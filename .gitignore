@@ -23,8 +23,9 @@
 hs_err_pid*
 replay_pid*
 
-# .properties files (contain sensitive data)
+# sesesion files (contain sensitive data)
 *.properties
+*.db
 
 # Other files
 /.vscode/

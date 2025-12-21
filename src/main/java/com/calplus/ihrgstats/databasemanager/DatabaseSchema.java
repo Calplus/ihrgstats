@@ -1,6 +1,8 @@
 package com.calplus.ihrgstats.databasemanager;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
+import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.utils.EnvironmentManager;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,9 +18,15 @@ import java.util.List;
  */
 public class DatabaseSchema {
     private final DiscordLog discordLog;
+    private final TelegramLog telegramLog;
 
     public DatabaseSchema() {
+        // Load environment variables first
+        EnvironmentManager envManager = new EnvironmentManager();
+        envManager.loadIntoSystemProperties();
+        
         this.discordLog = new DiscordLog();
+        this.telegramLog = new TelegramLog();
     }
 
     /**
@@ -59,13 +67,17 @@ public class DatabaseSchema {
                     stmt.execute(sql);
                     String successMsg = String.format("Column '%s' added to table '%s'.", columnName, tableName);
                     System.out.println(successMsg);
-                    discordLog.logSuccess(successMsg);
+                    discordLog.batchSuccess(successMsg);
+                    telegramLog.batchSuccess(successMsg);
                 }
             }
         } catch (SQLException e) {
+            discordLog.flushBatch(); // Flush batch before error
+            telegramLog.flushBatch();
             String errorMsg = String.format("Error checking/adding column %s to %s: %s", columnName, tableName, e.getMessage());
             System.err.println(errorMsg);
             discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
         }
     }
 
@@ -77,6 +89,7 @@ public class DatabaseSchema {
             String errorMsg = String.format("No columns specified for table %s.", tableName);
             System.err.println(errorMsg);
             discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
             return;
         }
 
@@ -97,7 +110,8 @@ public class DatabaseSchema {
                 stmt.execute(createSQL);
                 String successMsg = String.format("Table '%s' ensured.", tableName);
                 System.out.println(successMsg);
-                discordLog.logSuccess(successMsg);
+                discordLog.batchInfo(successMsg);
+                telegramLog.batchInfo(successMsg);
             }
 
             // Ensure all columns exist (for table updates)
@@ -115,14 +129,18 @@ public class DatabaseSchema {
                         stmt.execute(indexSQL);
                         String successMsg = String.format("Index '%s' created on '%s(%s)'.", indexName, tableName, col);
                         System.out.println(successMsg);
-                        discordLog.logSuccess(successMsg);
+                        discordLog.batchInfo(successMsg);
+                        telegramLog.batchInfo(successMsg);
                     }
                 }
             }
         } catch (SQLException e) {
+            discordLog.flushBatch(); // Flush batch before error
+            telegramLog.flushBatch();
             String errorMsg = String.format("Error creating table %s: %s", tableName, e.getMessage());
             System.err.println(errorMsg);
             discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
         }
     }
 
@@ -190,10 +208,11 @@ public class DatabaseSchema {
         cappedPlayersColumns.add(new ColumnDefinition("id", "INTEGER PRIMARY KEY AUTOINCREMENT"));
         cappedPlayersColumns.add(new ColumnDefinition("name", "TEXT"));
         cappedPlayersColumns.add(new ColumnDefinition("prevHall", "TEXT"));
+        cappedPlayersColumns.add(new ColumnDefinition("mapped", "BOOLEAN"));
 
         List<String> cappedPlayersIndexes = new ArrayList<>();
         cappedPlayersIndexes.add("name");
-        cappedPlayersIndexes.add("prevHall");
+        cappedPlayersIndexes.add("mapped");
 
         createOrUpdateTable(conn, "A2_CappedPlayers", cappedPlayersColumns, cappedPlayersIndexes);
     }
@@ -207,10 +226,11 @@ public class DatabaseSchema {
         Path dbPath = dbDir.resolve(dbName);
         boolean dbExists = Files.exists(dbPath);
 
-        // Log INFO: database is being created/running
+        // Log INFO: database is being created/running (initial message, send immediately)
         String infoMsgStart = String.format("Database creation started for: %s", dbName);
         System.out.println(infoMsgStart);
         discordLog.logInfo(infoMsgStart);
+        telegramLog.logInfo(infoMsgStart);
 
         // Create database directory if it doesn't exist
         if (!dbExists) {
@@ -219,11 +239,15 @@ public class DatabaseSchema {
                 Files.createFile(dbPath);
                 String infoMsgBlank = String.format("Blank database file '%s' created at %s", dbName, dbPath);
                 System.out.println(infoMsgBlank);
-                discordLog.logInfo(infoMsgBlank);
+                discordLog.batchInfo(infoMsgBlank); // Batch subsequent info messages
+                telegramLog.batchInfo(infoMsgBlank);
             } catch (IOException e) {
+                discordLog.flushBatch(); // Flush batch before error
+                telegramLog.flushBatch();
                 String errMsg = String.format("Failed to create database file: %s. Error: %s. Check the console log for details.", dbPath, e.getMessage());
                 System.err.println(errMsg);
                 discordLog.logError(errMsg);
+                telegramLog.logError(errMsg);
                 throw new RuntimeException(errMsg, e);
             }
         }
@@ -233,18 +257,25 @@ public class DatabaseSchema {
         try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
             String infoMsgOpen = String.format("Database '%s' opened", dbName);
             System.out.println(infoMsgOpen);
-            discordLog.logSuccess(infoMsgOpen);
+            discordLog.batchInfo(infoMsgOpen); // Batch this info message
+            telegramLog.batchInfo(infoMsgOpen);
 
             defineTableStructures(conn);
 
+            discordLog.flushBatch(); // Flush batch before final success message
+            telegramLog.flushBatch();
             String successMsg = String.format("Database created successfully: %s", dbPath);
             System.out.println(successMsg);
             discordLog.logSuccess(successMsg);
+            telegramLog.logSuccess(successMsg);
 
         } catch (SQLException e) {
+            discordLog.flushBatch(); // Flush batch before error
+            telegramLog.flushBatch();
             String errMsg = String.format("Database creation failed for %s: %s", dbName, e.getMessage());
             System.err.println(errMsg);
             discordLog.logError(errMsg);
+            telegramLog.logError(errMsg);
             throw new RuntimeException(errMsg, e);
         }
     }

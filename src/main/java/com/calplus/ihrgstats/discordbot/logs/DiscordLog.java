@@ -18,6 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Reacts to Discord rate limits (429) with retry_after delays.
  */
 public class DiscordLog {
+    private static final int DISCORD_CHARACTER_LIMIT = 2000;
+    private static final long BATCH_TIMEOUT_MS = 5000; // 5 seconds
+    
     private String botToken;
     private String channelId;
     private String adminUserId;
@@ -26,6 +29,11 @@ public class DiscordLog {
     private final AtomicBoolean isProcessing;
     private final HttpClient httpClient;
     private boolean discordEnabled;
+    
+    // Batch message handling
+    private final StringBuilder batchBuffer;
+    private long batchStartTime;
+    private final Object batchLock;
 
     private static class QueuedMessage {
         String message;
@@ -42,10 +50,14 @@ public class DiscordLog {
         this.isProcessing = new AtomicBoolean(false);
         this.httpClient = HttpClient.newHttpClient();
         this.discordEnabled = loadConfig();
+        this.batchBuffer = new StringBuilder();
+        this.batchStartTime = 0;
+        this.batchLock = new Object();
         
         // Add shutdown hook to ensure all messages are sent before exit
         if (discordEnabled) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                flushBatch(); // Send any pending batch messages
                 flush();
             }));
         }
@@ -56,14 +68,8 @@ public class DiscordLog {
      * @return true if Discord logging is enabled, false otherwise
      */
     private boolean loadConfig() {
-        try (var inputStream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
-            if (inputStream == null) {
-                System.err.println("WARNING: application.properties file not found. Discord logging disabled.");
-                return false;
-            }
-
-            java.util.Properties properties = new java.util.Properties();
-            properties.load(inputStream);
+        try {
+            java.util.Properties properties = com.calplus.ihrgstats.utils.PropertyResolver.loadAndResolve("application.properties");
 
             this.botToken = properties.getProperty("discord.bot.token");
             this.channelId = properties.getProperty("discord.log.channelId");
@@ -359,6 +365,137 @@ public class DiscordLog {
         String formattedMessage = formatMessage("🔵", "INFO", message, filename);
         System.out.println(formattedMessage);
         return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Adds a log message to the batch buffer
+     * @param message The log message to add to batch
+     */
+    public void batchLog(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("📝", "LOG", message, filename);
+        System.out.println(formattedMessage);
+        addToBatch(formattedMessage);
+    }
+
+    /**
+     * Adds an info log message to the batch buffer
+     * @param message The info message to add to batch
+     */
+    public void batchInfo(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🔵", "INFO", message, filename);
+        System.out.println(formattedMessage);
+        addToBatch(formattedMessage);
+    }
+
+    /**
+     * Adds a success log message to the batch buffer
+     * @param message The success message to add to batch
+     */
+    public void batchSuccess(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🟢", "SUCCESS", message, filename);
+        System.out.println(formattedMessage);
+        addToBatch(formattedMessage);
+    }
+
+    /**
+     * Adds a warning log message to the batch buffer
+     * @param message The warning message to add to batch
+     */
+    public void batchWarning(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🟡", "WARNING", message, filename);
+        System.out.println(formattedMessage);
+        addToBatch(formattedMessage);
+    }
+
+    /**
+     * Adds a message to the batch buffer with timeout check
+     * @param formattedMessage The formatted message to add
+     */
+    private void addToBatch(String formattedMessage) {
+        synchronized (batchLock) {
+            if (batchBuffer.length() == 0) {
+                batchStartTime = System.currentTimeMillis();
+            }
+            
+            // Check if adding this message would exceed the limit or timeout
+            boolean shouldFlush = false;
+            
+            if (batchBuffer.length() > 0) {
+                batchBuffer.append("\n");
+            }
+            
+            // Check timeout
+            if (System.currentTimeMillis() - batchStartTime >= BATCH_TIMEOUT_MS) {
+                shouldFlush = true;
+            }
+            
+            batchBuffer.append(formattedMessage);
+            
+            // Check if we need to flush due to character limit
+            if (batchBuffer.length() >= DISCORD_CHARACTER_LIMIT * 0.9) { // 90% threshold
+                shouldFlush = true;
+            }
+            
+            if (shouldFlush) {
+                flushBatchInternal();
+            }
+        }
+    }
+
+    /**
+     * Sends all batched messages immediately
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> flushBatch() {
+        synchronized (batchLock) {
+            return flushBatchInternal();
+        }
+    }
+
+    /**
+     * Internal method to flush batch (must be called within synchronized block)
+     */
+    private CompletableFuture<Boolean> flushBatchInternal() {
+        if (batchBuffer.length() == 0) {
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        String batchContent = batchBuffer.toString();
+        batchBuffer.setLength(0);
+        batchStartTime = 0;
+        
+        // Split message if it exceeds Discord's character limit
+        if (batchContent.length() <= DISCORD_CHARACTER_LIMIT) {
+            return queueMessage(batchContent);
+        } else {
+            // Split into multiple messages
+            CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
+            int start = 0;
+            while (start < batchContent.length()) {
+                int end = Math.min(start + DISCORD_CHARACTER_LIMIT, batchContent.length());
+                
+                // Try to break at newline if possible
+                if (end < batchContent.length()) {
+                    int lastNewline = batchContent.lastIndexOf('\n', end);
+                    if (lastNewline > start) {
+                        end = lastNewline;
+                    }
+                }
+                
+                String chunk = batchContent.substring(start, end);
+                CompletableFuture<Boolean> chunkResult = queueMessage(chunk);
+                result = result.thenCombine(chunkResult, (a, b) -> a && b);
+                start = end;
+                if (start < batchContent.length() && batchContent.charAt(start) == '\n') {
+                    start++; // Skip the newline we broke at
+                }
+            }
+            return result;
+        }
     }
 
     /**

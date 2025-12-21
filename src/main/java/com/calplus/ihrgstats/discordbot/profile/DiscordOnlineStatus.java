@@ -27,14 +27,8 @@ public class DiscordOnlineStatus {
      * Loads the Discord bot token from application.properties
      */
     private void loadConfig() {
-        try (var inputStream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
-            if (inputStream == null) {
-                discordLogger.logError("application.properties file not found");
-                throw new RuntimeException("application.properties file not found");
-            }
-
-            java.util.Properties properties = new java.util.Properties();
-            properties.load(inputStream);
+        try {
+            java.util.Properties properties = com.calplus.ihrgstats.utils.PropertyResolver.loadAndResolve("application.properties");
 
             this.botToken = properties.getProperty("discord.bot.token");
 
@@ -54,6 +48,7 @@ public class DiscordOnlineStatus {
      */
     public void start() {
         try {
+            // Initial message sent immediately
             discordLogger.logInfo("Starting Discord bot...");
 
             // Build JDA instance with necessary intents
@@ -66,15 +61,21 @@ public class DiscordOnlineStatus {
             // Wait for JDA to be ready
             jda.awaitReady();
 
+            // Batch subsequent info messages
+            discordLogger.batchInfo("Logged in as: " + jda.getSelfUser().getAsTag());
+            discordLogger.batchInfo("Bot ID: " + jda.getSelfUser().getId());
+            discordLogger.batchInfo("Serving " + jda.getGuilds().size() + " server(s)");
+            
+            // Flush batch before success message
+            discordLogger.flushBatch();
             discordLogger.logSuccess("Discord bot is now online!");
-            discordLogger.logInfo("Logged in as: " + jda.getSelfUser().getAsTag());
-            discordLogger.logInfo("Bot ID: " + jda.getSelfUser().getId());
-            discordLogger.logInfo("Serving " + jda.getGuilds().size() + " server(s)");
 
         } catch (InterruptedException e) {
+            discordLogger.flushBatch(); // Flush batch before error
             discordLogger.logError("Bot startup interrupted: " + e.getMessage());
             Thread.currentThread().interrupt();
         } catch (Exception e) {
+            discordLogger.flushBatch(); // Flush batch before error
             discordLogger.logError("Failed to login to Discord: " + e.getMessage());
             throw new RuntimeException("Failed to start Discord bot", e);
         }
