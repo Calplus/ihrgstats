@@ -36,6 +36,8 @@ public class TelegramListener {
     private String botToken;
     private String publicChatId;
     private String publicChatIdFileupload;
+    private String publicChatIdStatus;
+    private String publicChatIdCommands;
     private String adminUserId;
     private boolean allowNonAdminUploads;
     
@@ -47,8 +49,12 @@ public class TelegramListener {
     private boolean isRunning;
     private long lastUpdateId = 0;
     
-    // Pending confirmations: key = user_id, value = confirmation message
+    private ScheduledExecutorService statusHeartbeatExecutor;
+    private static final long STATUS_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    
+    // Pending confirmations: using a single key for file processing confirmations
     private final Map<String, ConfirmationRequest> pendingConfirmations = new ConcurrentHashMap<>();
+    private static final String FILE_PROCESSING_CONFIRMATION_KEY = "file_processing";
     
     private static class ConfirmationRequest {
         String message;
@@ -84,6 +90,8 @@ public class TelegramListener {
             this.botToken = PropertyResolver.getProperty("telegram.bot.token", "");
             this.publicChatId = PropertyResolver.getProperty("telegram.publicChatId", "");
             this.publicChatIdFileupload = PropertyResolver.getProperty("telegram.publicChatId.fileupload", "");
+            this.publicChatIdStatus = PropertyResolver.getProperty("telegram.devChatId.status", "");
+            this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
             this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
             this.allowNonAdminUploads = Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowNonAdminUploads", "true"));
             
@@ -130,6 +138,9 @@ public class TelegramListener {
 
         isRunning = true;
 
+        // Start status heartbeat if configured
+        startStatusHeartbeat();
+
         if (useWebhook) {
             startWebhookMode();
         } else {
@@ -142,6 +153,7 @@ public class TelegramListener {
      */
     public void stop() {
         isRunning = false;
+        stopStatusHeartbeat();
         discordLog.logInfo("Telegram listener stopped");
         telegramLog.logInfo("Telegram listener stopped");
     }
@@ -361,8 +373,16 @@ public class TelegramListener {
             boolean isPublicChat = chatId.equals(publicChatId);
             boolean hasThreadId = false;
             
-            if (!publicChatIdFileupload.isEmpty()) {
-                // Check message_thread_id if specified
+            // If we're waiting for a confirmation, accept ANY message from the correct chat
+            boolean waitingForConfirmation = pendingConfirmations.containsKey(FILE_PROCESSING_CONFIRMATION_KEY);
+            
+            if (waitingForConfirmation) {
+                // Accept any message from the correct chat while waiting for confirmation
+                hasThreadId = true;
+                String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : "none";
+                System.out.println("[CONFIRMATION MODE] Accepting message from chat " + chatId + " with thread ID: " + msgThreadId);
+            } else if (!publicChatIdFileupload.isEmpty()) {
+                // Normal mode - check message_thread_id if specified
                 if (message.has("message_thread_id")) {
                     String threadId = message.get("message_thread_id").getAsString();
                     if (threadId.equals(publicChatIdFileupload)) {
@@ -374,15 +394,20 @@ public class TelegramListener {
             }
             
             if (!isPublicChat || !hasThreadId) {
+                if (waitingForConfirmation) {
+                    System.out.println("[CONFIRMATION MODE] Rejecting message - isPublicChat: " + isPublicChat + ", hasThreadId: " + hasThreadId);
+                }
                 continue; // Not from target chat/thread
             }
             
-            // Check for text message (might be confirmation response)
+            // Check for text message (might be confirmation response or command)
             if (message.has("text")) {
                 String text = message.get("text").getAsString();
                 JsonObject from = message.getAsJsonObject("from");
                 String userId = from.get("id").getAsString();
-                handleTextMessage(userId, text.trim());
+                String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : "none";
+                System.out.println("[TEXT MESSAGE] Received from chat " + chatId + ", thread " + msgThreadId + ", user " + userId + ": '" + text + "'");
+                handleTextMessage(userId, text.trim(), message);
                 continue;
             }
             
@@ -399,20 +424,34 @@ public class TelegramListener {
     }
 
     /**
-     * Handles text messages (possibly confirmation responses)
+     * Handles text messages (possibly confirmation responses or commands)
      */
-    private void handleTextMessage(String userId, String text) {
-        ConfirmationRequest request = pendingConfirmations.get(userId);
+    private void handleTextMessage(String userId, String text, JsonObject message) {
+        // Check for commands
+        if (text.startsWith("/")) {
+            handleCommand(text.trim(), message);
+            return;
+        }
+
+        // Check for any pending confirmation (file processing uses global key)
+        ConfirmationRequest request = pendingConfirmations.get(FILE_PROCESSING_CONFIRMATION_KEY);
         
         if (request != null) {
+            System.out.println("Pending confirmation found. User text: '" + text + "'");
             String lowerText = text.toLowerCase();
             if (lowerText.equals("yes") || lowerText.equals("y")) {
+                System.out.println("User confirmed YES - completing future with true");
                 request.future.complete(true);
-                pendingConfirmations.remove(userId);
+                pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
             } else if (lowerText.equals("no") || lowerText.equals("n")) {
+                System.out.println("User confirmed NO - completing future with false");
                 request.future.complete(false);
-                pendingConfirmations.remove(userId);
+                pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+            } else {
+                System.out.println("Text does not match yes/no: '" + lowerText + "'");
             }
+        } else {
+            System.out.println("No pending confirmation found for text: '" + text + "'");
         }
     }
 
@@ -455,8 +494,14 @@ public class TelegramListener {
                 }
             }
             
-            // Process file based on filename
-            processFile(fileId, fileName);
+            // Process file in a separate thread to avoid blocking the polling thread
+            // This is CRITICAL - if we process synchronously, the polling thread can't receive
+            // the "yes/no" confirmation responses!
+            Thread processingThread = new Thread(() -> {
+                processFile(fileId, fileName, userId);
+            });
+            processingThread.setDaemon(true);
+            processingThread.start();
             
         } catch (Exception e) {
             String errorMsg = "Error handling file upload: " + e.getMessage();
@@ -471,7 +516,7 @@ public class TelegramListener {
      */
     private boolean requestUserConfirmationViaChat(String userId, String message) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
-        pendingConfirmations.put(userId, new ConfirmationRequest(message, future));
+        pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(message, future));
         
         // Send confirmation request message
         telegramLog.logInfo(message);
@@ -480,11 +525,12 @@ public class TelegramListener {
             // Wait up to 60 seconds for response
             return future.get(60, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            pendingConfirmations.remove(userId);
+            pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
             telegramLog.logWarning("Confirmation timeout - no response received within 60 seconds.");
+            sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.");
             return false;
         } catch (Exception e) {
-            pendingConfirmations.remove(userId);
+            pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
             telegramLog.logError("Error waiting for confirmation: " + e.getMessage());
             return false;
         }
@@ -493,7 +539,7 @@ public class TelegramListener {
     /**
      * Processes a file based on its name
      */
-    private void processFile(String fileId, String fileName) {
+    private void processFile(String fileId, String fileName, String userId) {
         fileName = fileName.toLowerCase();
         
         // Download file
@@ -504,6 +550,8 @@ public class TelegramListener {
             String errorMsg = "Failed to download file from Telegram";
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            // Send error to upload chat
+            sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
             return;
         }
         
@@ -526,6 +574,8 @@ public class TelegramListener {
                     String errorMsg = "Failed to process cappedlist.csv";
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
+                    // Send error to upload chat
+                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
                 }
                 
             } else if (fileName.matches("round_[1-6t1628]+(\\d+)?\\.csv")) {
@@ -536,6 +586,8 @@ public class TelegramListener {
                     String errorMsg = "Invalid round filename format: " + fileName;
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
+                    // Send error to upload chat
+                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
                     return;
                 }
                 
@@ -547,12 +599,25 @@ public class TelegramListener {
                 
                 // Set up confirmation callback for Telegram
                 processor.setConfirmationCallback((msg) -> {
-                    // For now, use default behavior (CLI)
-                    // Could be enhanced to request confirmation via Telegram chat
-                    System.out.println("\n" + msg);
-                    Scanner scanner = new Scanner(System.in);
-                    String response = scanner.nextLine().trim().toLowerCase();
-                    return response.equals("yes") || response.equals("y");
+                    // Send confirmation request to upload chat (only once)
+                    String formattedMsg = formatStatusMessage("⚠️", "CONFIRMATION", msg + "\n\nPlease reply 'yes' or 'no'.");
+                    sendMessageToUploadChat(formattedMsg);
+                    
+                    // Wait for user response via Telegram (don't log again in requestUserConfirmationViaChat)
+                    CompletableFuture<Boolean> future = new CompletableFuture<>();
+                    pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(msg, future));
+                    
+                    try {
+                        return future.get(60, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+                        sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.");
+                        return false;
+                    } catch (Exception e) {
+                        pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+                        telegramLog.logError("Error waiting for confirmation: " + e.getMessage());
+                        return false;
+                    }
                 });
                 
                 // Set up callback to send success message to upload chat
@@ -566,12 +631,38 @@ public class TelegramListener {
                     String errorMsg = String.format("Failed to process round_%s.csv", roundName);
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
+                    // Send error to upload chat
+                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                }
+                
+            } else if (fileName.matches("playerexport_\\d{8}_\\d{6}\\.csv")) {
+                // Process player import from export file
+                discordLog.logInfo("Processing player import file: " + fileName);
+                telegramLog.logInfo("Processing player import file: " + fileName);
+                
+                A1_PlayerStats processor = new A1_PlayerStats();
+                
+                // Set up callback to send success message to upload chat
+                processor.setUploadChatCallback((msg) -> {
+                    sendMessageToUploadChat(msg);
+                });
+                
+                boolean success = processor.importPlayerExport(downloadedFile.toString());
+                
+                if (!success) {
+                    String errorMsg = "Failed to import player export file: " + fileName;
+                    discordLog.logError(errorMsg);
+                    telegramLog.logError(errorMsg);
+                    // Send error to upload chat
+                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
                 }
                 
             } else {
-                String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, round_1.csv, round_2.csv, ..., round_6.csv, round_t16.csv, round_t8.csv, round_t4.csv, round_t2.csv", fileName);
+                String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, round_[n].csv, playerExport_[datetime].csv", fileName);
                 discordLog.logError(errorMsg);
                 telegramLog.logError(errorMsg);
+                // Send error to upload chat
+                sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
             }
             
         } finally {
@@ -591,6 +682,260 @@ public class TelegramListener {
             return matcher.group(1);
         }
         return null;
+    }
+
+    /**
+     * Formats a message like TelegramLog (with emote, timestamp, filename, type)
+     */
+    private String formatStatusMessage(String emote, String type, String message) {
+        String timestamp = java.time.LocalDateTime.now().format(
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+        );
+        String filename = "TelegramListener";
+        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, filename, type, message);
+    }
+
+    /**
+     * Handles commands (e.g., /exportplayers)
+     */
+    private void handleCommand(String command, JsonObject message) {
+        // Check if message is in commands channel/thread
+        boolean isCommandsChannel = false;
+        if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
+            if (message.has("message_thread_id")) {
+                String threadId = message.get("message_thread_id").getAsString();
+                if (threadId.equals(publicChatIdCommands)) {
+                    isCommandsChannel = true;
+                }
+            }
+        } else {
+            // If no specific commands channel, allow commands in any chat
+            isCommandsChannel = true;
+        }
+
+        if (!isCommandsChannel) {
+            System.out.println("Command received but not in commands channel: " + command);
+            return;
+        }
+
+        // Parse command
+        if (command.equalsIgnoreCase("/exportplayers")) {
+            handleExportPlayersCommand(message);
+        } else {
+            System.out.println("Unknown command: " + command);
+        }
+    }
+
+    /**
+     * Handles /exportplayers command
+     */
+    private void handleExportPlayersCommand(JsonObject message) {
+        discordLog.logInfo("Processing /exportplayers command...");
+        telegramLog.logInfo("Processing /exportplayers command...");
+
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandExportLatestPlayerData exporter = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandExportLatestPlayerData();
+            
+            java.nio.file.Path csvPath = exporter.exportLatestPlayerData();
+
+            if (csvPath != null && java.nio.file.Files.exists(csvPath)) {
+                // Send the file to the commands channel
+                sendFileToCommandsChannel(csvPath, message);
+                
+                discordLog.logSuccess("Player data export file sent to commands channel");
+                telegramLog.logSuccess("Player data export file sent to commands channel");
+            } else {
+                String errorMsg = "Failed to export player data";
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+            }
+        } catch (Exception e) {
+            String errorMsg = "Error processing /exportplayers command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Sends a file to the commands channel
+     */
+    private void sendFileToCommandsChannel(java.nio.file.Path filePath, JsonObject message) {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
+            
+            // Read file content
+            byte[] fileBytes = java.nio.file.Files.readAllBytes(filePath);
+            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+            
+            // Build multipart request body
+            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+            java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
+            
+            // Add chat_id
+            writer.append("--" + boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
+            writer.append("\r\n");
+            writer.append(publicChatId).append("\r\n");
+            
+            // Add message_thread_id if specified
+            if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
+                writer.append("--" + boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"message_thread_id\"").append("\r\n");
+                writer.append("\r\n");
+                writer.append(publicChatIdCommands).append("\r\n");
+            }
+            
+            // Add file
+            writer.append("--" + boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"document\"; filename=\"" + filePath.getFileName().toString() + "\"").append("\r\n");
+            writer.append("Content-Type: text/csv").append("\r\n");
+            writer.append("\r\n");
+            writer.flush();
+            
+            outputStream.write(fileBytes);
+            outputStream.flush();
+            
+            writer.append("\r\n");
+            writer.append("--" + boundary + "--").append("\r\n");
+            writer.flush();
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
+                .build();
+            
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() != 200) {
+                System.err.println("Failed to send file (HTTP " + response.statusCode() + "): " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Error sending file: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Sends a message to the commands channel
+     */
+    private void sendMessageToCommandsChannel(String message, JsonObject originalMessage) {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            
+            JsonObject payload = new JsonObject();
+            payload.addProperty("chat_id", publicChatId);
+            payload.addProperty("text", message);
+            
+            // Add thread ID if specified
+            if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
+                payload.addProperty("message_thread_id", publicChatIdCommands);
+            }
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() != 200) {
+                System.err.println("Failed to send message to commands channel (HTTP " + response.statusCode() + "): " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Error sending message to commands channel: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Starts the status heartbeat that sends a message every 5 minutes
+     */
+    private void startStatusHeartbeat() {
+        if (publicChatIdStatus == null || publicChatIdStatus.isEmpty()) {
+            System.out.println("Status chat ID not configured, heartbeat disabled");
+            return;
+        }
+
+        statusHeartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
+        statusHeartbeatExecutor.scheduleAtFixedRate(() -> {
+            try {
+                String message = formatStatusMessage("🟢", "SUCCESS", "Bot is online and monitoring for file uploads");
+                sendMessageToStatusChat(message);
+            } catch (Exception e) {
+                System.err.println("Error sending status heartbeat: " + e.getMessage());
+            }
+        }, 0, STATUS_HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);  // Changed initial delay to 0
+
+        System.out.println("Status heartbeat started (5 minute interval, first message sending now)");
+    }
+
+    /**
+     * Stops the status heartbeat
+     */
+    private void stopStatusHeartbeat() {
+        if (statusHeartbeatExecutor != null && !statusHeartbeatExecutor.isShutdown()) {
+            statusHeartbeatExecutor.shutdown();
+            try {
+                if (!statusHeartbeatExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    statusHeartbeatExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                statusHeartbeatExecutor.shutdownNow();
+            }
+        }
+    }
+
+    /**
+     * Sends a fatal error message to status chat and stops the bot
+     */
+    private void sendFatalErrorAndStop(String errorMessage) {
+        if (publicChatIdStatus != null && !publicChatIdStatus.isEmpty()) {
+            String message = formatStatusMessage("🔴", "ERROR", "Fatal error: " + errorMessage + " - Bot shutting down");
+            sendMessageToStatusChat(message);
+        }
+        stop();
+    }
+
+    /**
+     * Sends a message to the status chat/thread
+     */
+    private void sendMessageToStatusChat(String message) {
+        try {
+            if (publicChatId == null || publicChatId.isEmpty()) {
+                System.err.println("Cannot send status message: publicChatId is empty or null");
+                return;
+            }
+            
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            
+            JsonObject payload = new JsonObject();
+            payload.addProperty("chat_id", publicChatId);
+            payload.addProperty("text", message);
+            
+            // Add status thread ID if specified
+            if (publicChatIdStatus != null && !publicChatIdStatus.isEmpty()) {
+                payload.addProperty("message_thread_id", publicChatIdStatus);
+            }
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() != 200) {
+                System.err.println("Failed to send status message (HTTP " + response.statusCode() + "): " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Error sending status message: " + e.getMessage());
+        }
     }
 
     /**

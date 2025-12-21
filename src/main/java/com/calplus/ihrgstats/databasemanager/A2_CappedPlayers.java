@@ -5,8 +5,6 @@ import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
 import java.util.*;
@@ -37,6 +35,17 @@ public class A2_CappedPlayers {
         this.telegramLog = new TelegramLog();
         this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
         this.uploadChatCallback = null;
+    }
+
+    /**
+     * Formats a message like TelegramLog (with emote, timestamp, filename, type)
+     */
+    private String formatUploadMessage(String emote, String type, String message) {
+        String timestamp = java.time.LocalDateTime.now().format(
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+        );
+        String filename = "A2_CappedPlayers";
+        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, filename, type, message);
     }
 
     /**
@@ -103,13 +112,9 @@ public class A2_CappedPlayers {
             telegramLog.logSuccess(successMsg);
             
             // Send to upload chat if callback is set
-            System.out.println("DEBUG: A2 uploadChatCallback is " + (uploadChatCallback != null ? "SET" : "NULL"));
             if (uploadChatCallback != null) {
-                System.out.println("DEBUG: A2 Calling uploadChatCallback.sendMessage with: " + successMsg);
-                uploadChatCallback.sendMessage(successMsg);
-                System.out.println("DEBUG: A2 uploadChatCallback.sendMessage completed");
-            } else {
-                System.out.println("DEBUG: A2 uploadChatCallback is null, cannot send to upload chat");
+                String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
             }
             
             return true;
@@ -120,6 +125,13 @@ public class A2_CappedPlayers {
             String errorMsg = "Database update failed: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
     }

@@ -26,6 +26,7 @@ public class A1_PlayerStats {
 
     // Round sequence
     private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
+    private final int BASE_ELO = 1000;
 
     /**
      * Interface for user confirmation callbacks (used by Telegram listener)
@@ -52,6 +53,17 @@ public class A1_PlayerStats {
         this.loadConfig();
         this.confirmationCallback = null; // Default to CLI confirmation
         this.uploadChatCallback = null;
+    }
+
+    /**
+     * Formats a message like TelegramLog (with emote, timestamp, filename, type)
+     */
+    private String formatUploadMessage(String emote, String type, String message) {
+        String timestamp = java.time.LocalDateTime.now().format(
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+        );
+        String filename = "A1_PlayerStats";
+        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, filename, type, message);
     }
 
     /**
@@ -109,11 +121,16 @@ public class A1_PlayerStats {
         String name;
         String hall;
         boolean capped;
-        Integer baseElo;
+        Integer baseTrueElo;
+        Integer basePerfElo;
         String dateLogged;
         Map<String, Integer> trueEloByRound = new HashMap<>();
         Map<String, Integer> perfEloByRound = new HashMap<>();
         Map<String, Integer> seatByRound = new HashMap<>();
+        Map<String, String> oppHallByRound = new HashMap<>();
+        Map<String, String> oppNameByRound = new HashMap<>();
+        Map<String, Integer> oppTrueEloByRound = new HashMap<>();
+        Map<String, Integer> oppPerfEloByRound = new HashMap<>();
         boolean existsInDb = false;
         int dbId = -1;
     }
@@ -133,6 +150,13 @@ public class A1_PlayerStats {
             String errorMsg = String.format("round_%s.csv file not found at: %s", roundName, csvFilePath);
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
 
@@ -151,6 +175,13 @@ public class A1_PlayerStats {
             String errorMsg = "CSV validation failed: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
 
@@ -169,7 +200,79 @@ public class A1_PlayerStats {
             String errorMsg = "Failed to load database: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
+        }
+
+        // Check if this round was already processed (re-upload detection)
+        if (!dbPlayers.isEmpty() && isRoundAlreadyProcessed(roundName, dbPlayers)) {
+            String warningMsg = String.format(
+                "WARNING: round_%s has already been processed!\\n\\n" +
+                "If you continue:\\n" +
+                "- Round %s will be reprocessed with the new data\\n" +
+                "- ALL rounds after round %s will be DELETED\\n" +
+                "- You will need to re-upload those rounds again\\n\\n" +
+                "Do you want to continue and reprocess this round? (yes/no)",
+                roundName, roundName, roundName
+            );
+            
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+            
+            boolean confirmed = requestUserConfirmation(warningMsg);
+            
+            if (!confirmed) {
+                String cancelMsg = String.format("Round %s reprocessing cancelled by user.", roundName);
+                discordLog.logWarning(cancelMsg);
+                telegramLog.logWarning(cancelMsg);
+                
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🟡", "WARNING", cancelMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
+                return false;
+            }
+            
+            // User confirmed - clear all future rounds
+            try {
+                clearFutureRounds(roundName);
+                String infoMsg = String.format("Cleared all rounds after round_%s. Reprocessing...", roundName);
+                discordLog.logInfo(infoMsg);
+                telegramLog.logInfo(infoMsg);
+                
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("ℹ️", "INFO", infoMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+            } catch (Exception e) {
+                String errorMsg = "Failed to clear future rounds: " + e.getMessage();
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
+                return false;
+            }
+            
+            // Reload database after clearing
+            try {
+                dbPlayers = loadDatabasePlayers();
+            } catch (Exception e) {
+                String errorMsg = "Failed to reload database: " + e.getMessage();
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                return false;
+            }
         }
 
         // Extract players from CSV
@@ -177,6 +280,11 @@ public class A1_PlayerStats {
 
         // Check and set capped status
         checkCappedStatus(csvPlayers, cappedPlayers);
+
+        // Validate players per hall count
+        if (!validatePlayersPerHall(csvPlayers)) {
+            return false;
+        }
 
         // Validate player name/hall matches
         if (!validatePlayerMatches(csvPlayers, dbPlayers)) {
@@ -195,6 +303,13 @@ public class A1_PlayerStats {
             String errorMsg = "ELO calculation failed: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
 
@@ -216,13 +331,9 @@ public class A1_PlayerStats {
             telegramLog.logSuccess(successMsg);
             
             // Send to upload chat if callback is set
-            System.out.println("DEBUG: uploadChatCallback is " + (uploadChatCallback != null ? "SET" : "NULL"));
             if (uploadChatCallback != null) {
-                System.out.println("DEBUG: Calling uploadChatCallback.sendMessage with: " + successMsg);
-                uploadChatCallback.sendMessage(successMsg);
-                System.out.println("DEBUG: uploadChatCallback.sendMessage completed");
-            } else {
-                System.out.println("DEBUG: uploadChatCallback is null, cannot send to upload chat");
+                String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
             }
             
             return true;
@@ -233,6 +344,13 @@ public class A1_PlayerStats {
             String errorMsg = "Database update failed: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
     }
@@ -246,12 +364,24 @@ public class A1_PlayerStats {
             String errorMsg = String.format("Invalid round name: %s. Valid rounds: %s", roundName, String.join(", ", ROUND_SEQUENCE));
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
+            
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
             return false;
         }
 
         // Round 1 doesn't need previous round
         if (roundIndex == 0) {
             return true;
+        }
+
+        // Special handling for t16 - check if round 6 has been processed
+        if (roundName.equals("t16")) {
+            return validateBracketTransition(roundIndex);
         }
 
         // Check if previous round is processed
@@ -264,14 +394,28 @@ public class A1_PlayerStats {
         try {
             String jdbcUrl = "jdbc:sqlite:" + dbPath;
             try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+                // Check if previous round has been processed
                 String sql = String.format("SELECT COUNT(*) FROM A1_PlayerStats WHERE %s IS NOT NULL", columnName);
                 try (Statement stmt = conn.createStatement();
                      ResultSet rs = stmt.executeQuery(sql)) {
                     if (rs.next() && rs.getInt(1) == 0) {
-                        String errorMsg = String.format("Previous round (round_%s) has not been processed yet. Please process rounds in order: %s",
-                            previousRound, String.join(", ", ROUND_SEQUENCE));
+                        // Find last processed round
+                        String lastProcessed = findLastProcessedRound(conn, roundIndex);
+                        String lastProcessedMsg = lastProcessed != null ? 
+                            String.format(" Last processed round: round_%s.", lastProcessed) : 
+                            " No rounds have been processed yet.";
+                        
+                        String errorMsg = String.format("Previous round (round_%s) has not been processed yet.%s Please process rounds in order: %s",
+                            previousRound, lastProcessedMsg, String.join(", ", ROUND_SEQUENCE));
                         discordLog.logError(errorMsg);
                         telegramLog.logError(errorMsg);
+                        
+                        // Send error to upload chat if callback is set
+                        if (uploadChatCallback != null) {
+                            String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                            uploadChatCallback.sendMessage(formattedMsg);
+                        }
+                        
                         return false;
                     }
                 }
@@ -282,6 +426,193 @@ public class A1_PlayerStats {
         }
 
         return true;
+    }
+
+    /**
+     * Finds the last processed round in the database
+     * @param conn Database connection
+     * @param beforeIndex Only check rounds before this index
+     * @return Last processed round name, or null if none processed
+     */
+    private String findLastProcessedRound(Connection conn, int beforeIndex) {
+        try {
+            for (int i = beforeIndex - 1; i >= 0; i--) {
+                String round = ROUND_SEQUENCE.get(i);
+                String columnName = "trueEloR" + round.toUpperCase();
+                if (round.startsWith("t")) {
+                    columnName = "trueEloT" + round.substring(1);
+                }
+                
+                String sql = String.format("SELECT COUNT(*) FROM A1_PlayerStats WHERE %s IS NOT NULL", columnName);
+                try (Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery(sql)) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        return round;
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Warning: Could not find last processed round: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Validates transition from round-robin to bracket (t16)
+     * Checks if round 6 has been processed, if not asks user if tournament moved to bracket
+     */
+    private boolean validateBracketTransition(int t16Index) {
+        try {
+            String jdbcUrl = "jdbc:sqlite:" + dbPath;
+            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+                // Check which rounds have been processed
+                String lastProcessedRound = null;
+                for (int i = t16Index - 1; i >= 0; i--) {
+                    String round = ROUND_SEQUENCE.get(i);
+                    String columnName = "trueEloR" + round.toUpperCase();
+                    if (round.startsWith("t")) {
+                        columnName = "trueEloT" + round.substring(1);
+                    }
+
+                    String sql = String.format("SELECT COUNT(*) FROM A1_PlayerStats WHERE %s IS NOT NULL", columnName);
+                    try (Statement stmt = conn.createStatement();
+                         ResultSet rs = stmt.executeQuery(sql)) {
+                        if (rs.next() && rs.getInt(1) > 0) {
+                            lastProcessedRound = round;
+                            break;
+                        }
+                    }
+                }
+
+                // If round 6 has not been processed, warn user
+                // This includes both cases: no rounds processed (null) or last round != 6
+                if (lastProcessedRound == null || !lastProcessedRound.equals("6")) {
+                    StringBuilder message = new StringBuilder();
+                    message.append(String.format("⚠️ Tournament bracket (t16) is being uploaded, but round 6 has not been processed.\n"));
+                    if (lastProcessedRound != null) {
+                        message.append(String.format("Last processed round: %s\n\n", lastProcessedRound));
+                    } else {
+                        message.append("Last processed round: none (database is empty)\n\n");
+                    }
+                    message.append("Has the tournament moved to bracket matchup format, skipping the remaining round-robin rounds?\n\n");
+                    message.append("Answer 'yes' to fill missing rounds (");
+                    
+                    // List missing rounds
+                    List<String> missingRounds = new ArrayList<>();
+                    if (lastProcessedRound != null) {
+                        int lastIdx = ROUND_SEQUENCE.indexOf(lastProcessedRound);
+                        for (int i = lastIdx + 1; i < t16Index; i++) {
+                            missingRounds.add(ROUND_SEQUENCE.get(i));
+                        }
+                    } else {
+                        // No rounds processed - all rounds 1-6 are missing
+                        for (int i = 0; i < t16Index; i++) {
+                            missingRounds.add(ROUND_SEQUENCE.get(i));
+                        }
+                    }
+                    message.append(String.join(", ", missingRounds));
+                    message.append(") with last known ELO values and continue.\n");
+                    message.append("Answer 'no' to stop processing.");
+
+                    discordLog.flushBatch();
+                    telegramLog.flushBatch();
+                    
+                    // Send warning message to upload chat if callback is set
+                    if (uploadChatCallback != null) {
+                        String formattedMsg = formatUploadMessage("⚠️", "WARNING", message.toString());
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
+
+                    boolean confirmed = requestUserConfirmation(message.toString());
+
+                    if (!confirmed) {
+                        String errorMsg = "Processing stopped: User declined bracket transition.";
+                        discordLog.logError(errorMsg);
+                        telegramLog.logError(errorMsg);
+                        
+                        // Send error to upload chat if callback is set
+                        if (uploadChatCallback != null) {
+                            String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                            uploadChatCallback.sendMessage(formattedMsg);
+                        }
+                        
+                        return false;
+                    }
+
+                    // Fill missing rounds with last known ELO
+                    fillMissingRounds(lastProcessedRound, missingRounds);
+                    
+                    discordLog.logInfo("Missing rounds filled with last known ELO values.");
+                    telegramLog.logInfo("Missing rounds filled with last known ELO values.");
+                    
+                    // Send success message to upload chat if callback is set
+                    if (uploadChatCallback != null) {
+                        String successMsg = "Missing rounds filled with last known ELO values.";
+                        String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
+                }
+
+                return true;
+            }
+        } catch (SQLException e) {
+            System.err.println("Warning: Could not validate bracket transition: " + e.getMessage());
+            return true; // Proceed anyway
+        }
+    }
+
+    /**
+     * Fills missing rounds with last known ELO values
+     */
+    private void fillMissingRounds(String lastProcessedRound, List<String> missingRounds) {
+        try {
+            String jdbcUrl = "jdbc:sqlite:" + dbPath;
+            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+                conn.setAutoCommit(false);
+
+                String lastRoundTrueEloCol = getRoundColumnName("trueElo", lastProcessedRound);
+                String lastRoundPerfEloCol = getRoundColumnName("perfElo", lastProcessedRound);
+
+                // Get all players
+                String selectSQL = String.format("SELECT id, %s, %s FROM A1_PlayerStats", 
+                    lastRoundTrueEloCol, lastRoundPerfEloCol);
+
+                try (Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery(selectSQL)) {
+
+                    while (rs.next()) {
+                        int playerId = rs.getInt("id");
+                        Integer lastTrueElo = (Integer) rs.getObject(lastRoundTrueEloCol);
+                        Integer lastPerfElo = (Integer) rs.getObject(lastRoundPerfEloCol);
+
+                        // Fill each missing round with the last known values
+                        for (String missingRound : missingRounds) {
+                            String trueEloCol = getRoundColumnName("trueElo", missingRound);
+                            String perfEloCol = getRoundColumnName("perfElo", missingRound);
+
+                            String updateSQL = String.format("UPDATE A1_PlayerStats SET %s = ?, %s = ? WHERE id = ?",
+                                trueEloCol, perfEloCol);
+
+                            try (PreparedStatement pstmt = conn.prepareStatement(updateSQL)) {
+                                pstmt.setObject(1, lastTrueElo);
+                                pstmt.setObject(2, lastPerfElo);
+                                pstmt.setInt(3, playerId);
+                                pstmt.executeUpdate();
+                            }
+                        }
+                    }
+                }
+
+                conn.commit();
+                discordLog.batchInfo(String.format("Filled %d missing rounds with last known ELO values.", missingRounds.size()));
+                telegramLog.batchInfo(String.format("Filled %d missing rounds with last known ELO values.", missingRounds.size()));
+            }
+        } catch (SQLException e) {
+            String errorMsg = "Failed to fill missing rounds: " + e.getMessage();
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+        }
     }
 
     /**
@@ -358,6 +689,11 @@ public class A1_PlayerStats {
                     // Normal game - both halls must be present
                     if (hall1.isEmpty() || hall2.isEmpty()) {
                         throw new Exception(String.format("Invalid CSV format at line %d: Hall names cannot be empty for regular games", lineNumber));
+                    }
+                    
+                    // At least one winby field must be filled
+                    if (winby1.isEmpty() && winby2.isEmpty()) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: At least one winby field must be filled", lineNumber));
                     }
                     
                     // Validate winby logic: if both filled, must be "0" or "1"
@@ -465,7 +801,8 @@ public class A1_PlayerStats {
                     player.name = rs.getString("name");
                     player.hall = rs.getString("hall");
                     player.capped = rs.getInt("capped") == 1; // SQLite boolean as 0/1
-                    player.baseElo = (Integer) rs.getObject("baseElo");
+                    player.baseTrueElo = (Integer) rs.getObject("baseTrueElo");
+                    player.basePerfElo = (Integer) rs.getObject("basePerfElo");
                     player.dateLogged = rs.getString("dateLogged");
                     player.existsInDb = true;
 
@@ -474,10 +811,18 @@ public class A1_PlayerStats {
                         String trueEloCol = getRoundColumnName("trueElo", round);
                         String perfEloCol = getRoundColumnName("perfElo", round);
                         String seatCol = getRoundColumnName("seat", round);
+                        String oppHallCol = getRoundColumnName("oppHall", round);
+                        String oppNameCol = getRoundColumnName("oppName", round);
+                        String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
+                        String oppPerfEloCol = getRoundColumnName("oppPerfElo", round);
 
                         player.trueEloByRound.put(round, (Integer) rs.getObject(trueEloCol));
                         player.perfEloByRound.put(round, (Integer) rs.getObject(perfEloCol));
                         player.seatByRound.put(round, (Integer) rs.getObject(seatCol));
+                        player.oppHallByRound.put(round, rs.getString(oppHallCol));
+                        player.oppNameByRound.put(round, rs.getString(oppNameCol));
+                        player.oppTrueEloByRound.put(round, (Integer) rs.getObject(oppTrueEloCol));
+                        player.oppPerfEloByRound.put(round, (Integer) rs.getObject(oppPerfEloCol));
                     }
 
                     String key = player.name.toLowerCase();
@@ -509,6 +854,12 @@ public class A1_PlayerStats {
                         player.name, prevHall, player.hall);
                     discordLog.batchWarning(warningMsg);
                     telegramLog.batchWarning(warningMsg);
+                    
+                    // Send warning to upload chat if callback is set
+                    if (uploadChatCallback != null) {
+                        String formattedMsg = formatUploadMessage("⚠️", "WARNING", warningMsg);
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
                 }
             }
         }
@@ -550,11 +901,66 @@ public class A1_PlayerStats {
     }
 
     /**
+     * Validates that no hall has more than 5 players
+     * @return true if validation passes or user confirms to continue, false otherwise
+     */
+    private boolean validatePlayersPerHall(Map<String, PlayerStats> csvPlayers) {
+        // Count players per hall
+        Map<String, Integer> playersPerHall = new HashMap<>();
+        for (PlayerStats player : csvPlayers.values()) {
+            String hall = player.hall.toLowerCase();
+            playersPerHall.put(hall, playersPerHall.getOrDefault(hall, 0) + 1);
+        }
+
+        // Check for halls with more than 5 players
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : playersPerHall.entrySet()) {
+            if (entry.getValue() > 5) {
+                violations.add(String.format("Hall '%s' has %d players (max: 5)", 
+                    entry.getKey(), entry.getValue()));
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            StringBuilder message = new StringBuilder("WARNING: The following halls exceed the 5-player limit:\\n\\n");
+            for (String violation : violations) {
+                message.append("  - ").append(violation).append("\\n");
+            }
+            message.append("\\nDo you want to continue processing? (yes/no)");
+
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+
+            boolean confirmed = requestUserConfirmation(message.toString());
+            
+            if (!confirmed) {
+                String errorMsg = "Processing cancelled due to player count violations.";
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                
+                // Send error to upload chat if callback is set
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
+                return false;
+            }
+
+            discordLog.logInfo("User confirmed to proceed despite player count violations.");
+            telegramLog.logInfo("User confirmed to proceed despite player count violations.");
+        }
+
+        return true;
+    }
+
+    /**
      * Validates player name/hall matches between CSV and database
      */
     private boolean validatePlayerMatches(Map<String, PlayerStats> csvPlayers, Map<String, PlayerStats> dbPlayers) {
         List<String> warnings = new ArrayList<>();
         List<String> majorIssues = new ArrayList<>();
+        List<String> crossHallIssues = new ArrayList<>();
 
         for (Map.Entry<String, PlayerStats> entry : csvPlayers.entrySet()) {
             String key = entry.getKey();
@@ -566,6 +972,18 @@ public class A1_PlayerStats {
                 if (!csvPlayer.hall.equalsIgnoreCase(dbPlayer.hall)) {
                     warnings.add(String.format("⚠️ Player '%s' hall mismatch: CSV='%s', DB='%s'", 
                         csvPlayer.name, csvPlayer.hall, dbPlayer.hall));
+                }
+            } else {
+                // Player not found in same hall - check if they exist in other halls
+                for (Map.Entry<String, PlayerStats> dbEntry : dbPlayers.entrySet()) {
+                    PlayerStats otherDbPlayer = dbEntry.getValue();
+                    if (csvPlayer.name.equalsIgnoreCase(otherDbPlayer.name) && 
+                        !csvPlayer.hall.equalsIgnoreCase(otherDbPlayer.hall)) {
+                        crossHallIssues.add(String.format(
+                            "⚠️ Player '%s' found in CSV hall '%s' but exists in database in hall '%s'. Is this an error or a different person?",
+                            csvPlayer.name, csvPlayer.hall, otherDbPlayer.hall));
+                        break;
+                    }
                 }
             }
         }
@@ -597,6 +1015,39 @@ public class A1_PlayerStats {
             }
         }
 
+        // Handle cross-hall issues first (requires immediate confirmation)
+        if (!crossHallIssues.isEmpty()) {
+            StringBuilder message = new StringBuilder("The following players exist in different halls:\n\n");
+            for (String issue : crossHallIssues) {
+                message.append("- ").append(issue).append("\n");
+            }
+            message.append("\nIs this an error (same person, wrong hall)? (yes/no)\n");
+            message.append("Answer 'yes' if it's an error and processing should stop.\n");
+            message.append("Answer 'no' if these are different people and processing should continue.");
+
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+
+            boolean isError = requestUserConfirmation(message.toString());
+            
+            if (isError) {
+                String errorMsg = "Processing stopped: User confirmed cross-hall players are errors.";
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                
+                // Send error to upload chat if callback is set
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
+                return false;
+            }
+
+            discordLog.logInfo("User confirmed cross-hall players are different people. Continuing...");
+            telegramLog.logInfo("User confirmed cross-hall players are different people. Continuing...");
+        }
+
         // Log warnings without requiring confirmation
         if (!warnings.isEmpty()) {
             discordLog.flushBatch();
@@ -604,6 +1055,12 @@ public class A1_PlayerStats {
             for (String warning : warnings) {
                 discordLog.logWarning(warning);
                 telegramLog.logWarning(warning);
+                
+                // Send warning to upload chat if callback is set
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("⚠️", "WARNING", warning);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
             }
         }
 
@@ -624,6 +1081,13 @@ public class A1_PlayerStats {
                 String cancelMsg = "Processing cancelled by user due to validation issues.";
                 discordLog.logWarning(cancelMsg);
                 telegramLog.logWarning(cancelMsg);
+                
+                // Send warning to upload chat if callback is set
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🟡", "WARNING", cancelMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
                 return false;
             }
 
@@ -702,20 +1166,21 @@ public class A1_PlayerStats {
         } else {
             // CLI confirmation
             System.out.println("\n" + message);
-            Scanner scanner = new Scanner(System.in);
-            String response = scanner.nextLine().trim().toLowerCase();
-            return response.equals("yes") || response.equals("y");
+            try (Scanner scanner = new Scanner(System.in)) {
+                String response = scanner.nextLine().trim().toLowerCase();
+                return response.equals("yes") || response.equals("y");
+            }
         }
     }
 
     /**
-     * Calculates seating arrangements for players
+     * Calculates seating arrangements for players and records opponent information
      */
     private void calculateSeating(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, String roundName) {
         Map<String, Integer> hallSeatCounter = new HashMap<>();
 
         for (GameEntry game : games) {
-            // Player 1 seating (skip if walkover)
+            // Player 1 seating and opponent info (skip if walkover)
             if (!game.name1.equalsIgnoreCase("WALKOVER")) {
                 String hall1Lower = game.hall1.toLowerCase();
                 int seat1 = hallSeatCounter.getOrDefault(hall1Lower, 0) + 1;
@@ -724,10 +1189,20 @@ public class A1_PlayerStats {
                 PlayerStats player1 = csvPlayers.get(game.name1.toLowerCase());
                 if (player1 != null) {
                     player1.seatByRound.put(roundName, seat1);
+                    // Set opponent info for player 1
+                    if (game.name2.equalsIgnoreCase("WALKOVER")) {
+                        player1.oppNameByRound.put(roundName, "WALKOVER");
+                        player1.oppHallByRound.put(roundName, game.hall2); // Preserve hall even for walkover
+                        // ELO fields left null for walkover
+                    } else {
+                        player1.oppNameByRound.put(roundName, game.name2);
+                        player1.oppHallByRound.put(roundName, game.hall2);
+                        // ELO fields will be populated after calculation
+                    }
                 }
             }
 
-            // Player 2 seating (skip if walkover)
+            // Player 2 seating and opponent info (skip if walkover)
             if (!game.name2.equalsIgnoreCase("WALKOVER")) {
                 String hall2Lower = game.hall2.toLowerCase();
                 int seat2 = hallSeatCounter.getOrDefault(hall2Lower, 0) + 1;
@@ -736,150 +1211,322 @@ public class A1_PlayerStats {
                 PlayerStats player2 = csvPlayers.get(game.name2.toLowerCase());
                 if (player2 != null) {
                     player2.seatByRound.put(roundName, seat2);
+                    // Set opponent info for player 2
+                    if (game.name1.equalsIgnoreCase("WALKOVER")) {
+                        player2.oppNameByRound.put(roundName, "WALKOVER");
+                        player2.oppHallByRound.put(roundName, game.hall1); // Preserve hall even for walkover
+                        // ELO fields left null for walkover
+                    } else {
+                        player2.oppNameByRound.put(roundName, game.name1);
+                        player2.oppHallByRound.put(roundName, game.hall1);
+                        // ELO fields will be populated after calculation
+                    }
                 }
             }
         }
 
-        discordLog.batchInfo(String.format("Seating arrangements calculated for round %s", roundName));
-        telegramLog.batchInfo(String.format("Seating arrangements calculated for round %s", roundName));
+        discordLog.batchInfo(String.format("Seating arrangements and opponent info calculated for round %s", roundName));
+        telegramLog.batchInfo(String.format("Seating arrangements and opponent info calculated for round %s", roundName));
     }
 
     /**
-     * Calculates ELO ratings for all players
+     * Calculates ELO ratings for all players using true Whole-History Rating
+     * This method reconstructs ALL previous games and recalculates ratings for ALL rounds,
+     * not just the current round, as per WHR algorithm design.
      */
     private void calculateEloRatings(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, 
                                      Map<String, PlayerStats> dbPlayers, String roundName) {
         
-        // Get previous round for ELO history
-        String previousRound = EloCalculator.getPreviousRound(roundName);
+        int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
         
-        // Build game list for ELO calculator
-        List<EloCalculator.Game> trueEloGames = new ArrayList<>();
-        List<EloCalculator.Game> perfEloGames = new ArrayList<>();
-        Set<String> allPlayers = new HashSet<>(csvPlayers.keySet());
-        int timeStep = EloCalculator.roundNameToTimeStep(roundName);
-
-        for (GameEntry game : games) {
-            // Skip walkovers for ELO calculation
-            if (game.name1.equalsIgnoreCase("WALKOVER") || game.name2.equalsIgnoreCase("WALKOVER")) {
-                continue;
-            }
-
-            String player1Key = game.name1.toLowerCase();
-            String player2Key = game.name2.toLowerCase();
-
-            // Determine winner and point margin
-            boolean player1Won;
-            boolean player2Won;
-            double pointMargin = 0.0;
-            
-            // Check if both winby columns are filled with "0" or "1"
-            if (!game.winby1.isEmpty() && !game.winby2.isEmpty() && 
-                (game.winby1.equals("0") || game.winby1.equals("1")) && 
-                (game.winby2.equals("0") || game.winby2.equals("1"))) {
-                // Binary win/loss mode: "1" = win, "0" = loss
-                player1Won = game.winby1.equals("1");
-                player2Won = game.winby2.equals("1");
-                pointMargin = 0.0; // No point margin in binary mode
-            } else {
-                // Traditional mode: filled = won, empty = lost
-                player1Won = !game.winby1.isEmpty();
-                player2Won = !game.winby2.isEmpty();
-                
-                // Calculate point margin for PerfElo
-                if (player1Won && !game.winby1.isEmpty()) {
-                    try {
-                        pointMargin = Double.parseDouble(game.winby1);
-                    } catch (NumberFormatException e) {
-                        pointMargin = 0.0;
-                    }
-                } else if (player2Won && !game.winby2.isEmpty()) {
-                    try {
-                        pointMargin = -Double.parseDouble(game.winby2);
-                    } catch (NumberFormatException e) {
-                        pointMargin = 0.0;
-                    }
-                }
-            }
-
-            // TrueElo: Binary win/loss
-            double trueScore1 = player1Won ? 1.0 : 0.0;
-            trueEloGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore1, timeStep));
-
-            // PerfElo: Performance score based on point margin
-            if (perfEloEnabled) {
-                // For perfElo, also consider color advantage
-                PlayerStats p1 = csvPlayers.get(player1Key);
-                Integer seat1 = p1.seatByRound.get(roundName);
-                boolean player1IsBlack = (seat1 != null && (seat1 % 2 == 1)); // Seats 1,3,5 are black
-                
-                // Adjust margin for color (black gets komi disadvantage already in winby)
-                double perfScore = EloCalculator.pointMarginToPerformanceScore(pointMargin);
-                perfEloGames.add(new EloCalculator.Game(player1Key, player2Key, perfScore, timeStep));
+        // Step 1: Reconstruct ALL games from round 1 up to current round
+        List<EloCalculator.Game> allTrueEloGames = new ArrayList<>();
+        List<EloCalculator.Game> allPerfEloGames = new ArrayList<>();
+        Map<String, Map<String, GameEntry>> gamesByRound = new HashMap<>(); // round -> (player -> GameEntry)
+        
+        // Add current round's games
+        gamesByRound.put(roundName, extractGamesForRound(games, csvPlayers, roundName));
+        
+        // Reconstruct previous rounds' games from database
+        for (int i = 0; i < currentRoundIndex; i++) {
+            String pastRound = ROUND_SEQUENCE.get(i);
+            Map<String, GameEntry> pastGames = reconstructGamesFromDatabase(dbPlayers, pastRound);
+            if (!pastGames.isEmpty()) {
+                gamesByRound.put(pastRound, pastGames);
             }
         }
+        
+        // Step 2: Collect all unique players across all rounds
+        Set<String> allPlayers = new HashSet<>();
+        for (Map<String, GameEntry> roundGames : gamesByRound.values()) {
+            for (GameEntry game : roundGames.values()) {
+                if (!game.name1.equalsIgnoreCase("WALKOVER")) {
+                    allPlayers.add(game.name1.toLowerCase());
+                }
+                if (!game.name2.equalsIgnoreCase("WALKOVER")) {
+                    allPlayers.add(game.name2.toLowerCase());
+                }
+            }
+        }
+        
+        // Include players from CSV that might not have opponents recorded yet
+        allPlayers.addAll(csvPlayers.keySet());
+        
+        // Step 3: Build complete game list for WHR calculator
+        for (int i = 0; i <= currentRoundIndex; i++) {
+            String round = ROUND_SEQUENCE.get(i);
+            Map<String, GameEntry> roundGames = gamesByRound.get(round);
+            if (roundGames == null) continue;
+            
+            int timeStep = EloCalculator.roundNameToTimeStep(round);
+            
+            for (GameEntry game : roundGames.values()) {
+                // Skip walkovers for ELO calculation
+                if (game.name1.equalsIgnoreCase("WALKOVER") || game.name2.equalsIgnoreCase("WALKOVER")) {
+                    continue;
+                }
 
-        // Get previous ELO ratings
-        Map<String, Double> previousTrueElos = new HashMap<>();
-        Map<String, Double> previousPerfElos = new HashMap<>();
+                String player1Key = game.name1.toLowerCase();
+                String player2Key = game.name2.toLowerCase();
+
+                // Determine winner and point margin
+                boolean player1Won;
+                boolean player2Won;
+                double pointMargin = 0.0;
+                
+                // Check if both winby columns are filled with "0" or "1"
+                if (!game.winby1.isEmpty() && !game.winby2.isEmpty() && 
+                    (game.winby1.equals("0") || game.winby1.equals("1")) && 
+                    (game.winby2.equals("0") || game.winby2.equals("1"))) {
+                    // Binary win/loss mode: "1" = win, "0" = loss
+                    player1Won = game.winby1.equals("1");
+                    player2Won = game.winby2.equals("1");
+                    pointMargin = 0.0; // No point margin in binary mode
+                } else {
+                    // Traditional mode: filled = won, empty = lost
+                    player1Won = !game.winby1.isEmpty();
+                    player2Won = !game.winby2.isEmpty();
+                    
+                    // Calculate point margin for PerfElo
+                    if (player1Won && !game.winby1.isEmpty()) {
+                        try {
+                            pointMargin = Double.parseDouble(game.winby1);
+                        } catch (NumberFormatException e) {
+                            pointMargin = 0.0;
+                        }
+                    } else if (player2Won && !game.winby2.isEmpty()) {
+                        try {
+                            pointMargin = -Double.parseDouble(game.winby2);
+                        } catch (NumberFormatException e) {
+                            pointMargin = 0.0;
+                        }
+                    }
+                }
+
+                // TrueElo: Binary win/loss
+                double trueScore1 = player1Won ? 1.0 : 0.0;
+                allTrueEloGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore1, timeStep));
+
+                // PerfElo: Performance score based on point margin
+                if (perfEloEnabled) {
+                    double perfScore = EloCalculator.pointMarginToPerformanceScore(pointMargin);
+                    allPerfEloGames.add(new EloCalculator.Game(player1Key, player2Key, perfScore, timeStep));
+                }
+            }
+        }
+        
+        // Step 4: Get initial ELO ratings (only baseTrueElo/basePerfElo, not from previous rounds)
+        Map<String, Double> initialTrueElos = new HashMap<>();
+        Map<String, Double> initialPerfElos = new HashMap<>();
 
         for (String playerKey : allPlayers) {
-            PlayerStats csvPlayer = csvPlayers.get(playerKey);
             PlayerStats dbPlayer = dbPlayers.get(playerKey);
 
-            double prevTrueElo = 1000.0;
-            double prevPerfElo = 1000.0;
+            double initTrueElo = 1000.0;
+            double initPerfElo = 1000.0;
 
-            if (dbPlayer != null && previousRound != null) {
-                Integer prevTrue = dbPlayer.trueEloByRound.get(previousRound);
-                if (prevTrue != null) {
-                    prevTrueElo = prevTrue.doubleValue();
+            if (dbPlayer != null) {
+                if (dbPlayer.baseTrueElo != null) {
+                    initTrueElo = dbPlayer.baseTrueElo.doubleValue();
                 }
+                if (perfEloEnabled && dbPlayer.basePerfElo != null) {
+                    initPerfElo = dbPlayer.basePerfElo.doubleValue();
+                }
+            }
 
-                if (perfEloEnabled) {
-                    Integer prevPerf = dbPlayer.perfEloByRound.get(previousRound);
-                    if (prevPerf != null) {
-                        prevPerfElo = prevPerf.doubleValue();
+            initialTrueElos.put(playerKey, initTrueElo);
+            initialPerfElos.put(playerKey, initPerfElo);
+        }
+
+        // Step 5: Run WHR algorithm on ALL games to get ratings at each time step
+        Map<String, Map<String, Double>> trueElosByRound = EloCalculator.calculateWholeHistoryRating(
+            allTrueEloGames, allPlayers, initialTrueElos, ROUND_SEQUENCE, currentRoundIndex);
+        
+        Map<String, Map<String, Double>> perfElosByRound = null;
+        if (perfEloEnabled) {
+            perfElosByRound = EloCalculator.calculateWholeHistoryRating(
+                allPerfEloGames, allPlayers, initialPerfElos, ROUND_SEQUENCE, currentRoundIndex);
+        }
+        
+        // Step 6: Update ALL rounds' ELO values in csvPlayers and dbPlayers
+        for (int i = 0; i <= currentRoundIndex; i++) {
+            String round = ROUND_SEQUENCE.get(i);
+            Map<String, Double> roundTrueElos = trueElosByRound.get(round);
+            Map<String, Double> roundPerfElos = perfEloEnabled ? perfElosByRound.get(round) : null;
+            
+            for (String playerKey : allPlayers) {
+                // Update in csvPlayers if player exists there
+                PlayerStats csvPlayer = csvPlayers.get(playerKey);
+                if (csvPlayer != null) {
+                    if (roundTrueElos != null && roundTrueElos.containsKey(playerKey)) {
+                        csvPlayer.trueEloByRound.put(round, (int) Math.round(roundTrueElos.get(playerKey)));
+                    }
+                    if (perfEloEnabled && roundPerfElos != null && roundPerfElos.containsKey(playerKey)) {
+                        csvPlayer.perfEloByRound.put(round, (int) Math.round(roundPerfElos.get(playerKey)));
+                    } else if (!perfEloEnabled) {
+                        csvPlayer.perfEloByRound.put(round, null);
+                    }
+                }
+                
+                // Update in dbPlayers if player exists there (for previous rounds)
+                PlayerStats dbPlayer = dbPlayers.get(playerKey);
+                if (dbPlayer != null && i < currentRoundIndex) { // Only update past rounds in db
+                    if (roundTrueElos != null && roundTrueElos.containsKey(playerKey)) {
+                        dbPlayer.trueEloByRound.put(round, (int) Math.round(roundTrueElos.get(playerKey)));
+                    }
+                    if (perfEloEnabled && roundPerfElos != null && roundPerfElos.containsKey(playerKey)) {
+                        dbPlayer.perfEloByRound.put(round, (int) Math.round(roundPerfElos.get(playerKey)));
                     }
                 }
             }
-
-            previousTrueElos.put(playerKey, prevTrueElo);
-            previousPerfElos.put(playerKey, prevPerfElo);
         }
 
-        // Calculate new ratings
-        Map<String, Double> newTrueElos = EloCalculator.calculateTrueElo(trueEloGames, allPlayers, previousTrueElos);
-        
-        // Update player stats
-        for (Map.Entry<String, Double> entry : newTrueElos.entrySet()) {
-            String playerKey = entry.getKey();
-            PlayerStats player = csvPlayers.get(playerKey);
-            if (player != null) {
-                player.trueEloByRound.put(roundName, (int) Math.round(entry.getValue()));
-            }
-        }
-
-        if (perfEloEnabled) {
-            Map<String, Double> newPerfElos = EloCalculator.calculatePerfElo(perfEloGames, allPlayers, previousPerfElos);
-            for (Map.Entry<String, Double> entry : newPerfElos.entrySet()) {
-                String playerKey = entry.getKey();
-                PlayerStats player = csvPlayers.get(playerKey);
-                if (player != null) {
-                    player.perfEloByRound.put(roundName, (int) Math.round(entry.getValue()));
+        // Step 7: Populate opponent ELO values for current round (after ELO calculation)
+        for (PlayerStats player : csvPlayers.values()) {
+            String oppName = player.oppNameByRound.get(roundName);
+            if (oppName != null && !oppName.equalsIgnoreCase("WALKOVER")) {
+                // Find opponent player stats
+                String oppKey = oppName.toLowerCase();
+                PlayerStats opponent = csvPlayers.get(oppKey);
+                if (opponent != null) {
+                    // Use the newly calculated ELO for this round
+                    Integer oppTrueElo = opponent.trueEloByRound.get(roundName);
+                    Integer oppPerfElo = opponent.perfEloByRound.get(roundName);
+                    player.oppTrueEloByRound.put(roundName, oppTrueElo);
+                    player.oppPerfEloByRound.put(roundName, oppPerfElo);
                 }
             }
-        } else {
-            // Set perfElo to null if disabled
-            for (PlayerStats player : csvPlayers.values()) {
-                player.perfEloByRound.put(roundName, null);
-            }
+            // For walkovers, ELO fields remain null (already not set)
         }
 
-        discordLog.batchInfo(String.format("ELO ratings calculated for round %s (%s)", 
-            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only"));
-        telegramLog.batchInfo(String.format("ELO ratings calculated for round %s (%s)", 
-            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only"));
+        discordLog.batchInfo(String.format("WHR calculated for rounds 1-%s (%s), %d historical ratings updated", 
+            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only", currentRoundIndex + 1));
+        telegramLog.batchInfo(String.format("WHR calculated for rounds 1-%s (%s), %d historical ratings updated", 
+            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only", currentRoundIndex + 1));
+    }
+
+    /**
+     * Extracts games for a specific round into a map (player name -> GameEntry)
+     */
+    private Map<String, GameEntry> extractGamesForRound(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, String roundName) {
+        Map<String, GameEntry> roundGames = new HashMap<>();
+        for (GameEntry game : games) {
+            // Store by player1's name (lowercase key)
+            String key = game.name1.toLowerCase();
+            roundGames.put(key, game);
+        }
+        return roundGames;
+    }
+
+    /**
+     * Reconstructs games from database using opponent information
+     * Returns map of player name -> GameEntry
+     */
+    private Map<String, GameEntry> reconstructGamesFromDatabase(Map<String, PlayerStats> dbPlayers, String roundName) {
+        Map<String, GameEntry> games = new HashMap<>();
+        Set<String> processedPairs = new HashSet<>();
+        
+        for (Map.Entry<String, PlayerStats> entry : dbPlayers.entrySet()) {
+            String playerKey = entry.getKey();
+            PlayerStats player = entry.getValue();
+            
+            String oppName = player.oppNameByRound.get(roundName);
+            if (oppName == null || oppName.equalsIgnoreCase("WALKOVER")) {
+                continue;
+            }
+            
+            String oppKey = oppName.toLowerCase();
+            
+            // Create a unique pair identifier (sorted to avoid duplicates)
+            String pairKey = playerKey.compareTo(oppKey) < 0 
+                ? playerKey + "|" + oppKey 
+                : oppKey + "|" + playerKey;
+            
+            if (processedPairs.contains(pairKey)) {
+                continue; // Already processed this matchup
+            }
+            processedPairs.add(pairKey);
+            
+            // Get opponent stats
+            PlayerStats opponent = dbPlayers.get(oppKey);
+            if (opponent == null) {
+                continue; // Opponent not in database
+            }
+            
+            // Determine who won based on ELO changes or seat numbers
+            // For now, we'll need to determine winner from the fact that someone has a higher seat = won
+            Integer playerSeat = player.seatByRound.get(roundName);
+            Integer oppSeat = opponent.seatByRound.get(roundName);
+            
+            // We can't fully reconstruct winby without original CSV, but we can reconstruct who played whom
+            // Set winby1 = "1" if player had higher outcome, winby2 = "1" if opponent did
+            // For simplicity, if we can't determine winner, skip this game
+            if (playerSeat == null || oppSeat == null) {
+                continue;
+            }
+            
+            // Use trueElo comparison to guess winner (higher ELO gain likely means win)
+            Integer playerElo = player.trueEloByRound.get(roundName);
+            Integer oppElo = opponent.trueEloByRound.get(roundName);
+            
+            // Get previous ELOs to determine change
+            int roundIndex = ROUND_SEQUENCE.indexOf(roundName);
+            Integer playerPrevElo = null;
+            Integer oppPrevElo = null;
+            
+            if (roundIndex > 0) {
+                String prevRound = ROUND_SEQUENCE.get(roundIndex - 1);
+                playerPrevElo = player.trueEloByRound.get(prevRound);
+                oppPrevElo = opponent.trueEloByRound.get(prevRound);
+            }
+            
+            if (playerPrevElo == null) playerPrevElo = player.baseTrueElo != null ? player.baseTrueElo : 1000;
+            if (oppPrevElo == null) oppPrevElo = opponent.baseTrueElo != null ? opponent.baseTrueElo : 1000;
+            
+            if (playerElo == null || oppElo == null) {
+                continue; // Can't reconstruct without ELO data
+            }
+            
+            int playerChange = playerElo - playerPrevElo;
+            int oppChange = oppElo - oppPrevElo;
+            
+            // Whoever gained more ELO likely won (this is an approximation)
+            String winby1 = playerChange > oppChange ? "1" : "0";
+            String winby2 = oppChange > playerChange ? "1" : "0";
+            
+            GameEntry game = new GameEntry(
+                player.name,
+                player.hall,
+                winby1,
+                opponent.name,
+                opponent.oppHallByRound.get(roundName) != null ? opponent.oppHallByRound.get(roundName) : opponent.hall,
+                winby2
+            );
+            
+            games.put(playerKey, game);
+        }
+        
+        return games;
     }
 
     /**
@@ -929,9 +1576,15 @@ public class A1_PlayerStats {
                 }
 
                 // Update current round with previous values (or defaults)
-                dbPlayer.trueEloByRound.put(roundName, prevTrueElo != null ? prevTrueElo : 1000);
-                dbPlayer.perfEloByRound.put(roundName, perfEloEnabled ? (prevPerfElo != null ? prevPerfElo : 1000) : null);
+                dbPlayer.trueEloByRound.put(roundName, prevTrueElo != null ? prevTrueElo : BASE_ELO);
+                dbPlayer.perfEloByRound.put(roundName, perfEloEnabled ? (prevPerfElo != null ? prevPerfElo : BASE_ELO) : null);
                 dbPlayer.seatByRound.put(roundName, null); // No seat if didn't play
+                
+                // No opponent data since player didn't play
+                dbPlayer.oppHallByRound.put(roundName, null);
+                dbPlayer.oppNameByRound.put(roundName, null);
+                dbPlayer.oppTrueEloByRound.put(roundName, null);
+                dbPlayer.oppPerfEloByRound.put(roundName, null);
 
                 // Add to csvPlayers so it gets updated
                 csvPlayers.put(playerKey, dbPlayer);
@@ -946,6 +1599,10 @@ public class A1_PlayerStats {
                 player.trueEloByRound.put(futureRound, null);
                 player.perfEloByRound.put(futureRound, null);
                 player.seatByRound.put(futureRound, null);
+                player.oppHallByRound.put(futureRound, null);
+                player.oppNameByRound.put(futureRound, null);
+                player.oppTrueEloByRound.put(futureRound, null);
+                player.oppPerfEloByRound.put(futureRound, null);
             }
         }
     }
@@ -992,6 +1649,8 @@ public class A1_PlayerStats {
 
     /**
      * Updates an existing player in the database
+     * NOTE: With WHR, we now update ALL rounds (past, current, and future) because
+     * adding new games recalculates all historical ratings
      */
     private void updatePlayerInDatabase(Connection conn, PlayerStats player, PlayerStats dbPlayer, String roundName) throws SQLException {
         StringBuilder sql = new StringBuilder("UPDATE A1_PlayerStats SET ");
@@ -1006,15 +1665,28 @@ public class A1_PlayerStats {
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
         params.add(currentTimestamp);
 
-        // Update all round columns
-        for (String round : ROUND_SEQUENCE) {
+        // Update ALL rounds (not just current+future) because WHR recalculates historical ratings
+        // This is the key difference from incremental ELO systems
+        int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
+        
+        for (int i = 0; i < ROUND_SEQUENCE.size(); i++) {
+            String round = ROUND_SEQUENCE.get(i);
+            
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
             String seatCol = getRoundColumnName("seat", round);
+            String oppHallCol = getRoundColumnName("oppHall", round);
+            String oppNameCol = getRoundColumnName("oppName", round);
+            String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
+            String oppPerfEloCol = getRoundColumnName("oppPerfElo", round);
 
             Integer trueElo = player.trueEloByRound.get(round);
             Integer perfElo = player.perfEloByRound.get(round);
             Integer seat = player.seatByRound.get(round);
+            String oppHall = player.oppHallByRound.get(round);
+            String oppName = player.oppNameByRound.get(round);
+            Integer oppTrueElo = player.oppTrueEloByRound.get(round);
+            Integer oppPerfElo = player.oppPerfEloByRound.get(round);
 
             sql.append(trueEloCol).append(" = ?, ");
             params.add(trueElo);
@@ -1024,6 +1696,18 @@ public class A1_PlayerStats {
 
             sql.append(seatCol).append(" = ?, ");
             params.add(seat);
+
+            sql.append(oppHallCol).append(" = ?, ");
+            params.add(oppHall);
+
+            sql.append(oppNameCol).append(" = ?, ");
+            params.add(oppName);
+
+            sql.append(oppTrueEloCol).append(" = ?, ");
+            params.add(oppTrueElo);
+
+            sql.append(oppPerfEloCol).append(" = ?, ");
+            params.add(oppPerfElo);
         }
 
         // Remove trailing comma
@@ -1043,8 +1727,8 @@ public class A1_PlayerStats {
      * Inserts a new player into the database
      */
     private void insertPlayerInDatabase(Connection conn, PlayerStats player, String currentRound) throws SQLException {
-        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, baseElo, dateLogged");
-        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?");
+        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, dateLogged");
+        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?, ?");
         List<Object> params = new ArrayList<>();
 
         // Get current timestamp
@@ -1053,7 +1737,9 @@ public class A1_PlayerStats {
         params.add(player.name);
         params.add(player.hall);
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
-        params.add(1000); // Base ELO
+        // Use existing base ELO if set (from import), otherwise default to BASE_ELO
+        params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
+        params.add(player.basePerfElo != null ? player.basePerfElo : (perfEloEnabled ? BASE_ELO : null));
         params.add(currentTimestamp);
 
         // Add all round columns
@@ -1061,32 +1747,52 @@ public class A1_PlayerStats {
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
             String seatCol = getRoundColumnName("seat", round);
+            String oppHallCol = getRoundColumnName("oppHall", round);
+            String oppNameCol = getRoundColumnName("oppName", round);
+            String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
+            String oppPerfEloCol = getRoundColumnName("oppPerfElo", round);
 
             sql.append(", ").append(trueEloCol);
             sql.append(", ").append(perfEloCol);
             sql.append(", ").append(seatCol);
+            sql.append(", ").append(oppHallCol);
+            sql.append(", ").append(oppNameCol);
+            sql.append(", ").append(oppTrueEloCol);
+            sql.append(", ").append(oppPerfEloCol);
             
-            values.append(", ?, ?, ?");
+            values.append(", ?, ?, ?, ?, ?, ?, ?");
 
-            // Fill previous rounds with 1000, current round with calculated, future rounds with null
+            // Fill previous rounds with base ELO, current round with calculated, future rounds with null
             int currentIdx = ROUND_SEQUENCE.indexOf(currentRound);
             int roundIdx = ROUND_SEQUENCE.indexOf(round);
 
             if (roundIdx < currentIdx) {
-                // Previous rounds - fill with 1000
-                params.add(1000);
-                params.add(perfEloEnabled ? 1000 : null);
-                params.add(null);
+                // Previous rounds - fill with base ELO if available, otherwise BASE_ELO
+                params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
+                params.add(perfEloEnabled ? (player.basePerfElo != null ? player.basePerfElo : BASE_ELO) : null);
+                params.add(null); // seat
+                params.add(null); // oppHall
+                params.add(null); // oppName
+                params.add(null); // oppTrueElo
+                params.add(null); // oppPerfElo
             } else if (roundIdx == currentIdx) {
                 // Current round - use calculated values
                 params.add(player.trueEloByRound.get(round));
                 params.add(player.perfEloByRound.get(round));
                 params.add(player.seatByRound.get(round));
+                params.add(player.oppHallByRound.get(round));
+                params.add(player.oppNameByRound.get(round));
+                params.add(player.oppTrueEloByRound.get(round));
+                params.add(player.oppPerfEloByRound.get(round));
             } else {
                 // Future rounds - null
-                params.add(null);
-                params.add(null);
-                params.add(null);
+                params.add(null); // trueElo
+                params.add(null); // perfElo
+                params.add(null); // seat
+                params.add(null); // oppHall
+                params.add(null); // oppName
+                params.add(null); // oppTrueElo
+                params.add(null); // oppPerfElo
             }
         }
 
@@ -1138,6 +1844,428 @@ public class A1_PlayerStats {
             return prefix + "T" + round.substring(1);
         } else {
             return prefix + "R" + round;
+        }
+    }
+
+    /**
+     * Checks if a round has already been processed
+     * @param roundName The round to check
+     * @param dbPlayers Map of players from database
+     * @return true if the round has been processed, false otherwise
+     */
+    private boolean isRoundAlreadyProcessed(String roundName, Map<String, PlayerStats> dbPlayers) {
+        if (dbPlayers.isEmpty()) {
+            return false;
+        }
+        
+        // Check if any player has a non-null ELO value for this round
+        for (PlayerStats player : dbPlayers.values()) {
+            Integer trueElo = player.trueEloByRound.get(roundName);
+            if (trueElo != null) {
+                return true; // Found at least one player with this round processed
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Clears all rounds after (and including) the specified round
+     * @param fromRound The round from which to start clearing (inclusive)
+     */
+    private void clearFutureRounds(String fromRound) throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + dbPath;
+        int fromIndex = ROUND_SEQUENCE.indexOf(fromRound);
+        
+        if (fromIndex == -1) {
+            throw new IllegalArgumentException("Invalid round name: " + fromRound);
+        }
+        
+        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            conn.setAutoCommit(false);
+            
+            try {
+                StringBuilder sql = new StringBuilder("UPDATE A1_PlayerStats SET ");
+                
+                // Set all rounds from fromRound onwards to NULL
+                for (int i = fromIndex; i < ROUND_SEQUENCE.size(); i++) {
+                    String round = ROUND_SEQUENCE.get(i);
+                    
+                    sql.append(getRoundColumnName("trueElo", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("perfElo", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("seat", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("oppHall", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("oppName", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("oppTrueElo", round)).append(" = NULL, ");
+                    sql.append(getRoundColumnName("oppPerfElo", round)).append(" = NULL, ");
+                }
+                
+                // Remove trailing comma and space
+                sql.setLength(sql.length() - 2);
+                
+                try (PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+                    int rowsAffected = pstmt.executeUpdate();
+                    conn.commit();
+                    
+                    discordLog.batchInfo(String.format("Cleared %d rounds for %d players", 
+                        ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
+                    telegramLog.batchInfo(String.format("Cleared %d rounds for %d players", 
+                        ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
+                }
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Checks if the A1_PlayerStats table is empty
+     * @return true if table is empty, false otherwise
+     */
+    private boolean isTableEmpty() throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + dbPath;
+        
+        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            String sql = "SELECT COUNT(*) as count FROM A1_PlayerStats";
+            try (PreparedStatement pstmt = conn.prepareStatement(sql);
+                 ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    int count = rs.getInt("count");
+                    return count == 0;
+                }
+            }
+        } catch (SQLException e) {
+            throw new Exception("Failed to check if table is empty: " + e.getMessage());
+        }
+        
+        return false;
+    }
+
+    /**
+     * Imports player data from playerExport CSV file
+     * Updates/creates baseTrueElo, basePerfElo, and hall for players
+     * Leaves capped status as default (false) - capped should be managed via cappedlist.csv
+     * Validates that A1_PlayerStats table is empty before processing
+     * @param csvFilePath Path to the playerExport CSV file
+     * @return true if successful, false otherwise
+     */
+    public boolean importPlayerExport(String csvFilePath) {
+        discordLog.logInfo("Starting player import from export file...");
+        telegramLog.logInfo("Starting player import from export file...");
+
+        File csvFile = new File(csvFilePath);
+        if (!csvFile.exists()) {
+            String errorMsg = "Player export file not found at: " + csvFilePath;
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            return false;
+        }
+
+        try {
+            // Validate that A1_PlayerStats table is empty
+            if (!isTableEmpty()) {
+                String errorMsg = "Cannot import player data: A1_PlayerStats table is not empty. Table must be empty before importing playerExport.csv";
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                return false;
+            }
+
+            // Parse CSV
+            List<PlayerImportEntry> entries = parsePlayerExportCSV(csvFilePath);
+
+            discordLog.batchInfo(String.format("CSV parsed successfully. %d players found.", entries.size()));
+            telegramLog.batchInfo(String.format("CSV parsed successfully. %d players found.", entries.size()));
+
+            // Import into database
+            importPlayerData(entries);
+
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+            String successMsg = String.format("Player import completed successfully. Updated/created %d players.", entries.size());
+            discordLog.logSuccess(successMsg);
+            telegramLog.logSuccess(successMsg);
+
+            // Send to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+
+            return true;
+
+        } catch (Exception e) {
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+            String errorMsg = "Player import failed: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+
+            // Send error to upload chat if callback is set
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+
+            return false;
+        }
+    }
+
+    /**
+     * Represents a player import entry from CSV
+     */
+    private static class PlayerImportEntry {
+        String name;
+        Integer trueElo;
+        Integer perfElo;
+        String hall;
+
+        PlayerImportEntry(String name, Integer trueElo, Integer perfElo, String hall) {
+            this.name = name;
+            this.trueElo = trueElo;
+            this.perfElo = perfElo;
+            this.hall = hall;
+        }
+    }
+
+    /**
+     * Parses the playerExport CSV file
+     * Expected format: name,trueElo,perfElo,lastRound,lastHall,capped
+     */
+    private List<PlayerImportEntry> parsePlayerExportCSV(String csvFilePath) throws Exception {
+        List<PlayerImportEntry> entries = new ArrayList<>();
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(csvFilePath))) {
+            String line;
+            int lineNumber = 0;
+            boolean isHeader = true;
+
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                line = line.trim();
+
+                if (line.isEmpty()) continue;
+
+                String[] parts = parseCSVLine(line);
+
+                if (isHeader) {
+                    if (parts.length != 6) {
+                        throw new Exception("Invalid CSV format: Header must have exactly 6 columns (name,trueElo,perfElo,lastRound,lastHall,capped)");
+                    }
+                    String[] expected = {"name", "trueelo", "perfelo", "lastround", "lasthall", "capped"};
+                    for (int i = 0; i < 6; i++) {
+                        if (!parts[i].trim().toLowerCase().equals(expected[i])) {
+                            throw new Exception(String.format("Invalid CSV header: Expected '%s' at column %d, found '%s'",
+                                expected[i], i + 1, parts[i].trim()));
+                        }
+                    }
+                    isHeader = false;
+                    continue;
+                }
+
+                if (parts.length != 6) {
+                    throw new Exception(String.format("Invalid CSV format at line %d: Expected 6 columns, found %d", lineNumber, parts.length));
+                }
+
+                String name = parts[0].trim();
+                String trueEloStr = parts[1].trim();
+                String perfEloStr = parts[2].trim();
+                // lastRound (parts[3]) is not used during import
+                String lastHall = parts[4].trim();
+                // capped (parts[5]) is not imported - capped status is managed via cappedlist.csv
+
+                if (name.isEmpty()) {
+                    throw new Exception(String.format("Invalid CSV format at line %d: Name cannot be empty", lineNumber));
+                }
+
+                if (trueEloStr.isEmpty()) {
+                    throw new Exception(String.format("Invalid CSV format at line %d: trueElo cannot be empty", lineNumber));
+                }
+
+                // lastHall can be empty/null for players who haven't played yet
+                if (lastHall.isEmpty()) {
+                    lastHall = null;
+                }
+
+                Integer trueElo = null;
+                Integer perfElo = null;
+
+                try {
+                    trueElo = Integer.parseInt(trueEloStr);
+                } catch (NumberFormatException e) {
+                    throw new Exception(String.format("Invalid CSV format at line %d: trueElo must be an integer", lineNumber));
+                }
+
+                if (!perfEloStr.isEmpty()) {
+                    try {
+                        perfElo = Integer.parseInt(perfEloStr);
+                    } catch (NumberFormatException e) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: perfElo must be an integer or empty", lineNumber));
+                    }
+                }
+
+                entries.add(new PlayerImportEntry(name, trueElo, perfElo, lastHall));
+            }
+
+            if (entries.isEmpty()) {
+                throw new Exception("CSV file contains no data rows");
+            }
+
+        } catch (IOException e) {
+            throw new Exception("Error reading CSV file: " + e.getMessage());
+        }
+
+        return entries;
+    }
+
+    /**
+     * Checks if a player has played any rounds (has any non-null ELO values in round columns)
+     * @param conn Database connection
+     * @param playerId Player's ID
+     * @return true if player has played rounds, false otherwise
+     */
+    private boolean hasPlayedRounds(Connection conn, int playerId) throws SQLException {
+        String sql = "SELECT trueEloR1, trueEloR2, trueEloR3, trueEloR4, trueEloR5, trueEloR6, " +
+                     "trueEloT16, trueEloT8, trueEloT4, trueEloT2 FROM A1_PlayerStats WHERE id = ?";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, playerId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    // Check if any round ELO column is not null
+                    for (int i = 1; i <= 10; i++) {
+                        if (rs.getObject(i) != null) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Imports player data into the database
+     * Creates new players or updates existing ones (by name, case-insensitive)
+     * Writes hall field from CSV but does NOT import capped status (managed via cappedlist.csv)
+     * Detects hall conflicts and requests user confirmation when needed
+     */
+    private void importPlayerData(List<PlayerImportEntry> entries) throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + dbPath;
+
+        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            conn.setAutoCommit(false);
+
+            try {
+                String currentTimestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date());
+
+                for (PlayerImportEntry entry : entries) {
+                    // Check if player exists (case-insensitive name match)
+                    String checkSQL = "SELECT id, hall FROM A1_PlayerStats WHERE LOWER(name) = LOWER(?)";
+                    Integer existingId = null;
+                    String existingHall = null;
+
+                    try (PreparedStatement checkStmt = conn.prepareStatement(checkSQL)) {
+                        checkStmt.setString(1, entry.name);
+                        try (ResultSet rs = checkStmt.executeQuery()) {
+                            if (rs.next()) {
+                                existingId = rs.getInt("id");
+                                existingHall = rs.getString("hall");
+                            }
+                        }
+                    }
+
+                    if (existingId != null) {
+                        // Player exists - check for hall conflict
+                        boolean hallConflict = false;
+                        
+                        if (existingHall != null && entry.hall != null && 
+                            !existingHall.equalsIgnoreCase(entry.hall)) {
+                            // Hall differs - check if player has played any rounds
+                            if (!hasPlayedRounds(conn, existingId)) {
+                                // Player hasn't played yet - ask user for confirmation
+                                hallConflict = true;
+                                
+                                // Build confirmation message
+                                String conflictMsg = String.format(
+                                    "⚠️ HALL CONFLICT DETECTED\\n\\n" +
+                                    "Player: %s\\n" +
+                                    "Database hall: %s\\n" +
+                                    "CSV hall: %s\\n\\n" +
+                                    "This player exists in the database but has not played any rounds yet.\\n" +
+                                    "Are these the same player?\\n\\n" +
+                                    "Reply with:\\n" +
+                                    "✅ 'yes' - Update hall to '%s' (CSV value)\\n" +
+                                    "❌ 'no' - Keep as different players (import will fail)",
+                                    entry.name, existingHall, entry.hall, entry.hall
+                                );
+                                
+                                discordLog.logWarning(conflictMsg);
+                                telegramLog.logWarning(conflictMsg);
+                                
+                                // Send to upload chat for user confirmation
+                                if (uploadChatCallback != null) {
+                                    uploadChatCallback.sendMessage(conflictMsg);
+                                }
+                                
+                                // For now, we'll throw an exception to halt the import
+                                // In a real implementation, this would wait for user response
+                                throw new Exception(String.format(
+                                    "Hall conflict detected for player '%s' (DB: %s, CSV: %s). " +
+                                    "Player has not played any rounds. Please confirm if same player.",
+                                    entry.name, existingHall, entry.hall
+                                ));
+                            }
+                        }
+                        
+                        // Update existing player - update base ELO and hall values
+                        String updateSQL = "UPDATE A1_PlayerStats SET baseTrueElo = ?, basePerfElo = ?, hall = ?, dateLogged = ? WHERE id = ?";
+                        try (PreparedStatement pstmt = conn.prepareStatement(updateSQL)) {
+                            pstmt.setInt(1, entry.trueElo);
+                            pstmt.setObject(2, entry.perfElo);
+                            pstmt.setString(3, entry.hall);
+                            pstmt.setString(4, currentTimestamp);
+                            pstmt.setInt(5, existingId);
+                            pstmt.executeUpdate();
+                        }
+                        discordLog.batchInfo(String.format("Updated player: %s (hall: %s)",
+                            entry.name, entry.hall != null ? entry.hall : "none"));
+                        telegramLog.batchInfo(String.format("Updated player: %s (hall: %s)",
+                            entry.name, entry.hall != null ? entry.hall : "none"));
+                    } else {
+                        // Insert new player - name, base ELO, and hall. capped defaults to 0 (false)
+                        String insertSQL = "INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, dateLogged) VALUES (?, ?, 0, ?, ?, ?)";
+                        try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
+                            pstmt.setString(1, entry.name);
+                            pstmt.setString(2, entry.hall);
+                            pstmt.setInt(3, entry.trueElo);
+                            pstmt.setObject(4, entry.perfElo);
+                            pstmt.setString(5, currentTimestamp);
+                            pstmt.executeUpdate();
+                        }
+                        discordLog.batchInfo(String.format("Created new player: %s (hall: %s)",
+                            entry.name, entry.hall != null ? entry.hall : "none"));
+                        telegramLog.batchInfo(String.format("Created new player: %s (hall: %s)",
+                            entry.name, entry.hall != null ? entry.hall : "none"));
+                    }
+                }
+
+                conn.commit();
+
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new Exception("Database transaction failed: " + e.getMessage());
+            }
+
+        } catch (SQLException e) {
+            throw new Exception("Database connection failed: " + e.getMessage());
         }
     }
 

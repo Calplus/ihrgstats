@@ -111,7 +111,7 @@ public class EloCalculator {
      * @return Performance score between 0 and 1
      */
     public static double pointMarginToPerformanceScore(double pointMargin) {
-        return pointMarginToPerformanceScore(pointMargin, 0.04);
+        return pointMarginToPerformanceScore(pointMargin, 0.05);
     }
 
     /**
@@ -177,7 +177,6 @@ public class EloCalculator {
      * @return Probability of player 1 winning
      */
     private static double winProbability(double r1, double r2) {
-        // Using 100 instead of 200 makes ELO changes more dramatic
         return 1.0 / (1.0 + Math.exp(-(r1 - r2) / 100.0));
     }
 
@@ -223,6 +222,189 @@ public class EloCalculator {
             case 10: return "t2";
             default: return "unknown";
         }
+    }
+
+    /**
+     * Calculates Whole-History Rating across multiple rounds
+     * This method processes ALL games together and returns ratings for each round/player,
+     * implementing true WHR where adding new games updates ALL historical ratings
+     * 
+     * @param games List of all games across all rounds
+     * @param playerNames Set of all player names
+     * @param initialElos Initial ELO ratings (baseTrueElo/basePerfElo)
+     * @param roundSequence List of round names in order
+     * @param maxRoundIndex Maximum round index to calculate (0-based)
+     * @return Map of round name -> (player name -> ELO rating)
+     */
+    public static Map<String, Map<String, Double>> calculateWholeHistoryRating(
+            List<Game> games, 
+            Set<String> playerNames, 
+            Map<String, Double> initialElos,
+            List<String> roundSequence,
+            int maxRoundIndex) {
+        
+        // Group games by time step
+        Map<Integer, List<Game>> gamesByTimeStep = new HashMap<>();
+        for (Game game : games) {
+            gamesByTimeStep.computeIfAbsent(game.timeStep, k -> new ArrayList<>()).add(game);
+        }
+        
+        // Initialize ratings for each player at each time step
+        Map<String, Map<Integer, Rating>> ratingHistory = new HashMap<>();
+        for (String player : playerNames) {
+            Map<Integer, Rating> history = new HashMap<>();
+            double initialR = initialElos.getOrDefault(player, DEFAULT_ELO) - DEFAULT_ELO;
+            
+            // Create rating entry for each time step where player has games
+            for (int timeStep : gamesByTimeStep.keySet()) {
+                for (Game game : gamesByTimeStep.get(timeStep)) {
+                    if (game.player1.equals(player) || game.player2.equals(player)) {
+                        history.put(timeStep, new Rating(initialR, W2));
+                        break;
+                    }
+                }
+            }
+            
+            if (!history.isEmpty()) {
+                ratingHistory.put(player, history);
+            }
+        }
+        
+        // Run WHR algorithm with temporal links
+        for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
+            boolean converged = updateWholeHistoryIteration(ratingHistory, gamesByTimeStep);
+            if (converged) {
+                break;
+            }
+        }
+        
+        // Convert to output format: round name -> player -> ELO
+        Map<String, Map<String, Double>> result = new HashMap<>();
+        for (int i = 0; i <= maxRoundIndex; i++) {
+            String roundName = roundSequence.get(i);
+            int timeStep = roundNameToTimeStep(roundName);
+            Map<String, Double> roundElos = new HashMap<>();
+            
+            for (Map.Entry<String, Map<Integer, Rating>> entry : ratingHistory.entrySet()) {
+                String player = entry.getKey();
+                Map<Integer, Rating> history = entry.getValue();
+                Rating rating = history.get(timeStep);
+                
+                if (rating != null) {
+                    roundElos.put(player, rating.getElo());
+                } else {
+                    // Player didn't play this round, use most recent rating
+                    Double mostRecent = null;
+                    for (int t = timeStep - 1; t >= 1; t--) {
+                        if (history.containsKey(t)) {
+                            mostRecent = history.get(t).getElo();
+                            break;
+                        }
+                    }
+                    if (mostRecent == null) {
+                        mostRecent = initialElos.getOrDefault(player, DEFAULT_ELO);
+                    }
+                    roundElos.put(player, mostRecent);
+                }
+            }
+            
+            result.put(roundName, roundElos);
+        }
+        
+        return result;
+    }
+
+    /**
+     * Single iteration of WHR with temporal links between time steps
+     */
+    private static boolean updateWholeHistoryIteration(
+            Map<String, Map<Integer, Rating>> ratingHistory,
+            Map<Integer, List<Game>> gamesByTimeStep) {
+        
+        boolean converged = true;
+        
+        for (Map.Entry<String, Map<Integer, Rating>> playerEntry : ratingHistory.entrySet()) {
+            String player = playerEntry.getKey();
+            Map<Integer, Rating> history = playerEntry.getValue();
+            
+            // Get sorted time steps for this player
+            List<Integer> timeSteps = new ArrayList<>(history.keySet());
+            Collections.sort(timeSteps);
+            
+            for (int i = 0; i < timeSteps.size(); i++) {
+                int timeStep = timeSteps.get(i);
+                Rating rating = history.get(timeStep);
+                double oldR = rating.r;
+                
+                // Compute gradient and hessian
+                double gradient = 0.0;
+                double hessian = 0.0;
+                
+                // Prior term (pull towards initial rating or previous time step)
+                if (i == 0) {
+                    // First time step: prior pulls towards 0 (DEFAULT_ELO)
+                    gradient = -rating.r / rating.uncertainty;
+                    hessian = -1.0 / rating.uncertainty;
+                } else {
+                    // Temporal link to previous time step
+                    int prevTimeStep = timeSteps.get(i - 1);
+                    Rating prevRating = history.get(prevTimeStep);
+                    double diff = rating.r - prevRating.r;
+                    gradient = -diff / W2;
+                    hessian = -1.0 / W2;
+                }
+                
+                // Link to next time step
+                if (i < timeSteps.size() - 1) {
+                    int nextTimeStep = timeSteps.get(i + 1);
+                    Rating nextRating = history.get(nextTimeStep);
+                    double diff = nextRating.r - rating.r;
+                    gradient += -diff / W2;
+                    hessian += -1.0 / W2;
+                }
+                
+                // Game results at this time step
+                List<Game> games = gamesByTimeStep.get(timeStep);
+                if (games != null) {
+                    for (Game game : games) {
+                        String opponent;
+                        double score;
+                        
+                        if (game.player1.equals(player)) {
+                            opponent = game.player2;
+                            score = game.score;
+                        } else if (game.player2.equals(player)) {
+                            opponent = game.player1;
+                            score = 1.0 - game.score;
+                        } else {
+                            continue;
+                        }
+                        
+                        Map<Integer, Rating> oppHistory = ratingHistory.get(opponent);
+                        if (oppHistory == null) continue;
+                        
+                        Rating oppRating = oppHistory.get(timeStep);
+                        if (oppRating == null) continue;
+                        
+                        double prob = winProbability(rating.r, oppRating.r);
+                        gradient += score - prob;
+                        hessian -= prob * (1.0 - prob);
+                    }
+                }
+                
+                // Newton-Raphson update
+                if (Math.abs(hessian) > 1e-10) {
+                    double delta = -gradient / hessian;
+                    rating.r = oldR + delta;
+                    
+                    if (Math.abs(delta) > CONVERGENCE_THRESHOLD) {
+                        converged = false;
+                    }
+                }
+            }
+        }
+        
+        return converged;
     }
 
     /**

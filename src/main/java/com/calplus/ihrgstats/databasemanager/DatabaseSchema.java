@@ -159,7 +159,8 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("capped", "BOOLEAN"));
 
         // Elo Rating
-        playerStatsColumns.add(new ColumnDefinition("baseElo", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("baseTrueElo", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("basePerfElo", "INTEGER"));
 
         // True Elo
         playerStatsColumns.add(new ColumnDefinition("trueEloR1", "INTEGER"));
@@ -196,6 +197,54 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("seatT8", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("seatT4", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("seatT2", "INTEGER"));
+
+        // Opponent: Hall
+        playerStatsColumns.add(new ColumnDefinition("oppHallR1", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallR2", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallR3", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallR4", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallR5", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallR6", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallT16", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallT8", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallT4", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppHallT2", "TEXT"));
+
+        // Opponent: Name
+        playerStatsColumns.add(new ColumnDefinition("oppNameR1", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameR2", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameR3", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameR4", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameR5", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameR6", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameT16", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameT8", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameT4", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("oppNameT2", "TEXT"));
+
+        // Opponent: True Elo
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT2", "INTEGER"));
+
+        // Opponent: Perf Elo
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT2", "INTEGER"));
 
         List<String> playerStatsIndexes = new ArrayList<>();
         playerStatsIndexes.add("name");
