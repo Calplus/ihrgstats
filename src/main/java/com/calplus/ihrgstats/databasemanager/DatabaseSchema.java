@@ -1,0 +1,270 @@
+package com.calplus.ihrgstats.databasemanager;
+
+import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Database schema creation and management for SQLite database.
+ * Handles table creation, column updates, and indexing.
+ */
+public class DatabaseSchema {
+    private final DiscordLog discordLog;
+
+    public DatabaseSchema() {
+        this.discordLog = new DiscordLog();
+    }
+
+    /**
+     * Column definition for table creation
+     */
+    private static class ColumnDefinition {
+        String name;
+        String type;
+
+        ColumnDefinition(String name, String type) {
+            this.name = name;
+            this.type = type;
+        }
+    }
+
+    /**
+     * Ensures a column exists in the specified table, adding it if necessary
+     */
+    private void ensureColumn(Connection conn, String tableName, String columnName, String columnType) {
+        try {
+            // Get all columns for the table
+            DatabaseMetaData metaData = conn.getMetaData();
+            ResultSet columns = metaData.getColumns(null, null, tableName, null);
+            
+            boolean columnExists = false;
+            while (columns.next()) {
+                String existingColumn = columns.getString("COLUMN_NAME");
+                if (existingColumn.equalsIgnoreCase(columnName)) {
+                    columnExists = true;
+                    break;
+                }
+            }
+            columns.close();
+
+            if (!columnExists) {
+                String sql = String.format("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnType);
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute(sql);
+                    String successMsg = String.format("Column '%s' added to table '%s'.", columnName, tableName);
+                    System.out.println(successMsg);
+                    discordLog.logSuccess(successMsg);
+                }
+            }
+        } catch (SQLException e) {
+            String errorMsg = String.format("Error checking/adding column %s to %s: %s", columnName, tableName, e.getMessage());
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+        }
+    }
+
+    /**
+     * Creates or updates a table with the specified columns and indexes
+     */
+    private void createOrUpdateTable(Connection conn, String tableName, List<ColumnDefinition> columns, List<String> indexColumns) {
+        if (columns == null || columns.isEmpty()) {
+            String errorMsg = String.format("No columns specified for table %s.", tableName);
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+            return;
+        }
+
+        try {
+            // Build CREATE TABLE SQL
+            StringBuilder columnsDef = new StringBuilder();
+            for (int i = 0; i < columns.size(); i++) {
+                ColumnDefinition col = columns.get(i);
+                columnsDef.append(col.name).append(" ").append(col.type);
+                if (i < columns.size() - 1) {
+                    columnsDef.append(",\n    ");
+                }
+            }
+
+            String createSQL = String.format("CREATE TABLE IF NOT EXISTS %s (\n    %s\n)", tableName, columnsDef);
+
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute(createSQL);
+                String successMsg = String.format("Table '%s' ensured.", tableName);
+                System.out.println(successMsg);
+                discordLog.logSuccess(successMsg);
+            }
+
+            // Ensure all columns exist (for table updates)
+            for (ColumnDefinition col : columns) {
+                ensureColumn(conn, tableName, col.name, col.type);
+            }
+
+            // Create indexes on specified columns
+            if (indexColumns != null && !indexColumns.isEmpty()) {
+                for (String col : indexColumns) {
+                    String indexName = String.format("idx_%s_%s", tableName, col);
+                    String indexSQL = String.format("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", indexName, tableName, col);
+                    
+                    try (Statement stmt = conn.createStatement()) {
+                        stmt.execute(indexSQL);
+                        String successMsg = String.format("Index '%s' created on '%s(%s)'.", indexName, tableName, col);
+                        System.out.println(successMsg);
+                        discordLog.logSuccess(successMsg);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            String errorMsg = String.format("Error creating table %s: %s", tableName, e.getMessage());
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+        }
+    }
+
+    /**
+     * Defines all tables and their structures
+     */
+    private void defineTableStructures(Connection conn) {
+        // Table 1: Player Stats
+        List<ColumnDefinition> playerStatsColumns = new ArrayList<>();
+        playerStatsColumns.add(new ColumnDefinition("id", "INTEGER PRIMARY KEY AUTOINCREMENT"));
+        playerStatsColumns.add(new ColumnDefinition("dateLogged", "TEXT"));
+
+        // Player info
+        playerStatsColumns.add(new ColumnDefinition("name", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("hall", "TEXT"));
+        playerStatsColumns.add(new ColumnDefinition("capped", "BOOLEAN"));
+
+        // Elo Rating
+        playerStatsColumns.add(new ColumnDefinition("baseElo", "INTEGER"));
+
+        // True Elo
+        playerStatsColumns.add(new ColumnDefinition("trueEloR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("trueEloT2", "INTEGER"));
+
+        // Performance Elo
+        playerStatsColumns.add(new ColumnDefinition("perfEloR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("perfEloT2", "INTEGER"));
+
+        // Seating Arrangement
+        playerStatsColumns.add(new ColumnDefinition("seatR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("seatT2", "INTEGER"));
+
+        List<String> playerStatsIndexes = new ArrayList<>();
+        playerStatsIndexes.add("name");
+        playerStatsIndexes.add("hall");
+
+        createOrUpdateTable(conn, "A1_PlayerStats", playerStatsColumns, playerStatsIndexes);
+
+        // Table 2: Capped Players
+        List<ColumnDefinition> cappedPlayersColumns = new ArrayList<>();
+        cappedPlayersColumns.add(new ColumnDefinition("id", "INTEGER PRIMARY KEY AUTOINCREMENT"));
+        cappedPlayersColumns.add(new ColumnDefinition("name", "TEXT"));
+        cappedPlayersColumns.add(new ColumnDefinition("prevHall", "TEXT"));
+
+        List<String> cappedPlayersIndexes = new ArrayList<>();
+        cappedPlayersIndexes.add("name");
+        cappedPlayersIndexes.add("prevHall");
+
+        createOrUpdateTable(conn, "A2_CappedPlayers", cappedPlayersColumns, cappedPlayersIndexes);
+    }
+
+    /**
+     * Creates the database with all tables and structures
+     * @param dbName The database filename
+     */
+    public void createDatabase(String dbName) {
+        Path dbDir = Paths.get(System.getProperty("user.dir"), "database", "core");
+        Path dbPath = dbDir.resolve(dbName);
+        boolean dbExists = Files.exists(dbPath);
+
+        // Log INFO: database is being created/running
+        String infoMsgStart = String.format("Database creation started for: %s", dbName);
+        System.out.println(infoMsgStart);
+        discordLog.logInfo(infoMsgStart);
+
+        // Create database directory if it doesn't exist
+        if (!dbExists) {
+            try {
+                Files.createDirectories(dbDir);
+                Files.createFile(dbPath);
+                String infoMsgBlank = String.format("Blank database file '%s' created at %s", dbName, dbPath);
+                System.out.println(infoMsgBlank);
+                discordLog.logInfo(infoMsgBlank);
+            } catch (IOException e) {
+                String errMsg = String.format("Failed to create database file: %s. Error: %s. Check the console log for details.", dbPath, e.getMessage());
+                System.err.println(errMsg);
+                discordLog.logError(errMsg);
+                throw new RuntimeException(errMsg, e);
+            }
+        }
+
+        // Connect to database and create tables
+        String jdbcUrl = "jdbc:sqlite:" + dbPath.toString();
+        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            String infoMsgOpen = String.format("Database '%s' opened", dbName);
+            System.out.println(infoMsgOpen);
+            discordLog.logSuccess(infoMsgOpen);
+
+            defineTableStructures(conn);
+
+            String successMsg = String.format("Database created successfully: %s", dbPath);
+            System.out.println(successMsg);
+            discordLog.logSuccess(successMsg);
+
+        } catch (SQLException e) {
+            String errMsg = String.format("Database creation failed for %s: %s", dbName, e.getMessage());
+            System.err.println(errMsg);
+            discordLog.logError(errMsg);
+            throw new RuntimeException(errMsg, e);
+        }
+    }
+
+    /**
+     * Main method for testing and CLI usage
+     */
+    public static void main(String[] args) {
+        String dbFileName = "default.db";
+        
+        if (args.length > 0) {
+            dbFileName = args[0];
+        }
+
+        if (dbFileName == null || dbFileName.isEmpty()) {
+            System.err.println("Please specify a database file name.");
+            System.exit(1);
+        }
+
+        DatabaseSchema schema = new DatabaseSchema();
+        schema.createDatabase(dbFileName);
+    }
+}

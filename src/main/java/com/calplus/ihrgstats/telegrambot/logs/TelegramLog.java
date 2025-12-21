@@ -1,0 +1,428 @@
+package com.calplus.ihrgstats.telegrambot.logs;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Sends log messages to a Telegram chat via the Telegram Bot API.
+ * Messages are queued and processed sequentially to maintain order.
+ * Reacts to Telegram rate limits (429) with retry_after delays.
+ */
+public class TelegramLog {
+    private String botToken;
+    private String chatId;
+    private String adminUserId;
+    private String telegramApiUrl;
+    private final BlockingQueue<QueuedMessage> messageQueue;
+    private final AtomicBoolean isProcessing;
+    private final HttpClient httpClient;
+    private boolean telegramEnabled;
+
+    private static class QueuedMessage {
+        String message;
+        CompletableFuture<Boolean> future;
+
+        QueuedMessage(String message, CompletableFuture<Boolean> future) {
+            this.message = message;
+            this.future = future;
+        }
+    }
+
+    public TelegramLog() {
+        this.messageQueue = new LinkedBlockingQueue<>();
+        this.isProcessing = new AtomicBoolean(false);
+        this.httpClient = HttpClient.newHttpClient();
+        this.telegramEnabled = loadConfig();
+        
+        // Add shutdown hook to ensure all messages are sent before exit
+        if (telegramEnabled) {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                flush();
+            }));
+        }
+    }
+
+    /**
+     * Loads the Telegram bot token and chat ID from application.properties
+     * @return true if Telegram logging is enabled, false otherwise
+     */
+    private boolean loadConfig() {
+        try (var inputStream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
+            if (inputStream == null) {
+                System.err.println("WARNING: application.properties file not found. Telegram logging disabled.");
+                return false;
+            }
+
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(inputStream);
+
+            this.botToken = properties.getProperty("telegram.bot.token");
+            this.chatId = properties.getProperty("telegram.log.chatId");
+            this.adminUserId = properties.getProperty("telegram.admin.userId");
+
+            if (this.botToken == null || this.botToken.isEmpty()) {
+                System.err.println("WARNING: telegram.bot.token not found in application.properties. Telegram logging disabled.");
+                return false;
+            }
+            if (this.chatId == null || this.chatId.isEmpty()) {
+                System.err.println("WARNING: telegram.log.chatId not found in application.properties. Telegram logging disabled.");
+                return false;
+            }
+            
+            if (this.adminUserId == null || this.adminUserId.isEmpty()) {
+                System.out.println("INFO: telegram.admin.userId not found in application.properties. Admin mentions disabled.");
+            }
+
+            this.telegramApiUrl = "https://api.telegram.org/bot" + this.botToken + "/sendMessage";
+            return true;
+
+        } catch (IOException e) {
+            System.err.println("WARNING: Failed to read application.properties. Telegram logging disabled. Error: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Gets the caller's filename from the stack trace
+     * @return The filename of the caller
+     */
+    private String getCallerFilename() {
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+
+        // Skip internal calls and find the first external caller
+        for (StackTraceElement element : stackTrace) {
+            String className = element.getClassName();
+            String fileName = element.getFileName();
+
+            // Skip Thread, TelegramLog, and internal classes
+            if (fileName != null && 
+                !className.equals("java.lang.Thread") &&
+                !className.equals("telegrambot.logs.TelegramLog") &&
+                !className.startsWith("java.") &&
+                !className.startsWith("sun.")) {
+                return fileName;
+            }
+        }
+
+        return "CLI";
+    }
+
+    /**
+     * Formats timestamp with milliseconds
+     * @return Formatted timestamp
+     */
+    private String getTimestamp() {
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+        return now.format(formatter);
+    }
+
+    /**
+     * Formats a log message with emote, timestamp, filename, type, and message
+     * @param emote The emote to use
+     * @param type The log type (INFO, SUCCESS, ERROR, etc.)
+     * @param message The message to log
+     * @param filename The calling file
+     * @return Formatted message
+     */
+    private String formatMessage(String emote, String type, String message, String filename) {
+        String timestamp = getTimestamp();
+        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, filename, type, message);
+    }
+
+    /**
+     * Sends a message to the Telegram chat
+     * @param message The message to send
+     * @return Retry delay in milliseconds (0 if successful, -1 if failed, >0 if rate limited)
+     */
+    private long sendMessage(String message) {
+        try {
+            // URL encode the message and chat_id
+            String encodedMessage = URLEncoder.encode(message, StandardCharsets.UTF_8);
+            String encodedChatId = URLEncoder.encode(chatId, StandardCharsets.UTF_8);
+            
+            // Build the request body
+            String requestBody = "chat_id=" + encodedChatId + "&text=" + encodedMessage + "&parse_mode=HTML";
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(telegramApiUrl))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                return 0; // Success
+            } else if (response.statusCode() == 429) {
+                // Rate limited - extract retry_after from response
+                try {
+                    String responseBody = response.body();
+                    // Simple JSON parsing for retry_after
+                    int retryAfterIndex = responseBody.indexOf("\"retry_after\":");
+                    if (retryAfterIndex != -1) {
+                        String afterString = responseBody.substring(retryAfterIndex + 14);
+                        int endIndex = afterString.indexOf(",");
+                        if (endIndex == -1) {
+                            endIndex = afterString.indexOf("}");
+                        }
+                        if (endIndex != -1) {
+                            String retryAfterStr = afterString.substring(0, endIndex).trim();
+                            long retryAfter = Long.parseLong(retryAfterStr);
+                            System.err.println("Telegram rate limit hit. Retrying after " + retryAfter + " seconds.");
+                            return retryAfter * 1000; // Convert to milliseconds
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("Failed to parse retry_after from rate limit response: " + e.getMessage());
+                }
+                return 5000; // Default 5 seconds if parsing fails
+            } else {
+                System.err.println("Failed to send message to Telegram. Status: " + response.statusCode());
+                System.err.println("Response: " + response.body());
+                return -1; // Failed
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error sending message to Telegram: " + e.getMessage());
+            return -1; // Failed
+        }
+    }
+
+    /**
+     * Processes the message queue sequentially with reactive rate limiting
+     */
+    private void processQueue() {
+        if (!isProcessing.compareAndSet(false, true)) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            boolean interrupted = false;
+            try {
+                while (!messageQueue.isEmpty() && !interrupted) {
+                    QueuedMessage queuedMsg = messageQueue.poll();
+                    if (queuedMsg != null) {
+                        long retryDelay = sendMessage(queuedMsg.message);
+                        
+                        if (retryDelay == 0) {
+                            // Success
+                            queuedMsg.future.complete(true);
+                        } else if (retryDelay > 0) {
+                            // Rate limited - put message back in queue and wait
+                            messageQueue.add(queuedMsg);
+                            try {
+                                Thread.sleep(retryDelay);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                interrupted = true;
+                                queuedMsg.future.complete(false);
+                            }
+                        } else {
+                            // Failed
+                            queuedMsg.future.complete(false);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error processing message queue: " + e.getMessage());
+            } finally {
+                isProcessing.set(false);
+                
+                // If interrupted, complete all remaining messages as failed
+                if (interrupted) {
+                    QueuedMessage remaining;
+                    while ((remaining = messageQueue.poll()) != null) {
+                        remaining.future.complete(false);
+                    }
+                }
+            }
+        });
+    }
+    
+    /**
+     * Waits for all queued messages to be sent
+     */
+    public void flush() {
+        // Wait for queue to be empty and processing to finish
+        while (!messageQueue.isEmpty() || isProcessing.get()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    /**
+     * Adds a message to the queue and processes it
+     * @param message The message to queue
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    private CompletableFuture<Boolean> queueMessage(String message) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        
+        // If Telegram is disabled, complete immediately with false
+        if (!telegramEnabled) {
+            future.complete(false);
+            return future;
+        }
+        
+        messageQueue.add(new QueuedMessage(message, future));
+        processQueue();
+        return future;
+    }
+
+    /**
+     * Sends a log message with timestamp to the Telegram chat
+     * @param message The log message to send
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> log(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("📝", "LOG", message, filename);
+        System.out.println(formattedMessage);
+        return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Sends an error log message to the Telegram chat with admin user mention
+     * @param message The error message to send
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> logError(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🔴", "ERROR", message, filename);
+        
+        // Add admin user mention if configured (Telegram uses @username or tg://user?id=<userid>)
+        if (adminUserId != null && !adminUserId.isEmpty()) {
+            // For Telegram, if adminUserId is numeric, create a mention link
+            // If it's a username, use @username format
+            if (adminUserId.matches("\\d+")) {
+                formattedMessage = String.format("<a href=\"tg://user?id=%s\">Admin</a> %s", adminUserId, formattedMessage);
+            } else {
+                formattedMessage = "@" + adminUserId + " " + formattedMessage;
+            }
+        }
+        
+        System.err.println(formattedMessage);
+        return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Sends a success log message to the Telegram chat
+     * @param message The success message to send
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> logSuccess(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🟢", "SUCCESS", message, filename);
+        System.out.println(formattedMessage);
+        return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Sends a warning log message to the Telegram chat
+     * @param message The warning message to send
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> logWarning(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🟡", "WARNING", message, filename);
+        System.out.println(formattedMessage);
+        return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Sends an info log message to the Telegram chat
+     * @param message The info message to send
+     * @return CompletableFuture that resolves to true if successful, false otherwise
+     */
+    public CompletableFuture<Boolean> logInfo(String message) {
+        String filename = getCallerFilename();
+        String formattedMessage = formatMessage("🔵", "INFO", message, filename);
+        System.out.println(formattedMessage);
+        return queueMessage(formattedMessage);
+    }
+
+    /**
+     * Main method for testing
+     */
+    public static void main(String[] args) {
+        if (args.length == 0) {
+            // Test mode
+            TelegramLog telegramLog = new TelegramLog();
+            telegramLog.logInfo("Testing Telegram logging from Java");
+            telegramLog.logSuccess("Database update completed successfully");
+            telegramLog.logWarning("API rate limit approaching");
+            telegramLog.logError("Failed to connect to database");
+            telegramLog.log("Custom log message without prefix");
+            
+            // Wait a bit for messages to be sent
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return;
+        }
+
+        // CLI mode: java TelegramLog <logType> <message>
+        String logType = args[0].toLowerCase();
+        StringBuilder messageBuilder = new StringBuilder();
+        for (int i = 1; i < args.length; i++) {
+            if (i > 1) messageBuilder.append(" ");
+            messageBuilder.append(args[i]);
+        }
+        String message = messageBuilder.toString();
+
+        if (message.isEmpty()) {
+            System.err.println("Error: Message is required");
+            System.exit(1);
+        }
+
+        TelegramLog telegramLog = new TelegramLog();
+
+        try {
+            switch (logType) {
+                case "info":
+                    telegramLog.logInfo(message);
+                    break;
+                case "success":
+                    telegramLog.logSuccess(message);
+                    break;
+                case "warning":
+                    telegramLog.logWarning(message);
+                    break;
+                case "error":
+                    telegramLog.logError(message);
+                    break;
+                case "log":
+                    telegramLog.log(message);
+                    break;
+                default:
+                    System.err.println("Unknown log type: " + logType);
+                    System.exit(1);
+            }
+
+            // Wait a bit for the message to be sent
+            Thread.sleep(1000);
+
+        } catch (Exception e) {
+            System.err.println("Error logging to Telegram: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+}
