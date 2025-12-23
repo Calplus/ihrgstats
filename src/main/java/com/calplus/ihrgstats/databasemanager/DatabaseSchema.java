@@ -158,9 +158,15 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("hall", "TEXT"));
         playerStatsColumns.add(new ColumnDefinition("capped", "BOOLEAN"));
 
-        // Elo Rating
+        // Elo Rating - Base values
         playerStatsColumns.add(new ColumnDefinition("baseTrueElo", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("basePerfElo", "INTEGER"));
+        
+        // Glicko-2 Base Parameters
+        playerStatsColumns.add(new ColumnDefinition("baseRdTrueElo", "REAL")); // Rating Deviation for TrueElo
+        playerStatsColumns.add(new ColumnDefinition("baseVolTrueElo", "REAL")); // Volatility for TrueElo
+        playerStatsColumns.add(new ColumnDefinition("baseRdPerfElo", "REAL")); // Rating Deviation for PerfElo
+        playerStatsColumns.add(new ColumnDefinition("baseVolPerfElo", "REAL")); // Volatility for PerfElo
 
         // True Elo
         playerStatsColumns.add(new ColumnDefinition("trueEloR1", "INTEGER"));
@@ -173,6 +179,30 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("trueEloT8", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("trueEloT4", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("trueEloT2", "INTEGER"));
+        
+        // True Elo - Rating Deviation (RD)
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR1", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR2", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR3", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR5", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR6", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT16", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT8", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT2", "REAL"));
+        
+        // True Elo - Volatility
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR1", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR2", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR3", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR5", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloR6", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloT16", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloT8", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloT4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volTrueEloT2", "REAL"));
 
         // Performance Elo
         playerStatsColumns.add(new ColumnDefinition("perfEloR1", "INTEGER"));
@@ -185,6 +215,30 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("perfEloT8", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("perfEloT4", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("perfEloT2", "INTEGER"));
+        
+        // Performance Elo - Rating Deviation (RD)
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR1", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR2", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR3", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR5", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR6", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT16", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT8", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT2", "REAL"));
+        
+        // Performance Elo - Volatility
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR1", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR2", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR3", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR5", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloR6", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloT16", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloT8", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloT4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("volPerfEloT2", "REAL"));
 
         // Seating Arrangement
         playerStatsColumns.add(new ColumnDefinition("seatR1", "INTEGER"));

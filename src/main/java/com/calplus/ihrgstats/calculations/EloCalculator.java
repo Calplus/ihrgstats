@@ -3,187 +3,437 @@ package com.calplus.ihrgstats.calculations;
 import java.util.*;
 
 /**
- * ELO calculation system using Whole-History Rating (WHR) algorithm.
- * Supports both TrueElo (standard WHR) and PerfElo (WHR + Logistic Mapping for point spreads).
+ * ELO calculation system using Glicko-2 algorithm.
+ * Supports both TrueElo (standard Glicko-2 with binary outcomes) and 
+ * PerfElo (Glicko-2 + Sigmoid Point-Margin Transform for quality of win).
  */
 public class EloCalculator {
-    private static final double DEFAULT_ELO = 1000.0;
-    private static final double KOMI = 7.5;
+    // Glicko-2 Constants
+    private static final double DEFAULT_RATING = 1000.0;
+    private static final double DEFAULT_RD = 350.0; // High initial uncertainty for fast convergence
+    private static final double DEFAULT_VOLATILITY = 0.06;
+    private static final double TAU = 0.8; // System constant - higher allows faster volatility changes
+    private static final double CONVERGENCE_TOLERANCE = 0.000001;
     
-    // WHR parameters
-    private static final double W2 = 300.0; // Uncertainty growth per time step
-    private static final int MAX_ITERATIONS = 10;
-    private static final double CONVERGENCE_THRESHOLD = 0.001;
-
+    // Sigmoid transform constant for perfElo
+    private static final double SIGMOID_K = 0.15; // Sensitivity for Go point margins
+    
+    // Glicko-2 scale conversion constant
+    // Original Glicko-2 works on scale where 1 rating point ≈ 173.7178 in traditional scale
+    private static final double GLICKO2_SCALE = 173.7178;
+    
     /**
-     * Represents a single game result
+     * Represents a single game result with all necessary data
      */
     public static class Game {
         public String player1;
         public String player2;
-        public double score; // 1.0 for player1 win, 0.0 for player1 loss, or performance score for perfElo
-        public int timeStep; // Round number (1-6, then 16, 8, 4, 2 for tournaments)
+        public double score; // 1.0 for player1 win, 0.0 for player1 loss, or continuous value for perfElo
+        public double pointMargin; // For perfElo calculation (player1_score - player2_score)
+        public String roundName; // e.g., "1", "2", "t16"
         
-        public Game(String player1, String player2, double score, int timeStep) {
+        public Game(String player1, String player2, double score, double pointMargin, String roundName) {
             this.player1 = player1;
             this.player2 = player2;
             this.score = score;
-            this.timeStep = timeStep;
+            this.pointMargin = pointMargin;
+            this.roundName = roundName;
         }
     }
-
+    
     /**
-     * Represents a player's rating at a specific time step
+     * Represents a player's Glicko-2 rating state
      */
-    private static class Rating {
-        double r; // Natural rating
-        double uncertainty; // Uncertainty (sigma^2)
+    public static class Glicko2Rating {
+        public double rating; // μ (mu)
+        public double rd; // φ (phi) - Rating Deviation
+        public double volatility; // σ (sigma)
         
-        Rating(double r, double uncertainty) {
-            this.r = r;
-            this.uncertainty = uncertainty;
+        public Glicko2Rating(double rating, double rd, double volatility) {
+            this.rating = rating;
+            this.rd = rd;
+            this.volatility = volatility;
         }
         
-        double getElo() {
-            return r + DEFAULT_ELO;
+        public Glicko2Rating() {
+            this(DEFAULT_RATING, DEFAULT_RD, DEFAULT_VOLATILITY);
         }
     }
-
+    
     /**
-     * Calculates TrueElo using standard WHR algorithm (binary win/loss)
-     * @param games List of all games to process
-     * @param playerNames Set of all player names
-     * @param previousElos Map of player names to their previous ELO ratings
-     * @return Map of player names to their new ELO ratings
+     * Result of Glicko-2 calculation for all players across all rounds
      */
-    public static Map<String, Double> calculateTrueElo(List<Game> games, Set<String> playerNames, Map<String, Double> previousElos) {
-        // Initialize ratings
-        Map<String, Rating> ratings = new HashMap<>();
-        for (String player : playerNames) {
-            double prevElo = previousElos.getOrDefault(player, DEFAULT_ELO);
-            double r = prevElo - DEFAULT_ELO;
-            ratings.put(player, new Rating(r, W2));
+    public static class Glicko2Result {
+        // Map: roundName -> playerName -> Glicko2Rating
+        public Map<String, Map<String, Glicko2Rating>> ratingsByRound;
+        
+        public Glicko2Result() {
+            this.ratingsByRound = new HashMap<>();
         }
-
-        // Run WHR algorithm
-        for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
-            boolean converged = updateRatingsIteration(ratings, games);
-            if (converged) {
-                break;
+    }
+    
+    /**
+     * Converts point margin to continuous outcome score using sigmoid transform
+     * s_j = 1 / (1 + e^(-k * m))
+     * 
+     * @param pointMargin Margin of victory (positive for win, negative for loss)
+     * @return Continuous outcome value between 0 and 1
+     */
+    public static double pointMarginToOutcome(double pointMargin) {
+        return 1.0 / (1.0 + Math.exp(-SIGMOID_K * pointMargin));
+    }
+    
+    /**
+     * Glicko-2 g(φ) function - reduces effect of opponent's rating based on their RD
+     * g(φ) = 1 / sqrt(1 + 3φ² / π²)
+     * Note: φ must be on Glicko-2 scale (divide by GLICKO2_SCALE first)
+     */
+    private static double g(double phi) {
+        double phiScaled = phi / GLICKO2_SCALE;
+        return 1.0 / Math.sqrt(1.0 + 3.0 * phiScaled * phiScaled / (Math.PI * Math.PI));
+    }
+    
+    /**
+     * Expected outcome E(μ, μ_j, φ_j) using Bradley-Terry model
+     * E = 1 / (1 + e^(-g(φ_j) * (μ - μ_j) / SCALE))
+     */
+    private static double expectedOutcome(double rating, double oppRating, double oppRd) {
+        double gPhi = g(oppRd);
+        double ratingDiff = (rating - oppRating) / GLICKO2_SCALE;
+        return 1.0 / (1.0 + Math.exp(-gPhi * ratingDiff));
+    }
+    
+    /**
+     * Calculates estimated variance v
+     * v = [Σ g(φ_j)² * E(μ, μ_j, φ_j) * (1 - E(μ, μ_j, φ_j))]^(-1)
+     */
+    private static double calculateVariance(double rating, List<OpponentData> opponents) {
+        double sum = 0.0;
+        for (OpponentData opp : opponents) {
+            double gPhi = g(opp.rd);
+            double e = expectedOutcome(rating, opp.rating, opp.rd);
+            sum += gPhi * gPhi * e * (1.0 - e);
+        }
+        return 1.0 / sum;
+    }
+    
+    /**
+     * Calculates improvement delta Δ
+     * Δ = v * Σ g(φ_j) * (s_j - E(μ, μ_j, φ_j))
+     */
+    private static double calculateDelta(double rating, double variance, List<OpponentData> opponents) {
+        double sum = 0.0;
+        for (OpponentData opp : opponents) {
+            double gPhi = g(opp.rd);
+            double e = expectedOutcome(rating, opp.rating, opp.rd);
+            sum += gPhi * (opp.outcome - e);
+        }
+        return variance * sum;
+    }
+    
+    /**
+     * Updates volatility using Illinois algorithm
+     * This is the complex part of Glicko-2 that prevents rating from changing too quickly
+     */
+    private static double calculateNewVolatility(double phi, double sigma, double variance, double delta) {
+        // Convert to Glicko-2 scale
+        double phiScaled = phi / GLICKO2_SCALE;
+        double varianceScaled = variance / (GLICKO2_SCALE * GLICKO2_SCALE);
+        double deltaScaled = delta / GLICKO2_SCALE;
+        
+        double alpha = Math.log(sigma * sigma);
+        double phiSquared = phiScaled * phiScaled;
+        double deltaSquared = deltaScaled * deltaScaled;
+        double tauSquared = TAU * TAU;
+        
+        // Define function f(x)
+        java.util.function.DoubleFunction<Double> f = (x) -> {
+            double eX = Math.exp(x);
+            double phiSq_plus_v_plus_eX = phiSquared + varianceScaled + eX;
+            double term1 = eX * (deltaSquared - phiSquared - varianceScaled - eX) / (2.0 * phiSq_plus_v_plus_eX * phiSq_plus_v_plus_eX);
+            double term2 = (x - alpha) / tauSquared;
+            return term1 - term2;
+        };
+        
+        // Illinois algorithm to find root
+        double a = alpha;
+        double b = alpha;
+        
+        // Find initial bracket with safety limit
+        int bracketIterations = 0;
+        final int MAX_BRACKET_ITERATIONS = 100;
+        
+        if (deltaSquared > phiSquared + variance) {
+            b = alpha + TAU;
+            while (f.apply(b) < 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
+                b += TAU;
+                bracketIterations++;
+            }
+        } else {
+            b = alpha - TAU;
+            while (f.apply(b) > 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
+                b -= TAU;
+                bracketIterations++;
             }
         }
-
-        // Convert to ELO ratings
-        Map<String, Double> result = new HashMap<>();
-        for (Map.Entry<String, Rating> entry : ratings.entrySet()) {
-            result.put(entry.getKey(), entry.getValue().getElo());
+        
+        double fa = f.apply(a);
+        double fb = f.apply(b);
+        
+        // Iterate to find root with safety limits
+        int iterations = 0;
+        final int MAX_ITERATIONS = 1000;
+        
+        while (Math.abs(b - a) > CONVERGENCE_TOLERANCE && iterations < MAX_ITERATIONS) {
+            // Check for division by zero
+            if (Math.abs(fb - fa) < 1e-10) {
+                // Values too close, return current best estimate
+                return Math.exp(a / 2.0);
+            }
+            
+            double c = a + (a - b) * fa / (fb - fa);
+            double fc = f.apply(c);
+            
+            if (fc * fb < 0) {
+                a = b;
+                fa = fb;
+            } else {
+                fa = fa / 2.0;
+            }
+            
+            b = c;
+            fb = fc;
+            iterations++;
         }
+        
+        // If max iterations reached, log warning and return best estimate
+        if (iterations >= MAX_ITERATIONS) {
+            System.err.println("Warning: calculateNewVolatility reached max iterations. Returning best estimate.");
+        }
+        
+        return Math.exp(a / 2.0);
+    }
+    
+    /**
+     * Helper class to store opponent data for calculations
+     */
+    private static class OpponentData {
+        double rating;
+        double rd;
+        double outcome;
+        
+        OpponentData(double rating, double rd, double outcome) {
+            this.rating = rating;
+            this.rd = rd;
+            this.outcome = outcome;
+        }
+    }
+    
+    /**
+     * Updates a player's Glicko-2 rating after a rating period
+     * 
+     * @param currentRating Current rating state
+     * @param opponents List of opponents faced with their ratings and outcomes
+     * @return Updated rating state
+     */
+    private static Glicko2Rating updateGlicko2Rating(Glicko2Rating currentRating, List<OpponentData> opponents) {
+        // If no games played, increase RD due to inactivity
+        if (opponents.isEmpty()) {
+            double newRd = Math.sqrt(currentRating.rd * currentRating.rd + currentRating.volatility * currentRating.volatility);
+            return new Glicko2Rating(currentRating.rating, Math.min(newRd, DEFAULT_RD), currentRating.volatility);
+        }
+        
+        // Step 1: Calculate variance v
+        double v = calculateVariance(currentRating.rating, opponents);
+        
+        // Step 2: Calculate delta Δ
+        double delta = calculateDelta(currentRating.rating, v, opponents);
+        
+        // Step 3: Calculate new volatility σ'
+        double newVolatility = calculateNewVolatility(currentRating.rd, currentRating.volatility, v, delta);
+        
+        // Step 4: Calculate new RD φ* (convert to Glicko-2 scale)
+        double rdScaled = currentRating.rd / GLICKO2_SCALE;
+        double phiStar = Math.sqrt(rdScaled * rdScaled + newVolatility * newVolatility);
+        
+        // Step 5: Calculate new RD φ' 
+        // Note: v is already in Glicko-2 scale from calculateVariance
+        double newRdScaled = 1.0 / Math.sqrt(1.0 / (phiStar * phiStar) + 1.0 / v);
+        double newRd = newRdScaled * GLICKO2_SCALE;
+        
+        // Step 6: Calculate new rating μ' (rating change on regular scale)
+        double ratingChange = 0.0;
+        for (OpponentData opp : opponents) {
+            double gPhi = g(opp.rd);
+            double e = expectedOutcome(currentRating.rating, opp.rating, opp.rd);
+            ratingChange += gPhi * (opp.outcome - e);
+        }
+        double newRating = currentRating.rating + (newRdScaled * newRdScaled) * ratingChange * GLICKO2_SCALE;
+        
+        // DEBUG: First call only
+        if (DEBUG_FIRST_UPDATE) {
+            DEBUG_FIRST_UPDATE = false;
+            System.out.println("DEBUG updateGlicko2Rating (FIXED v2):");
+            System.out.println("  Current: rating=" + currentRating.rating + ", rd=" + currentRating.rd);
+            System.out.println("  Opponents: " + opponents.size());
+            System.out.println("  Variance v (Glicko-2 scale): " + v);
+            System.out.println("  Delta: " + delta);
+            System.out.println("  New volatility: " + newVolatility);
+            System.out.println("  RD scaled: " + rdScaled);
+            System.out.println("  PhiStar: " + phiStar);
+            System.out.println("  New RD scaled: " + newRdScaled);
+            System.out.println("  New RD (unscaled): " + newRd);
+            System.out.println("  RatingChange sum: " + ratingChange);
+            System.out.println("  Rating change: " + ((newRdScaled * newRdScaled) * ratingChange * GLICKO2_SCALE));
+            System.out.println("  New rating: " + newRating);
+        }
+        
+        return new Glicko2Rating(newRating, newRd, newVolatility);
+    }
+    
+    private static boolean DEBUG_FIRST_UPDATE = true;
+    
+    /**
+     * Calculates TrueElo using Glicko-2 with binary win/loss outcomes
+     * Processes games sequentially by round
+     * 
+     * @param allGames List of all games across all rounds
+     * @param playerNames Set of all player names
+     * @param initialRatings Map of player -> initial Glicko2Rating
+     * @param roundSequence Ordered list of round names
+     * @return Glicko2Result containing ratings for all players at each round
+     */
+    public static Glicko2Result calculateGlicko2TrueElo(
+            List<Game> allGames,
+            Set<String> playerNames,
+            Map<String, Glicko2Rating> initialRatings,
+            List<String> roundSequence) {
+        
+        Glicko2Result result = new Glicko2Result();
+        
+        // Initialize current ratings (ensure lowercase keys for consistency)
+        Map<String, Glicko2Rating> currentRatings = new HashMap<>();
+        for (String player : playerNames) {
+            String playerKey = player.toLowerCase();
+            currentRatings.put(playerKey, initialRatings.getOrDefault(playerKey, new Glicko2Rating()));
+        }
+        
+        // Group games by round
+        Map<String, List<Game>> gamesByRound = new HashMap<>();
+        for (Game game : allGames) {
+            gamesByRound.computeIfAbsent(game.roundName, k -> new ArrayList<>()).add(game);
+        }
+        
+        // Process each round sequentially
+        for (String round : roundSequence) {
+            List<Game> roundGames = gamesByRound.getOrDefault(round, new ArrayList<>());
+            
+            System.out.println("DEBUG EloCalculator: Processing round " + round);
+            System.out.println("  - Games in this round: " + roundGames.size());
+            
+            // Build opponent data for each player in this round
+            Map<String, List<OpponentData>> playerOpponents = new HashMap<>();
+            
+            for (Game game : roundGames) {
+                // Player 1's perspective
+                String player1Key = game.player1.toLowerCase();
+                String player2Key = game.player2.toLowerCase();
+                
+                Glicko2Rating opp2Rating = currentRatings.get(player2Key);
+                if (opp2Rating != null) {
+                    playerOpponents.computeIfAbsent(player1Key, k -> new ArrayList<>())
+                        .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
+                } else {
+                    System.err.println("WARNING: Could not find rating for player2: " + game.player2 + " (key: " + player2Key + ")");
+                }
+                
+                // Player 2's perspective
+                Glicko2Rating opp1Rating = currentRatings.get(player1Key);
+                if (opp1Rating != null) {
+                    playerOpponents.computeIfAbsent(player2Key, k -> new ArrayList<>())
+                        .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
+                } else {
+                    System.err.println("WARNING: Could not find rating for player1: " + game.player1 + " (key: " + player1Key + ")");
+                }
+            }
+            
+            System.out.println("  - Players with opponents: " + playerOpponents.size());
+            if (!playerOpponents.isEmpty()) {
+                String firstPlayer = playerOpponents.keySet().iterator().next();
+                System.out.println("  - Sample: " + firstPlayer + " has " + playerOpponents.get(firstPlayer).size() + " opponents");
+            }
+            
+            // Update all player ratings for this round
+            Map<String, Glicko2Rating> newRatings = new HashMap<>();
+            int changedCount = 0;
+            for (String player : playerNames) {
+                String playerKey = player.toLowerCase();
+                Glicko2Rating currentRating = currentRatings.get(playerKey);
+                List<OpponentData> opponents = playerOpponents.getOrDefault(playerKey, new ArrayList<>());
+                
+                Glicko2Rating newRating = updateGlicko2Rating(currentRating, opponents);
+                newRatings.put(playerKey, newRating);
+                
+                if (Math.abs(newRating.rating - currentRating.rating) > 0.1) {
+                    changedCount++;
+                }
+            }
+            
+            System.out.println("  - Players with rating changes: " + changedCount + " / " + playerNames.size());
+            if (changedCount > 0) {
+                // Show a sample
+                for (String player : playerNames) {
+                    String playerKey = player.toLowerCase();
+                    Glicko2Rating oldR = currentRatings.get(playerKey);
+                    Glicko2Rating newR = newRatings.get(playerKey);
+                    if (Math.abs(newR.rating - oldR.rating) > 0.1) {
+                        System.out.println("    Sample: " + playerKey + " : " + 
+                            String.format("%.1f -> %.1f (RD: %.1f -> %.1f)", 
+                                oldR.rating, newR.rating, oldR.rd, newR.rd));
+                        break;
+                    }
+                }
+            }
+            
+            // Store ratings for this round
+            result.ratingsByRound.put(round, new HashMap<>(newRatings));
+            
+            // Update current ratings for next round
+            currentRatings = newRatings;
+        }
+        
         return result;
     }
-
+    
     /**
-     * Calculates PerfElo using WHR with performance scores based on point margin
-     * @param games List of all games with performance scores
+     * Calculates PerfElo using Glicko-2 with sigmoid-transformed point margins
+     * Uses continuous outcome values based on quality of win
+     * 
+     * @param allGames List of all games with point margins
      * @param playerNames Set of all player names
-     * @param previousElos Map of player names to their previous PerfElo ratings
-     * @return Map of player names to their new PerfElo ratings
+     * @param initialRatings Map of player -> initial Glicko2Rating
+     * @param roundSequence Ordered list of round names
+     * @return Glicko2Result containing ratings for all players at each round
      */
-    public static Map<String, Double> calculatePerfElo(List<Game> games, Set<String> playerNames, Map<String, Double> previousElos) {
-        // Same algorithm as TrueElo, but games already contain performance scores instead of binary scores
-        return calculateTrueElo(games, playerNames, previousElos);
-    }
-
-    /**
-     * Converts a point margin to a performance score using logistic mapping
-     * @param pointMargin The margin of victory (positive for win, negative for loss)
-     * @param k Steepness parameter (default 0.04 gives good spread)
-     * @return Performance score between 0 and 1
-     */
-    public static double pointMarginToPerformanceScore(double pointMargin, double k) {
-        // S' = 1 / (1 + e^(-k * (M)))
-        // Note: Komi is already accounted for in pointMargin from CSV
-        return 1.0 / (1.0 + Math.exp(-k * pointMargin));
-    }
-
-    /**
-     * Converts a point margin to a performance score using default steepness
-     * @param pointMargin The margin of victory
-     * @return Performance score between 0 and 1
-     */
-    public static double pointMarginToPerformanceScore(double pointMargin) {
-        return pointMarginToPerformanceScore(pointMargin, 0.05);
-    }
-
-    /**
-     * Single iteration of WHR algorithm using Newton-Raphson method
-     * @param ratings Current ratings map
-     * @param games List of all games
-     * @return true if converged, false otherwise
-     */
-    private static boolean updateRatingsIteration(Map<String, Rating> ratings, List<Game> games) {
-        boolean converged = true;
-
-        for (Map.Entry<String, Rating> entry : ratings.entrySet()) {
-            String player = entry.getKey();
-            Rating rating = entry.getValue();
-            
-            double oldR = rating.r;
-
-            // Compute gradient and hessian
-            double gradient = -rating.r / rating.uncertainty;
-            double hessian = -1.0 / rating.uncertainty;
-
-            for (Game game : games) {
-                String opponent;
-                double score;
-                
-                if (game.player1.equals(player)) {
-                    opponent = game.player2;
-                    score = game.score;
-                } else if (game.player2.equals(player)) {
-                    opponent = game.player1;
-                    score = 1.0 - game.score;
-                } else {
-                    continue;
-                }
-
-                Rating opponentRating = ratings.get(opponent);
-                if (opponentRating == null) continue;
-
-                double prob = winProbability(rating.r, opponentRating.r);
-                
-                gradient += score - prob;
-                hessian -= prob * (1.0 - prob);
-            }
-
-            // Newton-Raphson update
-            if (Math.abs(hessian) > 1e-10) {
-                double delta = -gradient / hessian;
-                rating.r = oldR + delta;
-
-                if (Math.abs(delta) > CONVERGENCE_THRESHOLD) {
-                    converged = false;
-                }
-            }
+    public static Glicko2Result calculateGlicko2PerfElo(
+            List<Game> allGames,
+            Set<String> playerNames,
+            Map<String, Glicko2Rating> initialRatings,
+            List<String> roundSequence) {
+        
+        // Transform games to use sigmoid outcomes
+        List<Game> transformedGames = new ArrayList<>();
+        for (Game game : allGames) {
+            double sigmoidOutcome = pointMarginToOutcome(game.pointMargin);
+            transformedGames.add(new Game(game.player1, game.player2, sigmoidOutcome, game.pointMargin, game.roundName));
         }
-
-        return converged;
+        
+        // Use same calculation as TrueElo but with transformed outcomes
+        return calculateGlicko2TrueElo(transformedGames, playerNames, initialRatings, roundSequence);
     }
-
+    
     /**
-     * Calculates win probability using Bradley-Terry model
-     * @param r1 Natural rating of player 1
-     * @param r2 Natural rating of player 2
-     * @return Probability of player 1 winning
-     */
-    private static double winProbability(double r1, double r2) {
-        return 1.0 / (1.0 + Math.exp(-(r1 - r2) / 100.0));
-    }
-
-    /**
-     * Converts round name to time step number for WHR
-     * @param roundName Round name (e.g., "1", "2", "t16", "t8")
-     * @return Time step number
+     * Converts round name to time step number (for compatibility)
      */
     public static int roundNameToTimeStep(String roundName) {
         roundName = roundName.toLowerCase().replace("round_", "").replace(".csv", "");
@@ -202,11 +452,9 @@ public class EloCalculator {
             default: return 0;
         }
     }
-
+    
     /**
-     * Converts time step number back to round name
-     * @param timeStep Time step number
-     * @return Round name
+     * Converts time step number back to round name (for compatibility)
      */
     public static String timeStepToRoundName(int timeStep) {
         switch (timeStep) {
@@ -223,194 +471,9 @@ public class EloCalculator {
             default: return "unknown";
         }
     }
-
-    /**
-     * Calculates Whole-History Rating across multiple rounds
-     * This method processes ALL games together and returns ratings for each round/player,
-     * implementing true WHR where adding new games updates ALL historical ratings
-     * 
-     * @param games List of all games across all rounds
-     * @param playerNames Set of all player names
-     * @param initialElos Initial ELO ratings (baseTrueElo/basePerfElo)
-     * @param roundSequence List of round names in order
-     * @param maxRoundIndex Maximum round index to calculate (0-based)
-     * @return Map of round name -> (player name -> ELO rating)
-     */
-    public static Map<String, Map<String, Double>> calculateWholeHistoryRating(
-            List<Game> games, 
-            Set<String> playerNames, 
-            Map<String, Double> initialElos,
-            List<String> roundSequence,
-            int maxRoundIndex) {
-        
-        // Group games by time step
-        Map<Integer, List<Game>> gamesByTimeStep = new HashMap<>();
-        for (Game game : games) {
-            gamesByTimeStep.computeIfAbsent(game.timeStep, k -> new ArrayList<>()).add(game);
-        }
-        
-        // Initialize ratings for each player at each time step
-        Map<String, Map<Integer, Rating>> ratingHistory = new HashMap<>();
-        for (String player : playerNames) {
-            Map<Integer, Rating> history = new HashMap<>();
-            double initialR = initialElos.getOrDefault(player, DEFAULT_ELO) - DEFAULT_ELO;
-            
-            // Create rating entry for each time step where player has games
-            for (int timeStep : gamesByTimeStep.keySet()) {
-                for (Game game : gamesByTimeStep.get(timeStep)) {
-                    if (game.player1.equals(player) || game.player2.equals(player)) {
-                        history.put(timeStep, new Rating(initialR, W2));
-                        break;
-                    }
-                }
-            }
-            
-            if (!history.isEmpty()) {
-                ratingHistory.put(player, history);
-            }
-        }
-        
-        // Run WHR algorithm with temporal links
-        for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
-            boolean converged = updateWholeHistoryIteration(ratingHistory, gamesByTimeStep);
-            if (converged) {
-                break;
-            }
-        }
-        
-        // Convert to output format: round name -> player -> ELO
-        Map<String, Map<String, Double>> result = new HashMap<>();
-        for (int i = 0; i <= maxRoundIndex; i++) {
-            String roundName = roundSequence.get(i);
-            int timeStep = roundNameToTimeStep(roundName);
-            Map<String, Double> roundElos = new HashMap<>();
-            
-            for (Map.Entry<String, Map<Integer, Rating>> entry : ratingHistory.entrySet()) {
-                String player = entry.getKey();
-                Map<Integer, Rating> history = entry.getValue();
-                Rating rating = history.get(timeStep);
-                
-                if (rating != null) {
-                    roundElos.put(player, rating.getElo());
-                } else {
-                    // Player didn't play this round, use most recent rating
-                    Double mostRecent = null;
-                    for (int t = timeStep - 1; t >= 1; t--) {
-                        if (history.containsKey(t)) {
-                            mostRecent = history.get(t).getElo();
-                            break;
-                        }
-                    }
-                    if (mostRecent == null) {
-                        mostRecent = initialElos.getOrDefault(player, DEFAULT_ELO);
-                    }
-                    roundElos.put(player, mostRecent);
-                }
-            }
-            
-            result.put(roundName, roundElos);
-        }
-        
-        return result;
-    }
-
-    /**
-     * Single iteration of WHR with temporal links between time steps
-     */
-    private static boolean updateWholeHistoryIteration(
-            Map<String, Map<Integer, Rating>> ratingHistory,
-            Map<Integer, List<Game>> gamesByTimeStep) {
-        
-        boolean converged = true;
-        
-        for (Map.Entry<String, Map<Integer, Rating>> playerEntry : ratingHistory.entrySet()) {
-            String player = playerEntry.getKey();
-            Map<Integer, Rating> history = playerEntry.getValue();
-            
-            // Get sorted time steps for this player
-            List<Integer> timeSteps = new ArrayList<>(history.keySet());
-            Collections.sort(timeSteps);
-            
-            for (int i = 0; i < timeSteps.size(); i++) {
-                int timeStep = timeSteps.get(i);
-                Rating rating = history.get(timeStep);
-                double oldR = rating.r;
-                
-                // Compute gradient and hessian
-                double gradient = 0.0;
-                double hessian = 0.0;
-                
-                // Prior term (pull towards initial rating or previous time step)
-                if (i == 0) {
-                    // First time step: prior pulls towards 0 (DEFAULT_ELO)
-                    gradient = -rating.r / rating.uncertainty;
-                    hessian = -1.0 / rating.uncertainty;
-                } else {
-                    // Temporal link to previous time step
-                    int prevTimeStep = timeSteps.get(i - 1);
-                    Rating prevRating = history.get(prevTimeStep);
-                    double diff = rating.r - prevRating.r;
-                    gradient = -diff / W2;
-                    hessian = -1.0 / W2;
-                }
-                
-                // Link to next time step
-                if (i < timeSteps.size() - 1) {
-                    int nextTimeStep = timeSteps.get(i + 1);
-                    Rating nextRating = history.get(nextTimeStep);
-                    double diff = nextRating.r - rating.r;
-                    gradient += -diff / W2;
-                    hessian += -1.0 / W2;
-                }
-                
-                // Game results at this time step
-                List<Game> games = gamesByTimeStep.get(timeStep);
-                if (games != null) {
-                    for (Game game : games) {
-                        String opponent;
-                        double score;
-                        
-                        if (game.player1.equals(player)) {
-                            opponent = game.player2;
-                            score = game.score;
-                        } else if (game.player2.equals(player)) {
-                            opponent = game.player1;
-                            score = 1.0 - game.score;
-                        } else {
-                            continue;
-                        }
-                        
-                        Map<Integer, Rating> oppHistory = ratingHistory.get(opponent);
-                        if (oppHistory == null) continue;
-                        
-                        Rating oppRating = oppHistory.get(timeStep);
-                        if (oppRating == null) continue;
-                        
-                        double prob = winProbability(rating.r, oppRating.r);
-                        gradient += score - prob;
-                        hessian -= prob * (1.0 - prob);
-                    }
-                }
-                
-                // Newton-Raphson update
-                if (Math.abs(hessian) > 1e-10) {
-                    double delta = -gradient / hessian;
-                    rating.r = oldR + delta;
-                    
-                    if (Math.abs(delta) > CONVERGENCE_THRESHOLD) {
-                        converged = false;
-                    }
-                }
-            }
-        }
-        
-        return converged;
-    }
-
+    
     /**
      * Gets the previous round column name for database queries
-     * @param currentRound Current round name
-     * @return Previous round column name, or null if this is round 1
      */
     public static String getPreviousRound(String currentRound) {
         int timeStep = roundNameToTimeStep(currentRound);

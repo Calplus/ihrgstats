@@ -36,6 +36,7 @@ public class TelegramListener {
     private String botToken;
     private String publicChatId;
     private String publicChatIdFileupload;
+    private String devChatId;  // The dev chat ID for status messages
     private String publicChatIdStatus;
     private String publicChatIdCommands;
     private String adminUserId;
@@ -90,6 +91,7 @@ public class TelegramListener {
             this.botToken = PropertyResolver.getProperty("telegram.bot.token", "");
             this.publicChatId = PropertyResolver.getProperty("telegram.publicChatId", "");
             this.publicChatIdFileupload = PropertyResolver.getProperty("telegram.publicChatId.fileupload", "");
+            this.devChatId = PropertyResolver.getProperty("telegram.devChatId", "");  // Load dev chat ID
             this.publicChatIdStatus = PropertyResolver.getProperty("telegram.devChatId.status", "");
             this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
             this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
@@ -856,8 +858,13 @@ public class TelegramListener {
      * Starts the status heartbeat that sends a message every 5 minutes
      */
     private void startStatusHeartbeat() {
+        if (devChatId == null || devChatId.isEmpty()) {
+            System.out.println("Dev chat ID not configured, heartbeat disabled");
+            return;
+        }
+        
         if (publicChatIdStatus == null || publicChatIdStatus.isEmpty()) {
-            System.out.println("Status chat ID not configured, heartbeat disabled");
+            System.out.println("Status thread ID not configured, heartbeat disabled");
             return;
         }
 
@@ -869,7 +876,7 @@ public class TelegramListener {
             } catch (Exception e) {
                 System.err.println("Error sending status heartbeat: " + e.getMessage());
             }
-        }, 0, STATUS_HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);  // Changed initial delay to 0
+        }, 0, STATUS_HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
         System.out.println("Status heartbeat started (5 minute interval, first message sending now)");
     }
@@ -894,7 +901,7 @@ public class TelegramListener {
      * Sends a fatal error message to status chat and stops the bot
      */
     private void sendFatalErrorAndStop(String errorMessage) {
-        if (publicChatIdStatus != null && !publicChatIdStatus.isEmpty()) {
+        if (devChatId != null && !devChatId.isEmpty()) {
             String message = formatStatusMessage("🔴", "ERROR", "Fatal error: " + errorMessage + " - Bot shutting down");
             sendMessageToStatusChat(message);
         }
@@ -906,20 +913,25 @@ public class TelegramListener {
      */
     private void sendMessageToStatusChat(String message) {
         try {
-            if (publicChatId == null || publicChatId.isEmpty()) {
-                System.err.println("Cannot send status message: publicChatId is empty or null");
+            if (devChatId == null || devChatId.isEmpty()) {
+                System.err.println("Cannot send status message: devChatId is empty or null");
                 return;
             }
             
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             
             JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", publicChatId);
+            payload.addProperty("chat_id", devChatId);  // Use devChatId, not publicChatId!
             payload.addProperty("text", message);
             
-            // Add status thread ID if specified
+            // Add status thread ID if specified (convert to integer)
             if (publicChatIdStatus != null && !publicChatIdStatus.isEmpty()) {
-                payload.addProperty("message_thread_id", publicChatIdStatus);
+                try {
+                    int threadId = Integer.parseInt(publicChatIdStatus);
+                    payload.addProperty("message_thread_id", threadId);  // Pass as integer, not string
+                } catch (NumberFormatException e) {
+                    System.err.println("Invalid thread ID format: " + publicChatIdStatus + " - sending without thread ID");
+                }
             }
             
             HttpRequest request = HttpRequest.newBuilder()
@@ -932,9 +944,12 @@ public class TelegramListener {
             
             if (response.statusCode() != 200) {
                 System.err.println("Failed to send status message (HTTP " + response.statusCode() + "): " + response.body());
+            } else {
+                System.out.println("Status heartbeat sent successfully to chat " + devChatId + " thread " + publicChatIdStatus);
             }
         } catch (Exception e) {
             System.err.println("Error sending status message: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

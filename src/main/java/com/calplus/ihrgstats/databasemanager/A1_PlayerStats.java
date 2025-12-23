@@ -123,9 +123,23 @@ public class A1_PlayerStats {
         boolean capped;
         Integer baseTrueElo;
         Integer basePerfElo;
+        
+        // Glicko-2 base parameters
+        Double baseRdTrueElo;
+        Double baseVolTrueElo;
+        Double baseRdPerfElo;
+        Double baseVolPerfElo;
+        
         String dateLogged;
         Map<String, Integer> trueEloByRound = new HashMap<>();
         Map<String, Integer> perfEloByRound = new HashMap<>();
+        
+        // Glicko-2 parameters by round
+        Map<String, Double> rdTrueEloByRound = new HashMap<>();
+        Map<String, Double> volTrueEloByRound = new HashMap<>();
+        Map<String, Double> rdPerfEloByRound = new HashMap<>();
+        Map<String, Double> volPerfEloByRound = new HashMap<>();
+        
         Map<String, Integer> seatByRound = new HashMap<>();
         Map<String, String> oppHallByRound = new HashMap<>();
         Map<String, String> oppNameByRound = new HashMap<>();
@@ -213,11 +227,11 @@ public class A1_PlayerStats {
         // Check if this round was already processed (re-upload detection)
         if (!dbPlayers.isEmpty() && isRoundAlreadyProcessed(roundName, dbPlayers)) {
             String warningMsg = String.format(
-                "WARNING: round_%s has already been processed!\\n\\n" +
-                "If you continue:\\n" +
-                "- Round %s will be reprocessed with the new data\\n" +
-                "- ALL rounds after round %s will be DELETED\\n" +
-                "- You will need to re-upload those rounds again\\n\\n" +
+                "WARNING: round_%s has already been processed!\n\n" +
+                "If you continue:\n" +
+                "- Round %s will be reprocessed with the new data\n" +
+                "- ALL rounds after round %s will be DELETED\n" +
+                "- You will need to re-upload those rounds again\n\n" +
                 "Do you want to continue and reprocess this round? (yes/no)",
                 roundName, roundName, roundName
             );
@@ -803,6 +817,13 @@ public class A1_PlayerStats {
                     player.capped = rs.getInt("capped") == 1; // SQLite boolean as 0/1
                     player.baseTrueElo = (Integer) rs.getObject("baseTrueElo");
                     player.basePerfElo = (Integer) rs.getObject("basePerfElo");
+                    
+                    // Load Glicko-2 base parameters
+                    player.baseRdTrueElo = (Double) rs.getObject("baseRdTrueElo");
+                    player.baseVolTrueElo = (Double) rs.getObject("baseVolTrueElo");
+                    player.baseRdPerfElo = (Double) rs.getObject("baseRdPerfElo");
+                    player.baseVolPerfElo = (Double) rs.getObject("baseVolPerfElo");
+                    
                     player.dateLogged = rs.getString("dateLogged");
                     player.existsInDb = true;
 
@@ -810,6 +831,10 @@ public class A1_PlayerStats {
                     for (String round : ROUND_SEQUENCE) {
                         String trueEloCol = getRoundColumnName("trueElo", round);
                         String perfEloCol = getRoundColumnName("perfElo", round);
+                        String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
+                        String volTrueEloCol = getRoundColumnName("volTrueElo", round);
+                        String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
+                        String volPerfEloCol = getRoundColumnName("volPerfElo", round);
                         String seatCol = getRoundColumnName("seat", round);
                         String oppHallCol = getRoundColumnName("oppHall", round);
                         String oppNameCol = getRoundColumnName("oppName", round);
@@ -818,6 +843,10 @@ public class A1_PlayerStats {
 
                         player.trueEloByRound.put(round, (Integer) rs.getObject(trueEloCol));
                         player.perfEloByRound.put(round, (Integer) rs.getObject(perfEloCol));
+                        player.rdTrueEloByRound.put(round, (Double) rs.getObject(rdTrueEloCol));
+                        player.volTrueEloByRound.put(round, (Double) rs.getObject(volTrueEloCol));
+                        player.rdPerfEloByRound.put(round, (Double) rs.getObject(rdPerfEloCol));
+                        player.volPerfEloByRound.put(round, (Double) rs.getObject(volPerfEloCol));
                         player.seatByRound.put(round, (Integer) rs.getObject(seatCol));
                         player.oppHallByRound.put(round, rs.getString(oppHallCol));
                         player.oppNameByRound.put(round, rs.getString(oppNameCol));
@@ -1230,212 +1259,273 @@ public class A1_PlayerStats {
     }
 
     /**
-     * Calculates ELO ratings for all players using true Whole-History Rating
-     * This method reconstructs ALL previous games and recalculates ratings for ALL rounds,
-     * not just the current round, as per WHR algorithm design.
+     * Calculates ELO ratings for all players using Glicko-2 algorithm
+     * Processes rounds sequentially, updating ratings after each round
      */
     private void calculateEloRatings(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, 
                                      Map<String, PlayerStats> dbPlayers, String roundName) {
         
         int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
         
-        // Step 1: Reconstruct ALL games from round 1 up to current round
-        List<EloCalculator.Game> allTrueEloGames = new ArrayList<>();
-        List<EloCalculator.Game> allPerfEloGames = new ArrayList<>();
-        Map<String, Map<String, GameEntry>> gamesByRound = new HashMap<>(); // round -> (player -> GameEntry)
+        // Step 1: Collect all unique players
+        Set<String> allPlayers = new HashSet<>();
+        allPlayers.addAll(csvPlayers.keySet());
+        for (PlayerStats dbPlayer : dbPlayers.values()) {
+            allPlayers.add(dbPlayer.name.toLowerCase());
+        }
         
-        // Add current round's games
-        gamesByRound.put(roundName, extractGamesForRound(games, csvPlayers, roundName));
+        // Step 2: Initialize Glicko-2 ratings for all players
+        Map<String, EloCalculator.Glicko2Rating> currentTrueRatings = new HashMap<>();
+        Map<String, EloCalculator.Glicko2Rating> currentPerfRatings = new HashMap<>();
+        
+        for (String playerKey : allPlayers) {
+            PlayerStats dbPlayer = dbPlayers.get(playerKey);
+            
+            // Initialize TrueElo rating
+            if (dbPlayer != null && dbPlayer.baseRdTrueElo != null && dbPlayer.baseVolTrueElo != null) {
+                double rating = dbPlayer.baseTrueElo != null ? dbPlayer.baseTrueElo.doubleValue() : 1000.0;
+                currentTrueRatings.put(playerKey, new EloCalculator.Glicko2Rating(
+                    rating, dbPlayer.baseRdTrueElo, dbPlayer.baseVolTrueElo));
+            } else {
+                double rating = dbPlayer != null && dbPlayer.baseTrueElo != null ? 
+                    dbPlayer.baseTrueElo.doubleValue() : 1000.0;
+                currentTrueRatings.put(playerKey, new EloCalculator.Glicko2Rating(rating, 350.0, 0.06));
+            }
+            
+            // Initialize PerfElo rating
+            if (perfEloEnabled) {
+                if (dbPlayer != null && dbPlayer.baseRdPerfElo != null && dbPlayer.baseVolPerfElo != null) {
+                    double rating = dbPlayer.basePerfElo != null ? dbPlayer.basePerfElo.doubleValue() : 1000.0;
+                    currentPerfRatings.put(playerKey, new EloCalculator.Glicko2Rating(
+                        rating, dbPlayer.baseRdPerfElo, dbPlayer.baseVolPerfElo));
+                } else {
+                    double rating = dbPlayer != null && dbPlayer.basePerfElo != null ? 
+                        dbPlayer.basePerfElo.doubleValue() : 1000.0;
+                    currentPerfRatings.put(playerKey, new EloCalculator.Glicko2Rating(rating, 350.0, 0.06));
+                }
+            }
+        }
+        
+        // Step 3: Reconstruct games for all rounds up to current
+        Map<String, List<EloCalculator.Game>> gamesByRound = new HashMap<>();
         
         // Reconstruct previous rounds' games from database
         for (int i = 0; i < currentRoundIndex; i++) {
             String pastRound = ROUND_SEQUENCE.get(i);
             Map<String, GameEntry> pastGames = reconstructGamesFromDatabase(dbPlayers, pastRound);
-            if (!pastGames.isEmpty()) {
-                gamesByRound.put(pastRound, pastGames);
-            }
-        }
-        
-        // Step 2: Collect all unique players across all rounds
-        Set<String> allPlayers = new HashSet<>();
-        for (Map<String, GameEntry> roundGames : gamesByRound.values()) {
-            for (GameEntry game : roundGames.values()) {
-                if (!game.name1.equalsIgnoreCase("WALKOVER")) {
-                    allPlayers.add(game.name1.toLowerCase());
-                }
-                if (!game.name2.equalsIgnoreCase("WALKOVER")) {
-                    allPlayers.add(game.name2.toLowerCase());
-                }
-            }
-        }
-        
-        // Include players from CSV that might not have opponents recorded yet
-        allPlayers.addAll(csvPlayers.keySet());
-        
-        // Step 3: Build complete game list for WHR calculator
-        for (int i = 0; i <= currentRoundIndex; i++) {
-            String round = ROUND_SEQUENCE.get(i);
-            Map<String, GameEntry> roundGames = gamesByRound.get(round);
-            if (roundGames == null) continue;
             
-            int timeStep = EloCalculator.roundNameToTimeStep(round);
+            List<EloCalculator.Game> trueGames = new ArrayList<>();
+            List<EloCalculator.Game> perfGames = new ArrayList<>();
             
-            for (GameEntry game : roundGames.values()) {
-                // Skip walkovers for ELO calculation
+            for (GameEntry game : pastGames.values()) {
                 if (game.name1.equalsIgnoreCase("WALKOVER") || game.name2.equalsIgnoreCase("WALKOVER")) {
                     continue;
                 }
-
+                
                 String player1Key = game.name1.toLowerCase();
                 String player2Key = game.name2.toLowerCase();
-
+                
                 // Determine winner and point margin
                 boolean player1Won;
-                boolean player2Won;
                 double pointMargin = 0.0;
                 
-                // Check if both winby columns are filled with "0" or "1"
                 if (!game.winby1.isEmpty() && !game.winby2.isEmpty() && 
                     (game.winby1.equals("0") || game.winby1.equals("1")) && 
                     (game.winby2.equals("0") || game.winby2.equals("1"))) {
-                    // Binary win/loss mode: "1" = win, "0" = loss
                     player1Won = game.winby1.equals("1");
-                    player2Won = game.winby2.equals("1");
-                    pointMargin = 0.0; // No point margin in binary mode
                 } else {
-                    // Traditional mode: filled = won, empty = lost
                     player1Won = !game.winby1.isEmpty();
-                    player2Won = !game.winby2.isEmpty();
-                    
-                    // Calculate point margin for PerfElo
                     if (player1Won && !game.winby1.isEmpty()) {
-                        try {
-                            pointMargin = Double.parseDouble(game.winby1);
-                        } catch (NumberFormatException e) {
-                            pointMargin = 0.0;
-                        }
-                    } else if (player2Won && !game.winby2.isEmpty()) {
-                        try {
-                            pointMargin = -Double.parseDouble(game.winby2);
-                        } catch (NumberFormatException e) {
-                            pointMargin = 0.0;
-                        }
-                    }
-                }
-
-                // TrueElo: Binary win/loss
-                double trueScore1 = player1Won ? 1.0 : 0.0;
-                allTrueEloGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore1, timeStep));
-
-                // PerfElo: Performance score based on point margin
-                if (perfEloEnabled) {
-                    double perfScore = EloCalculator.pointMarginToPerformanceScore(pointMargin);
-                    allPerfEloGames.add(new EloCalculator.Game(player1Key, player2Key, perfScore, timeStep));
-                }
-            }
-        }
-        
-        // Step 4: Get initial ELO ratings (only baseTrueElo/basePerfElo, not from previous rounds)
-        Map<String, Double> initialTrueElos = new HashMap<>();
-        Map<String, Double> initialPerfElos = new HashMap<>();
-
-        for (String playerKey : allPlayers) {
-            PlayerStats dbPlayer = dbPlayers.get(playerKey);
-
-            double initTrueElo = 1000.0;
-            double initPerfElo = 1000.0;
-
-            if (dbPlayer != null) {
-                if (dbPlayer.baseTrueElo != null) {
-                    initTrueElo = dbPlayer.baseTrueElo.doubleValue();
-                }
-                if (perfEloEnabled && dbPlayer.basePerfElo != null) {
-                    initPerfElo = dbPlayer.basePerfElo.doubleValue();
-                }
-            }
-
-            initialTrueElos.put(playerKey, initTrueElo);
-            initialPerfElos.put(playerKey, initPerfElo);
-        }
-
-        // Step 5: Run WHR algorithm on ALL games to get ratings at each time step
-        Map<String, Map<String, Double>> trueElosByRound = EloCalculator.calculateWholeHistoryRating(
-            allTrueEloGames, allPlayers, initialTrueElos, ROUND_SEQUENCE, currentRoundIndex);
-        
-        Map<String, Map<String, Double>> perfElosByRound = null;
-        if (perfEloEnabled) {
-            perfElosByRound = EloCalculator.calculateWholeHistoryRating(
-                allPerfEloGames, allPlayers, initialPerfElos, ROUND_SEQUENCE, currentRoundIndex);
-        }
-        
-        // Step 6: Update ALL rounds' ELO values in csvPlayers and dbPlayers
-        for (int i = 0; i <= currentRoundIndex; i++) {
-            String round = ROUND_SEQUENCE.get(i);
-            Map<String, Double> roundTrueElos = trueElosByRound.get(round);
-            Map<String, Double> roundPerfElos = perfEloEnabled ? perfElosByRound.get(round) : null;
-            
-            for (String playerKey : allPlayers) {
-                // Update in csvPlayers if player exists there
-                PlayerStats csvPlayer = csvPlayers.get(playerKey);
-                if (csvPlayer != null) {
-                    if (roundTrueElos != null && roundTrueElos.containsKey(playerKey)) {
-                        csvPlayer.trueEloByRound.put(round, (int) Math.round(roundTrueElos.get(playerKey)));
-                    }
-                    if (perfEloEnabled && roundPerfElos != null && roundPerfElos.containsKey(playerKey)) {
-                        csvPlayer.perfEloByRound.put(round, (int) Math.round(roundPerfElos.get(playerKey)));
-                    } else if (!perfEloEnabled) {
-                        csvPlayer.perfEloByRound.put(round, null);
+                        try { pointMargin = Double.parseDouble(game.winby1); } catch (NumberFormatException e) {}
+                    } else if (!game.winby2.isEmpty()) {
+                        try { pointMargin = -Double.parseDouble(game.winby2); } catch (NumberFormatException e) {}
                     }
                 }
                 
-                // Update in dbPlayers if player exists there (for previous rounds)
-                PlayerStats dbPlayer = dbPlayers.get(playerKey);
-                if (dbPlayer != null && i < currentRoundIndex) { // Only update past rounds in db
-                    if (roundTrueElos != null && roundTrueElos.containsKey(playerKey)) {
-                        dbPlayer.trueEloByRound.put(round, (int) Math.round(roundTrueElos.get(playerKey)));
+                double trueScore = player1Won ? 1.0 : 0.0;
+                trueGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore, pointMargin, pastRound));
+                
+                if (perfEloEnabled) {
+                    perfGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore, pointMargin, pastRound));
+                }
+            }
+            
+            if (!trueGames.isEmpty()) {
+                gamesByRound.put(pastRound, trueGames);
+            }
+        }
+        
+        // Add current round's games
+        List<EloCalculator.Game> currentTrueGames = new ArrayList<>();
+        List<EloCalculator.Game> currentPerfGames = new ArrayList<>();
+        
+        for (GameEntry game : games) {
+            if (game.name1.equalsIgnoreCase("WALKOVER") || game.name2.equalsIgnoreCase("WALKOVER")) {
+                continue;
+            }
+            
+            String player1Key = game.name1.toLowerCase();
+            String player2Key = game.name2.toLowerCase();
+            
+            boolean player1Won;
+            double pointMargin = 0.0;
+            
+            if (!game.winby1.isEmpty() && !game.winby2.isEmpty() && 
+                (game.winby1.equals("0") || game.winby1.equals("1")) && 
+                (game.winby2.equals("0") || game.winby2.equals("1"))) {
+                player1Won = game.winby1.equals("1");
+            } else {
+                player1Won = !game.winby1.isEmpty();
+                if (player1Won && !game.winby1.isEmpty()) {
+                    try { pointMargin = Double.parseDouble(game.winby1); } catch (NumberFormatException e) {}
+                } else if (!game.winby2.isEmpty()) {
+                    try { pointMargin = -Double.parseDouble(game.winby2); } catch (NumberFormatException e) {}
+                }
+            }
+            
+            double trueScore = player1Won ? 1.0 : 0.0;
+            currentTrueGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore, pointMargin, roundName));
+            
+            // DEBUG: Print first game
+            if (currentTrueGames.size() == 1) {
+                System.out.println("DEBUG: First game parsed:");
+                System.out.println("  Player1: " + player1Key + " (won=" + player1Won + ")");
+                System.out.println("  Player2: " + player2Key);
+                System.out.println("  TrueScore: " + trueScore);
+                System.out.println("  PointMargin: " + pointMargin);
+            }
+            
+            if (perfEloEnabled) {
+                // For perfElo, we pass the same Game objects with point margins
+                // The calculateGlicko2PerfElo method will apply sigmoid transform
+                currentPerfGames.add(new EloCalculator.Game(player1Key, player2Key, trueScore, pointMargin, roundName));
+            }
+        }
+        
+        gamesByRound.put(roundName, currentTrueGames);
+        if (perfEloEnabled) {
+            // Store perfElo games separately for later processing
+            // (Note: currently not used, but kept for potential future optimization)
+        }
+        
+        // Step 4: Process rounds sequentially using Glicko-2
+        List<String> roundsToProcess = ROUND_SEQUENCE.subList(0, currentRoundIndex + 1);
+        
+        System.out.println("DEBUG: About to calculate Glicko-2");
+        System.out.println("  - Total players: " + allPlayers.size());
+        System.out.println("  - Rounds to process: " + roundsToProcess);
+        System.out.println("  - Total games: " + flattenGames(gamesByRound, roundsToProcess).size());
+        System.out.println("  - First 3 players: " + allPlayers.stream().limit(3).toArray());
+        
+        // Calculate TrueElo
+        Map<String, EloCalculator.Glicko2Rating> initialTrueRatings = new HashMap<>(currentTrueRatings);
+        EloCalculator.Glicko2Result trueResult = EloCalculator.calculateGlicko2TrueElo(
+            flattenGames(gamesByRound, roundsToProcess),
+            allPlayers,
+            initialTrueRatings,
+            roundsToProcess
+        );
+        
+        System.out.println("DEBUG: TrueElo calculation complete");
+        System.out.println("  - Rounds in result: " + trueResult.ratingsByRound.keySet());
+        
+        // Calculate PerfElo
+        EloCalculator.Glicko2Result perfResult = null;
+        if (perfEloEnabled) {
+            Map<String, EloCalculator.Glicko2Rating> initialPerfRatings = new HashMap<>(currentPerfRatings);
+            perfResult = EloCalculator.calculateGlicko2PerfElo(
+                flattenGames(gamesByRound, roundsToProcess),
+                allPlayers,
+                initialPerfRatings,
+                roundsToProcess
+            );
+        }
+        
+        // Step 5: Store calculated ratings in player stats
+        int storedCount = 0;
+        for (int i = 0; i <= currentRoundIndex; i++) {
+            String round = ROUND_SEQUENCE.get(i);
+            Map<String, EloCalculator.Glicko2Rating> roundTrueRatings = trueResult.ratingsByRound.get(round);
+            Map<String, EloCalculator.Glicko2Rating> roundPerfRatings = 
+                perfEloEnabled ? perfResult.ratingsByRound.get(round) : null;
+            
+            System.out.println("DEBUG: Storing ratings for round " + round);
+            System.out.println("  - roundTrueRatings has " + (roundTrueRatings != null ? roundTrueRatings.size() : 0) + " players");
+            
+            for (String playerKey : allPlayers) {
+                // Update csvPlayers (current round data)
+                PlayerStats csvPlayer = csvPlayers.get(playerKey);
+                if (csvPlayer != null) {
+                    if (roundTrueRatings != null && roundTrueRatings.containsKey(playerKey)) {
+                        EloCalculator.Glicko2Rating rating = roundTrueRatings.get(playerKey);
+                        csvPlayer.trueEloByRound.put(round, (int) Math.round(rating.rating));
+                        csvPlayer.rdTrueEloByRound.put(round, rating.rd);
+                        csvPlayer.volTrueEloByRound.put(round, rating.volatility);
+                        storedCount++;
+                        
+                        if (storedCount <= 2) {
+                            System.out.println("  Sample storage: " + playerKey + " -> " + 
+                                Math.round(rating.rating) + " (RD:" + String.format("%.2f", rating.rd) + ")");
+                        }
                     }
-                    if (perfEloEnabled && roundPerfElos != null && roundPerfElos.containsKey(playerKey)) {
-                        dbPlayer.perfEloByRound.put(round, (int) Math.round(roundPerfElos.get(playerKey)));
+                    
+                    if (perfEloEnabled && roundPerfRatings != null && roundPerfRatings.containsKey(playerKey)) {
+                        EloCalculator.Glicko2Rating rating = roundPerfRatings.get(playerKey);
+                        csvPlayer.perfEloByRound.put(round, (int) Math.round(rating.rating));
+                        csvPlayer.rdPerfEloByRound.put(round, rating.rd);
+                        csvPlayer.volPerfEloByRound.put(round, rating.volatility);
+                    }
+                }
+                
+                // Update dbPlayers (for previous rounds)
+                PlayerStats dbPlayer = dbPlayers.get(playerKey);
+                if (dbPlayer != null && i < currentRoundIndex) {
+                    if (roundTrueRatings != null && roundTrueRatings.containsKey(playerKey)) {
+                        EloCalculator.Glicko2Rating rating = roundTrueRatings.get(playerKey);
+                        dbPlayer.trueEloByRound.put(round, (int) Math.round(rating.rating));
+                        dbPlayer.rdTrueEloByRound.put(round, rating.rd);
+                        dbPlayer.volTrueEloByRound.put(round, rating.volatility);
+                    }
+                    
+                    if (perfEloEnabled && roundPerfRatings != null && roundPerfRatings.containsKey(playerKey)) {
+                        EloCalculator.Glicko2Rating rating = roundPerfRatings.get(playerKey);
+                        dbPlayer.perfEloByRound.put(round, (int) Math.round(rating.rating));
+                        dbPlayer.rdPerfEloByRound.put(round, rating.rd);
+                        dbPlayer.volPerfEloByRound.put(round, rating.volatility);
                     }
                 }
             }
         }
-
-        // Step 7: Populate opponent ELO values for current round (after ELO calculation)
+        
+        // Step 6: Populate opponent ELO values for current round
         for (PlayerStats player : csvPlayers.values()) {
             String oppName = player.oppNameByRound.get(roundName);
             if (oppName != null && !oppName.equalsIgnoreCase("WALKOVER")) {
-                // Find opponent player stats
                 String oppKey = oppName.toLowerCase();
                 PlayerStats opponent = csvPlayers.get(oppKey);
                 if (opponent != null) {
-                    // Use the newly calculated ELO for this round
-                    Integer oppTrueElo = opponent.trueEloByRound.get(roundName);
-                    Integer oppPerfElo = opponent.perfEloByRound.get(roundName);
-                    player.oppTrueEloByRound.put(roundName, oppTrueElo);
-                    player.oppPerfEloByRound.put(roundName, oppPerfElo);
+                    player.oppTrueEloByRound.put(roundName, opponent.trueEloByRound.get(roundName));
+                    player.oppPerfEloByRound.put(roundName, opponent.perfEloByRound.get(roundName));
                 }
             }
-            // For walkovers, ELO fields remain null (already not set)
         }
-
-        discordLog.batchInfo(String.format("WHR calculated for rounds 1-%s (%s), %d historical ratings updated", 
-            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only", currentRoundIndex + 1));
-        telegramLog.batchInfo(String.format("WHR calculated for rounds 1-%s (%s), %d historical ratings updated", 
-            roundName, perfEloEnabled ? "TrueElo + PerfElo" : "TrueElo only", currentRoundIndex + 1));
+        
+        discordLog.batchInfo(String.format("Glicko-2 ELO ratings calculated for round %s", roundName));
+        telegramLog.batchInfo(String.format("Glicko-2 ELO ratings calculated for round %s", roundName));
     }
-
+    
     /**
-     * Extracts games for a specific round into a map (player name -> GameEntry)
+     * Flattens games from multiple rounds into a single list
      */
-    private Map<String, GameEntry> extractGamesForRound(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, String roundName) {
-        Map<String, GameEntry> roundGames = new HashMap<>();
-        for (GameEntry game : games) {
-            // Store by player1's name (lowercase key)
-            String key = game.name1.toLowerCase();
-            roundGames.put(key, game);
+    private List<EloCalculator.Game> flattenGames(Map<String, List<EloCalculator.Game>> gamesByRound, List<String> rounds) {
+        List<EloCalculator.Game> allGames = new ArrayList<>();
+        for (String round : rounds) {
+            List<EloCalculator.Game> roundGames = gamesByRound.get(round);
+            if (roundGames != null) {
+                allGames.addAll(roundGames);
+            }
         }
-        return roundGames;
+        return allGames;
     }
 
     /**
@@ -1649,8 +1739,7 @@ public class A1_PlayerStats {
 
     /**
      * Updates an existing player in the database
-     * NOTE: With WHR, we now update ALL rounds (past, current, and future) because
-     * adding new games recalculates all historical ratings
+     * Updates current and future rounds only - previous rounds remain unchanged
      */
     private void updatePlayerInDatabase(Connection conn, PlayerStats player, PlayerStats dbPlayer, String roundName) throws SQLException {
         StringBuilder sql = new StringBuilder("UPDATE A1_PlayerStats SET ");
@@ -1665,15 +1754,18 @@ public class A1_PlayerStats {
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
         params.add(currentTimestamp);
 
-        // Update ALL rounds (not just current+future) because WHR recalculates historical ratings
-        // This is the key difference from incremental ELO systems
+        // Update ONLY current and future rounds (previous rounds remain unchanged)
         int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
         
-        for (int i = 0; i < ROUND_SEQUENCE.size(); i++) {
+        for (int i = currentRoundIndex; i < ROUND_SEQUENCE.size(); i++) {
             String round = ROUND_SEQUENCE.get(i);
             
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
+            String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
+            String volTrueEloCol = getRoundColumnName("volTrueElo", round);
+            String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
+            String volPerfEloCol = getRoundColumnName("volPerfElo", round);
             String seatCol = getRoundColumnName("seat", round);
             String oppHallCol = getRoundColumnName("oppHall", round);
             String oppNameCol = getRoundColumnName("oppName", round);
@@ -1682,6 +1774,10 @@ public class A1_PlayerStats {
 
             Integer trueElo = player.trueEloByRound.get(round);
             Integer perfElo = player.perfEloByRound.get(round);
+            Double rdTrueElo = player.rdTrueEloByRound.get(round);
+            Double volTrueElo = player.volTrueEloByRound.get(round);
+            Double rdPerfElo = player.rdPerfEloByRound.get(round);
+            Double volPerfElo = player.volPerfEloByRound.get(round);
             Integer seat = player.seatByRound.get(round);
             String oppHall = player.oppHallByRound.get(round);
             String oppName = player.oppNameByRound.get(round);
@@ -1693,6 +1789,18 @@ public class A1_PlayerStats {
 
             sql.append(perfEloCol).append(" = ?, ");
             params.add(perfElo);
+            
+            sql.append(rdTrueEloCol).append(" = ?, ");
+            params.add(rdTrueElo);
+            
+            sql.append(volTrueEloCol).append(" = ?, ");
+            params.add(volTrueElo);
+            
+            sql.append(rdPerfEloCol).append(" = ?, ");
+            params.add(rdPerfElo);
+            
+            sql.append(volPerfEloCol).append(" = ?, ");
+            params.add(volPerfElo);
 
             sql.append(seatCol).append(" = ?, ");
             params.add(seat);
@@ -1727,8 +1835,8 @@ public class A1_PlayerStats {
      * Inserts a new player into the database
      */
     private void insertPlayerInDatabase(Connection conn, PlayerStats player, String currentRound) throws SQLException {
-        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, dateLogged");
-        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?, ?");
+        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, baseRdTrueElo, baseVolTrueElo, baseRdPerfElo, baseVolPerfElo, dateLogged");
+        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
         List<Object> params = new ArrayList<>();
 
         // Get current timestamp
@@ -1740,12 +1848,20 @@ public class A1_PlayerStats {
         // Use existing base ELO if set (from import), otherwise default to BASE_ELO
         params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
         params.add(player.basePerfElo != null ? player.basePerfElo : (perfEloEnabled ? BASE_ELO : null));
+        params.add(player.baseRdTrueElo != null ? player.baseRdTrueElo : 350.0); // Default RD
+        params.add(player.baseVolTrueElo != null ? player.baseVolTrueElo : 0.06); // Default volatility
+        params.add(player.baseRdPerfElo != null ? player.baseRdPerfElo : (perfEloEnabled ? 350.0 : null));
+        params.add(player.baseVolPerfElo != null ? player.baseVolPerfElo : (perfEloEnabled ? 0.06 : null));
         params.add(currentTimestamp);
 
         // Add all round columns
         for (String round : ROUND_SEQUENCE) {
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
+            String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
+            String volTrueEloCol = getRoundColumnName("volTrueElo", round);
+            String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
+            String volPerfEloCol = getRoundColumnName("volPerfElo", round);
             String seatCol = getRoundColumnName("seat", round);
             String oppHallCol = getRoundColumnName("oppHall", round);
             String oppNameCol = getRoundColumnName("oppName", round);
@@ -1754,13 +1870,17 @@ public class A1_PlayerStats {
 
             sql.append(", ").append(trueEloCol);
             sql.append(", ").append(perfEloCol);
+            sql.append(", ").append(rdTrueEloCol);
+            sql.append(", ").append(volTrueEloCol);
+            sql.append(", ").append(rdPerfEloCol);
+            sql.append(", ").append(volPerfEloCol);
             sql.append(", ").append(seatCol);
             sql.append(", ").append(oppHallCol);
             sql.append(", ").append(oppNameCol);
             sql.append(", ").append(oppTrueEloCol);
             sql.append(", ").append(oppPerfEloCol);
             
-            values.append(", ?, ?, ?, ?, ?, ?, ?");
+            values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
             // Fill previous rounds with base ELO, current round with calculated, future rounds with null
             int currentIdx = ROUND_SEQUENCE.indexOf(currentRound);
@@ -1770,6 +1890,10 @@ public class A1_PlayerStats {
                 // Previous rounds - fill with base ELO if available, otherwise BASE_ELO
                 params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
                 params.add(perfEloEnabled ? (player.basePerfElo != null ? player.basePerfElo : BASE_ELO) : null);
+                params.add(player.baseRdTrueElo != null ? player.baseRdTrueElo : 350.0);
+                params.add(player.baseVolTrueElo != null ? player.baseVolTrueElo : 0.06);
+                params.add(perfEloEnabled ? (player.baseRdPerfElo != null ? player.baseRdPerfElo : 350.0) : null);
+                params.add(perfEloEnabled ? (player.baseVolPerfElo != null ? player.baseVolPerfElo : 0.06) : null);
                 params.add(null); // seat
                 params.add(null); // oppHall
                 params.add(null); // oppName
@@ -1779,6 +1903,10 @@ public class A1_PlayerStats {
                 // Current round - use calculated values
                 params.add(player.trueEloByRound.get(round));
                 params.add(player.perfEloByRound.get(round));
+                params.add(player.rdTrueEloByRound.get(round));
+                params.add(player.volTrueEloByRound.get(round));
+                params.add(player.rdPerfEloByRound.get(round));
+                params.add(player.volPerfEloByRound.get(round));
                 params.add(player.seatByRound.get(round));
                 params.add(player.oppHallByRound.get(round));
                 params.add(player.oppNameByRound.get(round));
@@ -1788,6 +1916,10 @@ public class A1_PlayerStats {
                 // Future rounds - null
                 params.add(null); // trueElo
                 params.add(null); // perfElo
+                params.add(null); // rdTrueElo
+                params.add(null); // volTrueElo
+                params.add(null); // rdPerfElo
+                params.add(null); // volPerfElo
                 params.add(null); // seat
                 params.add(null); // oppHall
                 params.add(null); // oppName
