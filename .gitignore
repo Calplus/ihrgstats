@@ -29,3 +29,5 @@ replay_pid*
 
 # Other files
 /.vscode/
+/target/
+/temp/

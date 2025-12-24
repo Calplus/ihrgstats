@@ -22,6 +22,7 @@ public class A1_PlayerStats {
     private final String dbPath;
     private boolean perfEloEnabled;
     private UserConfirmationCallback confirmationCallback;
+    private MultiChoiceConfirmationCallback multiChoiceCallback;
     private UploadChatMessageCallback uploadChatCallback;
 
     // Round sequence
@@ -33,6 +34,13 @@ public class A1_PlayerStats {
      */
     public interface UserConfirmationCallback {
         boolean requestConfirmation(String message);
+    }
+    
+    /**
+     * Interface for multi-choice confirmation callbacks (used by Telegram listener)
+     */
+    public interface MultiChoiceConfirmationCallback {
+        int requestChoice(String message, String[] options);
     }
 
     /**
@@ -52,6 +60,7 @@ public class A1_PlayerStats {
         this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
         this.loadConfig();
         this.confirmationCallback = null; // Default to CLI confirmation
+        this.multiChoiceCallback = null;
         this.uploadChatCallback = null;
     }
 
@@ -71,6 +80,13 @@ public class A1_PlayerStats {
      */
     public void setConfirmationCallback(UserConfirmationCallback callback) {
         this.confirmationCallback = callback;
+    }
+    
+    /**
+     * Sets a custom multi-choice confirmation callback (for Telegram integration)
+     */
+    public void setMultiChoiceCallback(MultiChoiceConfirmationCallback callback) {
+        this.multiChoiceCallback = callback;
     }
 
     /**
@@ -121,6 +137,7 @@ public class A1_PlayerStats {
         String name;
         String hall;
         boolean capped;
+        boolean active; // true if found in round_n.csv, false if only from imports/cappedlist
         Integer baseTrueElo;
         Integer basePerfElo;
         
@@ -147,6 +164,40 @@ public class A1_PlayerStats {
         Map<String, Integer> oppPerfEloByRound = new HashMap<>();
         boolean existsInDb = false;
         int dbId = -1;
+    }
+
+    /**
+     * Represents a detected name mismatch between CSV and database
+     */
+    private static class NameMismatch {
+        PlayerStats csvPlayer;
+        PlayerStats dbPlayer;
+        String csvKey;
+        String dbKey;
+        String type; // "partial" or "spelling"
+        String description;
+        
+        NameMismatch(PlayerStats csvPlayer, PlayerStats dbPlayer, String csvKey, String dbKey, String type, String description) {
+            this.csvPlayer = csvPlayer;
+            this.dbPlayer = dbPlayer;
+            this.csvKey = csvKey;
+            this.dbKey = dbKey;
+            this.type = type;
+            this.description = description;
+        }
+    }
+
+    /**
+     * Represents a detected hall mismatch between CSV and database
+     */
+    private static class HallMismatch {
+        PlayerStats csvPlayer;
+        PlayerStats dbPlayer;
+        
+        HallMismatch(PlayerStats csvPlayer, PlayerStats dbPlayer) {
+            this.csvPlayer = csvPlayer;
+            this.dbPlayer = dbPlayer;
+        }
     }
 
     /**
@@ -227,21 +278,24 @@ public class A1_PlayerStats {
         // Check if this round was already processed (re-upload detection)
         if (!dbPlayers.isEmpty() && isRoundAlreadyProcessed(roundName, dbPlayers)) {
             String warningMsg = String.format(
-                "WARNING: round_%s has already been processed!\n\n" +
-                "If you continue:\n" +
+                "⚠️ **Round Already Processed**\n\n" +
+                "Round %s has already been processed!\n\n" +
+                "**If you continue:**\n" +
                 "- Round %s will be reprocessed with the new data\n" +
                 "- ALL rounds after round %s will be DELETED\n" +
                 "- You will need to re-upload those rounds again\n\n" +
-                "Do you want to continue and reprocess this round? (yes/no)",
+                "**Do you want to continue?**",
                 roundName, roundName, roundName
             );
+            
+            String[] options = {"Continue and reprocess", "Cancel"};
             
             discordLog.flushBatch();
             telegramLog.flushBatch();
             
-            boolean confirmed = requestUserConfirmation(warningMsg);
+            int choice = requestMultiChoice(warningMsg, options);
             
-            if (!confirmed) {
+            if (choice != 0) {
                 String cancelMsg = String.format("Round %s reprocessing cancelled by user.", roundName);
                 discordLog.logWarning(cancelMsg);
                 telegramLog.logWarning(cancelMsg);
@@ -366,6 +420,357 @@ public class A1_PlayerStats {
             }
             
             return false;
+        }
+    }
+
+    /**
+     * Imports player data from an exported CSV file
+     * @param csvFilePath Path to the playerExport CSV file
+     * @return true if successful, false otherwise
+     */
+    public boolean importPlayerExport(String csvFilePath) {
+        discordLog.logInfo("Starting player export import...");
+        telegramLog.logInfo("Starting player export import...");
+        
+        if (uploadChatCallback != null) {
+            String formattedMsg = formatUploadMessage("🔵", "INFO", "Starting player export import...");
+            uploadChatCallback.sendMessage(formattedMsg);
+        }
+        
+        try {
+            // Check if table is empty
+            boolean tableIsEmpty = isTableEmpty();
+            
+            if (!tableIsEmpty) {
+                // Table has data - ask user if they want to overwrite
+                String warningMsg = "⚠️ **Database Not Empty**\n\n" +
+                    "The A1_PlayerStats table already contains data.\n\n" +
+                    "**If you continue:**\n" +
+                    "- ALL existing player data will be DELETED\n" +
+                    "- New data from the CSV will be imported\n\n" +
+                    "**Do you want to overwrite all existing data?**";
+                
+                String[] options = {"Yes - Delete all and import", "No - Cancel import"};
+                
+                discordLog.flushBatch();
+                telegramLog.flushBatch();
+                
+                int choice = requestMultiChoice(warningMsg, options);
+                
+                if (choice != 0) {
+                    String cancelMsg = "Player import cancelled by user.";
+                    discordLog.logInfo(cancelMsg);
+                    telegramLog.logInfo(cancelMsg);
+                    
+                    if (uploadChatCallback != null) {
+                        String formattedMsg = formatUploadMessage("🟡", "INFO", cancelMsg);
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
+                    
+                    return false;
+                }
+                
+                // User confirmed - delete all existing data
+                deleteAllPlayerData();
+                
+                discordLog.logInfo("All existing player data deleted.");
+                telegramLog.logInfo("All existing player data deleted.");
+                
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🟡", "INFO", "All existing player data deleted.");
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+            }
+            
+            // Parse CSV file
+            List<PlayerExportData> importData = parsePlayerExportCSV(csvFilePath);
+            
+            if (importData.isEmpty()) {
+                String errorMsg = "No valid player data found in export file.";
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                
+                if (uploadChatCallback != null) {
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                    uploadChatCallback.sendMessage(formattedMsg);
+                }
+                
+                return false;
+            }
+            
+            // Update database with imported data
+            importPlayersToDatabase(importData);
+            
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+            
+            String successMsg = String.format("Successfully imported %d players from export file.", importData.size());
+            discordLog.logSuccess(successMsg);
+            telegramLog.logSuccess(successMsg);
+            
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
+            return true;
+            
+        } catch (Exception e) {
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+            String errorMsg = "Player import failed: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
+            return false;
+        }
+    }
+    
+    /**
+     * Represents imported player data from export CSV
+     */
+    private static class PlayerExportData {
+        String name;
+        int trueElo;
+        Integer perfElo;
+        Double rdTrueElo;
+        Double volTrueElo;
+        Double rdPerfElo;
+        Double volPerfElo;
+        String lastRound;
+        String lastHall;
+        boolean capped;
+        
+        PlayerExportData(String name, int trueElo, Integer perfElo, 
+                        Double rdTrueElo, Double volTrueElo, 
+                        Double rdPerfElo, Double volPerfElo,
+                        String lastRound, String lastHall) {
+            this.name = name;
+            this.trueElo = trueElo;
+            this.perfElo = perfElo;
+            this.rdTrueElo = rdTrueElo;
+            this.volTrueElo = volTrueElo;
+            this.rdPerfElo = rdPerfElo;
+            this.volPerfElo = volPerfElo;
+            this.lastRound = lastRound;
+            this.lastHall = lastHall;
+        }
+    }
+    
+    /**
+     * Parses player export CSV file
+     * Expected format: name,trueElo,perfElo,rdTrueElo,volTrueElo,rdPerfElo,volPerfElo,lastRound,lastHall,capped
+     */
+    private List<PlayerExportData> parsePlayerExportCSV(String csvFilePath) throws Exception {
+        List<PlayerExportData> importData = new ArrayList<>();
+        
+        try (BufferedReader reader = new BufferedReader(new FileReader(csvFilePath))) {
+            String line;
+            int lineNumber = 0;
+            boolean isHeader = true;
+            
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                line = line.trim();
+                
+                if (line.isEmpty()) continue;
+                
+                // Parse CSV line
+                String[] parts = parseCSVLine(line);
+                
+                // Check header
+                if (isHeader) {
+                    isHeader = false;
+                    // Validate header format
+                    if (parts.length < 10 || !parts[0].equalsIgnoreCase("name")) {
+                        throw new Exception("Invalid CSV header. Expected: name,trueElo,perfElo,rdTrueElo,volTrueElo,rdPerfElo,volPerfElo,lastRound,lastHall,capped");
+                    }
+                    continue;
+                }
+                
+                // Validate data row
+                if (parts.length < 10) {
+                    throw new Exception(String.format("Line %d: Expected 10 columns, found %d", lineNumber, parts.length));
+                }
+                
+                try {
+                    String name = parts[0].trim();
+                    int trueElo = Integer.parseInt(parts[1].trim());
+                    Integer perfElo = parts[2].trim().isEmpty() ? null : Integer.parseInt(parts[2].trim());
+                    Double rdTrueElo = parts[3].trim().isEmpty() ? null : Double.parseDouble(parts[3].trim());
+                    Double volTrueElo = parts[4].trim().isEmpty() ? null : Double.parseDouble(parts[4].trim());
+                    Double rdPerfElo = parts[5].trim().isEmpty() ? null : Double.parseDouble(parts[5].trim());
+                    Double volPerfElo = parts[6].trim().isEmpty() ? null : Double.parseDouble(parts[6].trim());
+                    String lastRound = parts[7].trim().isEmpty() ? null : parts[7].trim();
+                    String lastHall = parts[8].trim();
+                    boolean capped = parts[9].trim().equalsIgnoreCase("true");
+                    
+                    if (name.isEmpty()) {
+                        throw new Exception(String.format("Line %d: Player name cannot be empty", lineNumber));
+                    }
+                    if (lastHall.isEmpty()) {
+                        throw new Exception(String.format("Line %d: Hall cannot be empty", lineNumber));
+                    }
+                    
+                    importData.add(new PlayerExportData(name, trueElo, perfElo, rdTrueElo, volTrueElo, 
+                                                       rdPerfElo, volPerfElo, lastRound, lastHall));
+                    
+                    discordLog.batchInfo(String.format("Parsed player: %s (Hall: %s, TrueElo: %d)", name, lastHall, trueElo));
+                    telegramLog.batchInfo(String.format("Parsed player: %s (Hall: %s, TrueElo: %d)", name, lastHall, trueElo));
+                    
+                } catch (NumberFormatException e) {
+                    throw new Exception(String.format("Line %d: Invalid number format - %s", lineNumber, e.getMessage()));
+                }
+            }
+            
+            if (importData.isEmpty()) {
+                throw new Exception("CSV file contains no data rows");
+            }
+            
+        } catch (IOException e) {
+            throw new Exception("Error reading CSV file: " + e.getMessage());
+        }
+        
+        return importData;
+    }
+    
+    /**
+     * Imports players into database, creating or updating existing records
+     */
+    private void importPlayersToDatabase(List<PlayerExportData> importData) throws Exception {
+        String jdbcUrl = "jdbc:sqlite:" + dbPath;
+        
+        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            conn.setAutoCommit(false);
+            
+            try {
+                // Check if players exist and update/insert accordingly
+                for (PlayerExportData data : importData) {
+                    String key = (data.name + "_" + data.lastHall).toLowerCase();
+                    
+                    // Check if player exists
+                    String checkSQL = "SELECT id FROM A1_PlayerStats WHERE LOWER(name || '_' || hall) = ?";
+                    Long playerId = null;
+                    
+                    try (PreparedStatement checkStmt = conn.prepareStatement(checkSQL)) {
+                        checkStmt.setString(1, key);
+                        try (ResultSet rs = checkStmt.executeQuery()) {
+                            if (rs.next()) {
+                                playerId = rs.getLong("id");
+                            }
+                        }
+                    }
+                    
+                    if (playerId != null) {
+                        // Update existing player
+                        String updateSQL = "UPDATE A1_PlayerStats SET " +
+                            "baseTrueElo = ?, basePerfElo = ?, " +
+                            "baseRdTrueElo = ?, baseVolTrueElo = ?, " +
+                            "baseRdPerfElo = ?, baseVolPerfElo = ?, " +
+                            "capped = ?, active = ?, dateLogged = ? " +
+                            "WHERE id = ?";
+                        
+                        try (PreparedStatement updateStmt = conn.prepareStatement(updateSQL)) {
+                            updateStmt.setInt(1, data.trueElo);
+                            if (data.perfElo != null) {
+                                updateStmt.setInt(2, data.perfElo);
+                            } else {
+                                updateStmt.setNull(2, Types.INTEGER);
+                            }
+                            if (data.rdTrueElo != null) {
+                                updateStmt.setDouble(3, data.rdTrueElo);
+                            } else {
+                                updateStmt.setNull(3, Types.REAL);
+                            }
+                            if (data.volTrueElo != null) {
+                                updateStmt.setDouble(4, data.volTrueElo);
+                            } else {
+                                updateStmt.setNull(4, Types.REAL);
+                            }
+                            if (data.rdPerfElo != null) {
+                                updateStmt.setDouble(5, data.rdPerfElo);
+                            } else {
+                                updateStmt.setNull(5, Types.REAL);
+                            }
+                            if (data.volPerfElo != null) {
+                                updateStmt.setDouble(6, data.volPerfElo);
+                            } else {
+                                updateStmt.setNull(6, Types.REAL);
+                            }
+                            updateStmt.setInt(7, data.capped ? 1 : 0);
+                            updateStmt.setInt(8, 0); // active = false (imported, not from round CSV)
+                            updateStmt.setString(9, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+                            updateStmt.setLong(10, playerId);
+                            updateStmt.executeUpdate();
+                        }
+                        
+                        discordLog.batchInfo(String.format("Updated player: %s (Hall: %s)", data.name, data.lastHall));
+                        telegramLog.batchInfo(String.format("Updated player: %s (Hall: %s)", data.name, data.lastHall));
+                        
+                    } else {
+                        // Insert new player
+                        String insertSQL = "INSERT INTO A1_PlayerStats " +
+                            "(name, hall, capped, active, baseTrueElo, basePerfElo, " +
+                            "baseRdTrueElo, baseVolTrueElo, baseRdPerfElo, baseVolPerfElo, dateLogged) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        
+                        try (PreparedStatement insertStmt = conn.prepareStatement(insertSQL)) {
+                            insertStmt.setString(1, data.name);
+                            insertStmt.setString(2, data.lastHall);
+                            insertStmt.setInt(3, data.capped ? 1 : 0);
+                            insertStmt.setInt(4, 0); // active = false (imported, not from round CSV)
+                            insertStmt.setInt(5, data.trueElo);
+                            if (data.perfElo != null) {
+                                insertStmt.setInt(6, data.perfElo);
+                            } else {
+                                insertStmt.setNull(6, Types.INTEGER);
+                            }
+                            if (data.rdTrueElo != null) {
+                                insertStmt.setDouble(7, data.rdTrueElo);
+                            } else {
+                                insertStmt.setNull(7, Types.REAL);
+                            }
+                            if (data.volTrueElo != null) {
+                                insertStmt.setDouble(8, data.volTrueElo);
+                            } else {
+                                insertStmt.setNull(8, Types.REAL);
+                            }
+                            if (data.rdPerfElo != null) {
+                                insertStmt.setDouble(9, data.rdPerfElo);
+                            } else {
+                                insertStmt.setNull(9, Types.REAL);
+                            }
+                            if (data.volPerfElo != null) {
+                                insertStmt.setDouble(10, data.volPerfElo);
+                            } else {
+                                insertStmt.setNull(10, Types.REAL);
+                            }
+                            insertStmt.setString(11, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+                            insertStmt.executeUpdate();
+                        }
+                        
+                        discordLog.batchInfo(String.format("Inserted new player: %s (Hall: %s)", data.name, data.lastHall));
+                        telegramLog.batchInfo(String.format("Inserted new player: %s (Hall: %s)", data.name, data.lastHall));
+                    }
+                }
+                
+                conn.commit();
+                discordLog.batchInfo("Database import committed successfully");
+                telegramLog.batchInfo("Database import committed successfully");
+                
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new Exception("Database transaction failed: " + e.getMessage());
+            }
+            
+        } catch (SQLException e) {
+            throw new Exception("Database connection failed: " + e.getMessage());
         }
     }
 
@@ -502,14 +907,14 @@ public class A1_PlayerStats {
                 // This includes both cases: no rounds processed (null) or last round != 6
                 if (lastProcessedRound == null || !lastProcessedRound.equals("6")) {
                     StringBuilder message = new StringBuilder();
-                    message.append(String.format("⚠️ Tournament bracket (t16) is being uploaded, but round 6 has not been processed.\n"));
+                    message.append("⚠️ **Bracket Transition Detected**\n\n");
+                    message.append(String.format("Tournament bracket (t16) is being uploaded, but round 6 has not been processed.\n"));
                     if (lastProcessedRound != null) {
                         message.append(String.format("Last processed round: %s\n\n", lastProcessedRound));
                     } else {
                         message.append("Last processed round: none (database is empty)\n\n");
                     }
                     message.append("Has the tournament moved to bracket matchup format, skipping the remaining round-robin rounds?\n\n");
-                    message.append("Answer 'yes' to fill missing rounds (");
                     
                     // List missing rounds
                     List<String> missingRounds = new ArrayList<>();
@@ -524,22 +929,20 @@ public class A1_PlayerStats {
                             missingRounds.add(ROUND_SEQUENCE.get(i));
                         }
                     }
-                    message.append(String.join(", ", missingRounds));
-                    message.append(") with last known ELO values and continue.\n");
-                    message.append("Answer 'no' to stop processing.");
+                    message.append("**Missing rounds: ").append(String.join(", ", missingRounds)).append("**\n\n");
+                    message.append("**What would you like to do?**");
+
+                    String[] options = {
+                        "Fill missing rounds and continue",
+                        "Stop processing"
+                    };
 
                     discordLog.flushBatch();
                     telegramLog.flushBatch();
-                    
-                    // Send warning message to upload chat if callback is set
-                    if (uploadChatCallback != null) {
-                        String formattedMsg = formatUploadMessage("⚠️", "WARNING", message.toString());
-                        uploadChatCallback.sendMessage(formattedMsg);
-                    }
 
-                    boolean confirmed = requestUserConfirmation(message.toString());
+                    int choice = requestMultiChoice(message.toString(), options);
 
-                    if (!confirmed) {
+                    if (choice != 0) {
                         String errorMsg = "Processing stopped: User declined bracket transition.";
                         discordLog.logError(errorMsg);
                         telegramLog.logError(errorMsg);
@@ -815,6 +1218,7 @@ public class A1_PlayerStats {
                     player.name = rs.getString("name");
                     player.hall = rs.getString("hall");
                     player.capped = rs.getInt("capped") == 1; // SQLite boolean as 0/1
+                    player.active = rs.getInt("active") == 1; // SQLite boolean as 0/1
                     player.baseTrueElo = (Integer) rs.getObject("baseTrueElo");
                     player.basePerfElo = (Integer) rs.getObject("basePerfElo");
                     
@@ -909,6 +1313,7 @@ public class A1_PlayerStats {
                     player.name = game.name1;
                     player.hall = game.hall1;
                     player.capped = false;
+                    player.active = true; // Player is active (seen in round CSV)
                     players.put(key1, player);
                 }
             }
@@ -921,6 +1326,7 @@ public class A1_PlayerStats {
                     player.name = game.name2;
                     player.hall = game.hall2;
                     player.capped = false;
+                    player.active = true; // Player is active (seen in round CSV)
                     players.put(key2, player);
                 }
             }
@@ -951,23 +1357,25 @@ public class A1_PlayerStats {
         }
 
         if (!violations.isEmpty()) {
-            StringBuilder message = new StringBuilder("WARNING: The following halls exceed the 5-player limit:\\n\\n");
+            StringBuilder message = new StringBuilder("⚠️ **Hall Capacity Violations**\n\n");
+            message.append("The following halls exceed the 5-player limit:\n\n");
             for (String violation : violations) {
-                message.append("  - ").append(violation).append("\\n");
+                message.append("  - ").append(violation).append("\n");
             }
-            message.append("\\nDo you want to continue processing? (yes/no)");
+            message.append("\n**Do you want to continue processing?**");
+
+            String[] options = {"Continue", "Cancel"};
 
             discordLog.flushBatch();
             telegramLog.flushBatch();
 
-            boolean confirmed = requestUserConfirmation(message.toString());
+            int choice = requestMultiChoice(message.toString(), options);
             
-            if (!confirmed) {
+            if (choice != 0) {
                 String errorMsg = "Processing cancelled due to player count violations.";
                 discordLog.logError(errorMsg);
                 telegramLog.logError(errorMsg);
                 
-                // Send error to upload chat if callback is set
                 if (uploadChatCallback != null) {
                     String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
                     uploadChatCallback.sendMessage(formattedMsg);
@@ -987,10 +1395,12 @@ public class A1_PlayerStats {
      * Validates player name/hall matches between CSV and database
      */
     private boolean validatePlayerMatches(Map<String, PlayerStats> csvPlayers, Map<String, PlayerStats> dbPlayers) {
-        List<String> warnings = new ArrayList<>();
-        List<String> majorIssues = new ArrayList<>();
+        // Store hall mismatches with their player references for interactive resolution
+        List<HallMismatch> hallMismatches = new ArrayList<>();
         List<String> crossHallIssues = new ArrayList<>();
+        List<NameMismatch> nameMismatches = new ArrayList<>();
 
+        // First pass: Check for exact key matches and hall mismatches
         for (Map.Entry<String, PlayerStats> entry : csvPlayers.entrySet()) {
             String key = entry.getKey();
             PlayerStats csvPlayer = entry.getValue();
@@ -999,11 +1409,10 @@ public class A1_PlayerStats {
             if (dbPlayer != null) {
                 // Player exists in database - check hall match
                 if (!csvPlayer.hall.equalsIgnoreCase(dbPlayer.hall)) {
-                    warnings.add(String.format("⚠️ Player '%s' hall mismatch: CSV='%s', DB='%s'", 
-                        csvPlayer.name, csvPlayer.hall, dbPlayer.hall));
+                    hallMismatches.add(new HallMismatch(csvPlayer, dbPlayer));
                 }
             } else {
-                // Player not found in same hall - check if they exist in other halls
+                // Player not found with exact key - check if they exist in other halls
                 for (Map.Entry<String, PlayerStats> dbEntry : dbPlayers.entrySet()) {
                     PlayerStats otherDbPlayer = dbEntry.getValue();
                     if (csvPlayer.name.equalsIgnoreCase(otherDbPlayer.name) && 
@@ -1017,7 +1426,7 @@ public class A1_PlayerStats {
             }
         }
 
-        // Check for potential typos/partial names within same hall only
+        // Second pass: Check for potential name mismatches within same hall
         for (Map.Entry<String, PlayerStats> csvEntry : csvPlayers.entrySet()) {
             String csvKey = csvEntry.getKey();
             PlayerStats csvPlayer = csvEntry.getValue();
@@ -1032,13 +1441,15 @@ public class A1_PlayerStats {
                 PlayerStats dbPlayer = dbEntry.getValue();
                 
                 if (!csvKey.equals(dbKey)) {
-                    // Check if names are similar (partial match, comma difference, or small misspelling)
+                    // Check if names are similar (partial match or small misspelling)
                     if (isPartialNameMatch(csvKey, dbKey)) {
-                        warnings.add(String.format("⚠️ Possible partial name: '%s' (CSV) matches '%s' (DB) in hall '%s'", 
-                            csvPlayer.name, dbPlayer.name, csvPlayer.hall));
+                        String description = String.format("⚠️ Possible partial name: '%s' (CSV) matches '%s' (DB) in hall '%s'", 
+                            csvPlayer.name, dbPlayer.name, csvPlayer.hall);
+                        nameMismatches.add(new NameMismatch(csvPlayer, dbPlayer, csvKey, dbKey, "partial", description));
                     } else if (areSimilarNames(csvKey, dbKey)) {
-                        majorIssues.add(String.format("❌ Potential major misspelling: '%s' (CSV) vs '%s' (DB) in hall '%s'", 
-                            csvPlayer.name, dbPlayer.name, csvPlayer.hall));
+                        String description = String.format("❌ Potential major misspelling: '%s' (CSV) vs '%s' (DB) in hall '%s'", 
+                            csvPlayer.name, dbPlayer.name, csvPlayer.hall);
+                        nameMismatches.add(new NameMismatch(csvPlayer, dbPlayer, csvKey, dbKey, "spelling", description));
                     }
                 }
             }
@@ -1046,25 +1457,28 @@ public class A1_PlayerStats {
 
         // Handle cross-hall issues first (requires immediate confirmation)
         if (!crossHallIssues.isEmpty()) {
-            StringBuilder message = new StringBuilder("The following players exist in different halls:\n\n");
+            StringBuilder message = new StringBuilder("⚠️ **Cross-Hall Player Detection**\n\n");
+            message.append("The following players exist in different halls:\n\n");
             for (String issue : crossHallIssues) {
                 message.append("- ").append(issue).append("\n");
             }
-            message.append("\nIs this an error (same person, wrong hall)? (yes/no)\n");
-            message.append("Answer 'yes' if it's an error and processing should stop.\n");
-            message.append("Answer 'no' if these are different people and processing should continue.");
+            message.append("\n**Is this an error or are these different people?**");
+
+            String[] options = {
+                "It's an error - Stop processing",
+                "Different people - Continue"
+            };
 
             discordLog.flushBatch();
             telegramLog.flushBatch();
 
-            boolean isError = requestUserConfirmation(message.toString());
+            int choice = requestMultiChoice(message.toString(), options);
             
-            if (isError) {
+            if (choice == 0) {
                 String errorMsg = "Processing stopped: User confirmed cross-hall players are errors.";
                 discordLog.logError(errorMsg);
                 telegramLog.logError(errorMsg);
                 
-                // Send error to upload chat if callback is set
                 if (uploadChatCallback != null) {
                     String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
                     uploadChatCallback.sendMessage(formattedMsg);
@@ -1077,41 +1491,131 @@ public class A1_PlayerStats {
             telegramLog.logInfo("User confirmed cross-hall players are different people. Continuing...");
         }
 
-        // Log warnings without requiring confirmation
-        if (!warnings.isEmpty()) {
+        // Handle hall mismatches with interactive resolution
+        if (!hallMismatches.isEmpty()) {
             discordLog.flushBatch();
             telegramLog.flushBatch();
-            for (String warning : warnings) {
-                discordLog.logWarning(warning);
-                telegramLog.logWarning(warning);
+            
+            for (HallMismatch mismatch : hallMismatches) {
+                String message = String.format(
+                    "⚠️ **Hall Mismatch**\n\n" +
+                    "Player: **%s**\n" +
+                    "CSV Hall: **%s**\n" +
+                    "Database Hall: **%s**\n\n" +
+                    "**Which hall should be used in the database?**",
+                    mismatch.csvPlayer.name,
+                    mismatch.csvPlayer.hall,
+                    mismatch.dbPlayer.hall
+                );
                 
-                // Send warning to upload chat if callback is set
-                if (uploadChatCallback != null) {
-                    String formattedMsg = formatUploadMessage("⚠️", "WARNING", warning);
-                    uploadChatCallback.sendMessage(formattedMsg);
+                String[] options = {
+                    "Use CSV hall (" + mismatch.csvPlayer.hall + ")",
+                    "Use DB hall (" + mismatch.dbPlayer.hall + ")",
+                    "Cancel processing"
+                };
+                
+                int choice = requestMultiChoice(message, options);
+                
+                if (choice == 0) {
+                    // Use CSV hall - csvPlayer already has correct hall, just log
+                    discordLog.logInfo(String.format("Hall resolved: '%s' will use CSV hall '%s'", 
+                        mismatch.csvPlayer.name, mismatch.csvPlayer.hall));
+                    telegramLog.logInfo(String.format("Hall resolved: '%s' will use CSV hall '%s'", 
+                        mismatch.csvPlayer.name, mismatch.csvPlayer.hall));
+                } else if (choice == 1) {
+                    // Use DB hall - update csvPlayer to use DB hall
+                    String oldHall = mismatch.csvPlayer.hall;
+                    mismatch.csvPlayer.hall = mismatch.dbPlayer.hall;
+                    discordLog.logInfo(String.format("Hall resolved: '%s' changed from '%s' to '%s' (using DB hall)", 
+                        mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+                    telegramLog.logInfo(String.format("Hall resolved: '%s' changed from '%s' to '%s' (using DB hall)", 
+                        mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+                } else {
+                    // User cancelled
+                    String errorMsg = "Processing cancelled by user during hall mismatch resolution.";
+                    discordLog.logError(errorMsg);
+                    telegramLog.logError(errorMsg);
+                    
+                    if (uploadChatCallback != null) {
+                        String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
+                    
+                    return false;
                 }
             }
         }
 
-        // Major issues require confirmation
-        if (!majorIssues.isEmpty()) {
-            StringBuilder message = new StringBuilder("The following major issues were detected:\n\n");
-            for (String issue : majorIssues) {
-                message.append("- ").append(issue).append("\n");
+        // Handle name mismatches (both partial and spelling) with single dialog
+        if (!nameMismatches.isEmpty()) {
+            StringBuilder message = new StringBuilder("⚠️ **Name Mismatch Detected**\n\n");
+            message.append("The following potential name mismatches were found:\n\n");
+            
+            for (NameMismatch mismatch : nameMismatches) {
+                message.append("- ").append(mismatch.description).append("\n");
             }
-            message.append("\nDo you want to continue processing? (yes/no)");
+            
+            message.append("\n**Please choose how to handle these mismatches:**");
+            
+            String[] options = {
+                "Treat as same person (use DB name)",
+                "Treat as different people",
+                "Cancel processing"
+            };
 
             discordLog.flushBatch();
             telegramLog.flushBatch();
 
-            boolean confirmed = requestUserConfirmation(message.toString());
+            int choice = requestMultiChoice(message.toString(), options);
             
-            if (!confirmed) {
-                String cancelMsg = "Processing cancelled by user due to validation issues.";
+            if (choice == 0) {
+                // Treat as same person - map CSV players to DB players
+                discordLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
+                telegramLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
+                
+                for (NameMismatch mismatch : nameMismatches) {
+                    // Mark CSV player as existing in DB and link to DB player
+                    mismatch.csvPlayer.existsInDb = true;
+                    mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
+                    
+                    // Copy base ELO values from DB player
+                    mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
+                    mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
+                    mismatch.csvPlayer.baseRdTrueElo = mismatch.dbPlayer.baseRdTrueElo;
+                    mismatch.csvPlayer.baseVolTrueElo = mismatch.dbPlayer.baseVolTrueElo;
+                    mismatch.csvPlayer.baseRdPerfElo = mismatch.dbPlayer.baseRdPerfElo;
+                    mismatch.csvPlayer.baseVolPerfElo = mismatch.dbPlayer.baseVolPerfElo;
+                    
+                    // Copy all historical round data from DB player
+                    mismatch.csvPlayer.trueEloByRound.putAll(mismatch.dbPlayer.trueEloByRound);
+                    mismatch.csvPlayer.perfEloByRound.putAll(mismatch.dbPlayer.perfEloByRound);
+                    mismatch.csvPlayer.rdTrueEloByRound.putAll(mismatch.dbPlayer.rdTrueEloByRound);
+                    mismatch.csvPlayer.volTrueEloByRound.putAll(mismatch.dbPlayer.volTrueEloByRound);
+                    mismatch.csvPlayer.rdPerfEloByRound.putAll(mismatch.dbPlayer.rdPerfEloByRound);
+                    mismatch.csvPlayer.volPerfEloByRound.putAll(mismatch.dbPlayer.volPerfEloByRound);
+                    mismatch.csvPlayer.seatByRound.putAll(mismatch.dbPlayer.seatByRound);
+                    mismatch.csvPlayer.oppHallByRound.putAll(mismatch.dbPlayer.oppHallByRound);
+                    mismatch.csvPlayer.oppNameByRound.putAll(mismatch.dbPlayer.oppNameByRound);
+                    mismatch.csvPlayer.oppTrueEloByRound.putAll(mismatch.dbPlayer.oppTrueEloByRound);
+                    mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
+                    
+                    discordLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
+                        mismatch.csvPlayer.name, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+                    telegramLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
+                        mismatch.csvPlayer.name, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+                }
+                
+            } else if (choice == 1) {
+                // Treat as different people - continue as-is
+                discordLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
+                telegramLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
+                
+            } else {
+                // Cancel processing
+                String cancelMsg = "Processing cancelled by user due to name mismatches.";
                 discordLog.logWarning(cancelMsg);
                 telegramLog.logWarning(cancelMsg);
                 
-                // Send warning to upload chat if callback is set
                 if (uploadChatCallback != null) {
                     String formattedMsg = formatUploadMessage("🟡", "WARNING", cancelMsg);
                     uploadChatCallback.sendMessage(formattedMsg);
@@ -1119,9 +1623,6 @@ public class A1_PlayerStats {
                 
                 return false;
             }
-
-            discordLog.logInfo("User confirmed to proceed despite validation issues.");
-            telegramLog.logInfo("User confirmed to proceed despite validation issues.");
         }
 
         return true;
@@ -1199,6 +1700,36 @@ public class A1_PlayerStats {
                 String response = scanner.nextLine().trim().toLowerCase();
                 return response.equals("yes") || response.equals("y");
             }
+        }
+    }
+    
+    /**
+     * Requests user to choose from multiple options (either via callback or CLI)
+     * @param message The message to display
+     * @param options Array of option strings
+     * @return Index of chosen option (0-based), or -1 if cancelled
+     */
+    private int requestMultiChoice(String message, String[] options) {
+        if (multiChoiceCallback != null) {
+            return multiChoiceCallback.requestChoice(message, options);
+        } else {
+            // CLI fallback
+            System.out.println("\n" + message);
+            for (int i = 0; i < options.length; i++) {
+                System.out.println((i + 1) + ". " + options[i]);
+            }
+            System.out.print("Enter choice (1-" + options.length + "): ");
+            try (Scanner scanner = new Scanner(System.in)) {
+                try {
+                    int choice = Integer.parseInt(scanner.nextLine().trim());
+                    if (choice >= 1 && choice <= options.length) {
+                        return choice - 1;
+                    }
+                } catch (NumberFormatException e) {
+                    // Invalid input
+                }
+            }
+            return -1; // Invalid choice
         }
     }
 
@@ -1408,7 +1939,7 @@ public class A1_PlayerStats {
             // (Note: currently not used, but kept for potential future optimization)
         }
         
-        // Step 4: Process rounds sequentially using Glicko-2
+        // Step 4: Process rounds sequentially using Glicko-2 with iterative refinement
         List<String> roundsToProcess = ROUND_SEQUENCE.subList(0, currentRoundIndex + 1);
         
         System.out.println("DEBUG: About to calculate Glicko-2");
@@ -1417,28 +1948,47 @@ public class A1_PlayerStats {
         System.out.println("  - Total games: " + flattenGames(gamesByRound, roundsToProcess).size());
         System.out.println("  - First 3 players: " + allPlayers.stream().limit(3).toArray());
         
-        // Calculate TrueElo
+        // Determine number of iterations based on round
+        int iterations = (currentRoundIndex == 0) ? 1 : 3;
+        System.out.println("  - Iterations: " + iterations + " (Round " + (currentRoundIndex + 1) + ")");
+        
+        // Calculate TrueElo with iterative refinement
         Map<String, EloCalculator.Glicko2Rating> initialTrueRatings = new HashMap<>(currentTrueRatings);
-        EloCalculator.Glicko2Result trueResult = EloCalculator.calculateGlicko2TrueElo(
-            flattenGames(gamesByRound, roundsToProcess),
-            allPlayers,
-            initialTrueRatings,
-            roundsToProcess
-        );
+        EloCalculator.Glicko2Result trueResult = null;
+        
+        for (int iter = 0; iter < iterations; iter++) {
+            System.out.println("  - TrueElo iteration " + (iter + 1) + "/" + iterations);
+            trueResult = EloCalculator.calculateGlicko2TrueElo(
+                flattenGames(gamesByRound, roundsToProcess),
+                allPlayers,
+                initialTrueRatings,  // Always use original base ratings, not previous iteration's final ratings
+                roundsToProcess
+            );
+            
+            // Note: We do NOT update initialTrueRatings for next iteration
+            // Each iteration should start from the same base ratings to converge properly
+        }
         
         System.out.println("DEBUG: TrueElo calculation complete");
         System.out.println("  - Rounds in result: " + trueResult.ratingsByRound.keySet());
         
-        // Calculate PerfElo
+        // Calculate PerfElo with iterative refinement
         EloCalculator.Glicko2Result perfResult = null;
         if (perfEloEnabled) {
             Map<String, EloCalculator.Glicko2Rating> initialPerfRatings = new HashMap<>(currentPerfRatings);
-            perfResult = EloCalculator.calculateGlicko2PerfElo(
-                flattenGames(gamesByRound, roundsToProcess),
-                allPlayers,
-                initialPerfRatings,
-                roundsToProcess
-            );
+            
+            for (int iter = 0; iter < iterations; iter++) {
+                System.out.println("  - PerfElo iteration " + (iter + 1) + "/" + iterations);
+                perfResult = EloCalculator.calculateGlicko2PerfElo(
+                    flattenGames(gamesByRound, roundsToProcess),
+                    allPlayers,
+                    initialPerfRatings,  // Always use original base ratings, not previous iteration's final ratings
+                    roundsToProcess
+                );
+                
+                // Note: We do NOT update initialPerfRatings for next iteration
+                // Each iteration should start from the same base ratings to converge properly
+            }
         }
         
         // Step 5: Store calculated ratings in player stats
@@ -1676,6 +2226,9 @@ public class A1_PlayerStats {
                 dbPlayer.oppTrueEloByRound.put(roundName, null);
                 dbPlayer.oppPerfEloByRound.put(roundName, null);
 
+                // Preserve active status from database (don't change it)
+                // If player was active before, keep them active
+
                 // Add to csvPlayers so it gets updated
                 csvPlayers.put(playerKey, dbPlayer);
             }
@@ -1710,18 +2263,49 @@ public class A1_PlayerStats {
                 int newPlayers = 0;
                 int updatedPlayers = 0;
 
-                for (PlayerStats player : csvPlayers.values()) {
-                    String playerKey = player.name.toLowerCase();
-                    PlayerStats dbPlayer = dbPlayers.get(playerKey);
-
-                    if (dbPlayer != null && dbPlayer.existsInDb) {
-                        // Update existing player
-                        updatePlayerInDatabase(conn, player, dbPlayer, roundName);
-                        updatedPlayers++;
+                for (PlayerStats csvPlayer : csvPlayers.values()) {
+                    if (csvPlayer.existsInDb) {
+                        // This CSV player is mapped to an existing DB player
+                        // Find the DB player by ID
+                        PlayerStats dbPlayer = null;
+                        for (PlayerStats db : dbPlayers.values()) {
+                            if (db.dbId == csvPlayer.dbId) {
+                                dbPlayer = db;
+                                break;
+                            }
+                        }
+                        
+                        if (dbPlayer != null) {
+                            // Update existing player
+                            updatePlayerInDatabase(conn, csvPlayer, dbPlayer, roundName);
+                            updatedPlayers++;
+                            discordLog.batchInfo(String.format("Updated player: %s (ID: %d)", csvPlayer.name, dbPlayer.dbId));
+                            telegramLog.batchInfo(String.format("Updated player: %s (ID: %d)", csvPlayer.name, dbPlayer.dbId));
+                        } else {
+                            // This shouldn't happen, but handle it
+                            discordLog.logWarning(String.format("Warning: CSV player '%s' marked as existsInDb but DB player not found (ID: %d)", 
+                                csvPlayer.name, csvPlayer.dbId));
+                            telegramLog.logWarning(String.format("Warning: CSV player '%s' marked as existsInDb but DB player not found (ID: %d)", 
+                                csvPlayer.name, csvPlayer.dbId));
+                        }
                     } else {
-                        // Insert new player
-                        insertPlayerInDatabase(conn, player, roundName);
-                        newPlayers++;
+                        // Check if this player exists in DB by exact name match
+                        String playerKey = csvPlayer.name.toLowerCase();
+                        PlayerStats dbPlayer = dbPlayers.get(playerKey);
+                        
+                        if (dbPlayer != null) {
+                            // Player exists - update
+                            updatePlayerInDatabase(conn, csvPlayer, dbPlayer, roundName);
+                            updatedPlayers++;
+                            discordLog.batchInfo(String.format("Updated player: %s", csvPlayer.name));
+                            telegramLog.batchInfo(String.format("Updated player: %s", csvPlayer.name));
+                        } else {
+                            // Insert new player
+                            insertPlayerInDatabase(conn, csvPlayer, roundName);
+                            newPlayers++;
+                            discordLog.batchInfo(String.format("Inserted new player: %s", csvPlayer.name));
+                            telegramLog.batchInfo(String.format("Inserted new player: %s", csvPlayer.name));
+                        }
                     }
                 }
 
@@ -1748,10 +2332,14 @@ public class A1_PlayerStats {
         // Get current timestamp
         String currentTimestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date());
 
-        // Always update hall, capped status, and dateLogged
-        sql.append("hall = ?, capped = ?, dateLogged = ?, ");
+        // Always update hall, capped status, active status, and dateLogged
+        // Note: active status can only go from false->true, never true->false
+        // If player was already active (1) in DB, keep them active even if current round shows false
+        boolean finalActive = player.active || dbPlayer.active; // Once active, always active
+        sql.append("hall = ?, capped = ?, active = ?, dateLogged = ?, ");
         params.add(player.hall);
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
+        params.add(finalActive ? 1 : 0); // SQLite boolean as 0/1
         params.add(currentTimestamp);
 
         // Update ONLY current and future rounds (previous rounds remain unchanged)
@@ -1835,8 +2423,8 @@ public class A1_PlayerStats {
      * Inserts a new player into the database
      */
     private void insertPlayerInDatabase(Connection conn, PlayerStats player, String currentRound) throws SQLException {
-        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, baseRdTrueElo, baseVolTrueElo, baseRdPerfElo, baseVolPerfElo, dateLogged");
-        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
+        StringBuilder sql = new StringBuilder("INSERT INTO A1_PlayerStats (name, hall, capped, active, baseTrueElo, basePerfElo, baseRdTrueElo, baseVolTrueElo, baseRdPerfElo, baseVolPerfElo, dateLogged");
+        StringBuilder values = new StringBuilder("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
         List<Object> params = new ArrayList<>();
 
         // Get current timestamp
@@ -1845,6 +2433,7 @@ public class A1_PlayerStats {
         params.add(player.name);
         params.add(player.hall);
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
+        params.add(player.active ? 1 : 0); // SQLite boolean as 0/1
         // Use existing base ELO if set (from import), otherwise default to BASE_ELO
         params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
         params.add(player.basePerfElo != null ? player.basePerfElo : (perfEloEnabled ? BASE_ELO : null));
@@ -2075,327 +2664,25 @@ public class A1_PlayerStats {
     }
 
     /**
-     * Imports player data from playerExport CSV file
-     * Updates/creates baseTrueElo, basePerfElo, and hall for players
-     * Leaves capped status as default (false) - capped should be managed via cappedlist.csv
-     * Validates that A1_PlayerStats table is empty before processing
-     * @param csvFilePath Path to the playerExport CSV file
-     * @return true if successful, false otherwise
+     * Deletes all player data from the A1_PlayerStats table
      */
-    public boolean importPlayerExport(String csvFilePath) {
-        discordLog.logInfo("Starting player import from export file...");
-        telegramLog.logInfo("Starting player import from export file...");
-
-        File csvFile = new File(csvFilePath);
-        if (!csvFile.exists()) {
-            String errorMsg = "Player export file not found at: " + csvFilePath;
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-            if (uploadChatCallback != null) {
-                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
-                uploadChatCallback.sendMessage(formattedMsg);
-            }
-            return false;
-        }
-
-        try {
-            // Validate that A1_PlayerStats table is empty
-            if (!isTableEmpty()) {
-                String errorMsg = "Cannot import player data: A1_PlayerStats table is not empty. Table must be empty before importing playerExport.csv";
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
-                if (uploadChatCallback != null) {
-                    String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
-                    uploadChatCallback.sendMessage(formattedMsg);
-                }
-                return false;
-            }
-
-            // Parse CSV
-            List<PlayerImportEntry> entries = parsePlayerExportCSV(csvFilePath);
-
-            discordLog.batchInfo(String.format("CSV parsed successfully. %d players found.", entries.size()));
-            telegramLog.batchInfo(String.format("CSV parsed successfully. %d players found.", entries.size()));
-
-            // Import into database
-            importPlayerData(entries);
-
-            discordLog.flushBatch();
-            telegramLog.flushBatch();
-            String successMsg = String.format("Player import completed successfully. Updated/created %d players.", entries.size());
-            discordLog.logSuccess(successMsg);
-            telegramLog.logSuccess(successMsg);
-
-            // Send to upload chat if callback is set
-            if (uploadChatCallback != null) {
-                String formattedMsg = formatUploadMessage("🟢", "SUCCESS", successMsg);
-                uploadChatCallback.sendMessage(formattedMsg);
-            }
-
-            return true;
-
-        } catch (Exception e) {
-            discordLog.flushBatch();
-            telegramLog.flushBatch();
-            String errorMsg = "Player import failed: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-
-            // Send error to upload chat if callback is set
-            if (uploadChatCallback != null) {
-                String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
-                uploadChatCallback.sendMessage(formattedMsg);
-            }
-
-            return false;
-        }
-    }
-
-    /**
-     * Represents a player import entry from CSV
-     */
-    private static class PlayerImportEntry {
-        String name;
-        Integer trueElo;
-        Integer perfElo;
-        String hall;
-
-        PlayerImportEntry(String name, Integer trueElo, Integer perfElo, String hall) {
-            this.name = name;
-            this.trueElo = trueElo;
-            this.perfElo = perfElo;
-            this.hall = hall;
-        }
-    }
-
-    /**
-     * Parses the playerExport CSV file
-     * Expected format: name,trueElo,perfElo,lastRound,lastHall,capped
-     */
-    private List<PlayerImportEntry> parsePlayerExportCSV(String csvFilePath) throws Exception {
-        List<PlayerImportEntry> entries = new ArrayList<>();
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(csvFilePath))) {
-            String line;
-            int lineNumber = 0;
-            boolean isHeader = true;
-
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                line = line.trim();
-
-                if (line.isEmpty()) continue;
-
-                String[] parts = parseCSVLine(line);
-
-                if (isHeader) {
-                    if (parts.length != 6) {
-                        throw new Exception("Invalid CSV format: Header must have exactly 6 columns (name,trueElo,perfElo,lastRound,lastHall,capped)");
-                    }
-                    String[] expected = {"name", "trueelo", "perfelo", "lastround", "lasthall", "capped"};
-                    for (int i = 0; i < 6; i++) {
-                        if (!parts[i].trim().toLowerCase().equals(expected[i])) {
-                            throw new Exception(String.format("Invalid CSV header: Expected '%s' at column %d, found '%s'",
-                                expected[i], i + 1, parts[i].trim()));
-                        }
-                    }
-                    isHeader = false;
-                    continue;
-                }
-
-                if (parts.length != 6) {
-                    throw new Exception(String.format("Invalid CSV format at line %d: Expected 6 columns, found %d", lineNumber, parts.length));
-                }
-
-                String name = parts[0].trim();
-                String trueEloStr = parts[1].trim();
-                String perfEloStr = parts[2].trim();
-                // lastRound (parts[3]) is not used during import
-                String lastHall = parts[4].trim();
-                // capped (parts[5]) is not imported - capped status is managed via cappedlist.csv
-
-                if (name.isEmpty()) {
-                    throw new Exception(String.format("Invalid CSV format at line %d: Name cannot be empty", lineNumber));
-                }
-
-                if (trueEloStr.isEmpty()) {
-                    throw new Exception(String.format("Invalid CSV format at line %d: trueElo cannot be empty", lineNumber));
-                }
-
-                // lastHall can be empty/null for players who haven't played yet
-                if (lastHall.isEmpty()) {
-                    lastHall = null;
-                }
-
-                Integer trueElo = null;
-                Integer perfElo = null;
-
-                try {
-                    trueElo = Integer.parseInt(trueEloStr);
-                } catch (NumberFormatException e) {
-                    throw new Exception(String.format("Invalid CSV format at line %d: trueElo must be an integer", lineNumber));
-                }
-
-                if (!perfEloStr.isEmpty()) {
-                    try {
-                        perfElo = Integer.parseInt(perfEloStr);
-                    } catch (NumberFormatException e) {
-                        throw new Exception(String.format("Invalid CSV format at line %d: perfElo must be an integer or empty", lineNumber));
-                    }
-                }
-
-                entries.add(new PlayerImportEntry(name, trueElo, perfElo, lastHall));
-            }
-
-            if (entries.isEmpty()) {
-                throw new Exception("CSV file contains no data rows");
-            }
-
-        } catch (IOException e) {
-            throw new Exception("Error reading CSV file: " + e.getMessage());
-        }
-
-        return entries;
-    }
-
-    /**
-     * Checks if a player has played any rounds (has any non-null ELO values in round columns)
-     * @param conn Database connection
-     * @param playerId Player's ID
-     * @return true if player has played rounds, false otherwise
-     */
-    private boolean hasPlayedRounds(Connection conn, int playerId) throws SQLException {
-        String sql = "SELECT trueEloR1, trueEloR2, trueEloR3, trueEloR4, trueEloR5, trueEloR6, " +
-                     "trueEloT16, trueEloT8, trueEloT4, trueEloT2 FROM A1_PlayerStats WHERE id = ?";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, playerId);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    // Check if any round ELO column is not null
-                    for (int i = 1; i <= 10; i++) {
-                        if (rs.getObject(i) != null) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Imports player data into the database
-     * Creates new players or updates existing ones (by name, case-insensitive)
-     * Writes hall field from CSV but does NOT import capped status (managed via cappedlist.csv)
-     * Detects hall conflicts and requests user confirmation when needed
-     */
-    private void importPlayerData(List<PlayerImportEntry> entries) throws Exception {
+    private void deleteAllPlayerData() throws Exception {
         String jdbcUrl = "jdbc:sqlite:" + dbPath;
-
+        
         try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
             conn.setAutoCommit(false);
-
+            
             try {
-                String currentTimestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date());
-
-                for (PlayerImportEntry entry : entries) {
-                    // Check if player exists (case-insensitive name match)
-                    String checkSQL = "SELECT id, hall FROM A1_PlayerStats WHERE LOWER(name) = LOWER(?)";
-                    Integer existingId = null;
-                    String existingHall = null;
-
-                    try (PreparedStatement checkStmt = conn.prepareStatement(checkSQL)) {
-                        checkStmt.setString(1, entry.name);
-                        try (ResultSet rs = checkStmt.executeQuery()) {
-                            if (rs.next()) {
-                                existingId = rs.getInt("id");
-                                existingHall = rs.getString("hall");
-                            }
-                        }
-                    }
-
-                    if (existingId != null) {
-                        // Player exists - check for hall conflict
-                        boolean hallConflict = false;
-                        
-                        if (existingHall != null && entry.hall != null && 
-                            !existingHall.equalsIgnoreCase(entry.hall)) {
-                            // Hall differs - check if player has played any rounds
-                            if (!hasPlayedRounds(conn, existingId)) {
-                                // Player hasn't played yet - ask user for confirmation
-                                hallConflict = true;
-                                
-                                // Build confirmation message
-                                String conflictMsg = String.format(
-                                    "⚠️ HALL CONFLICT DETECTED\\n\\n" +
-                                    "Player: %s\\n" +
-                                    "Database hall: %s\\n" +
-                                    "CSV hall: %s\\n\\n" +
-                                    "This player exists in the database but has not played any rounds yet.\\n" +
-                                    "Are these the same player?\\n\\n" +
-                                    "Reply with:\\n" +
-                                    "✅ 'yes' - Update hall to '%s' (CSV value)\\n" +
-                                    "❌ 'no' - Keep as different players (import will fail)",
-                                    entry.name, existingHall, entry.hall, entry.hall
-                                );
-                                
-                                discordLog.logWarning(conflictMsg);
-                                telegramLog.logWarning(conflictMsg);
-                                
-                                // Send to upload chat for user confirmation
-                                if (uploadChatCallback != null) {
-                                    uploadChatCallback.sendMessage(conflictMsg);
-                                }
-                                
-                                // For now, we'll throw an exception to halt the import
-                                // In a real implementation, this would wait for user response
-                                throw new Exception(String.format(
-                                    "Hall conflict detected for player '%s' (DB: %s, CSV: %s). " +
-                                    "Player has not played any rounds. Please confirm if same player.",
-                                    entry.name, existingHall, entry.hall
-                                ));
-                            }
-                        }
-                        
-                        // Update existing player - update base ELO and hall values
-                        String updateSQL = "UPDATE A1_PlayerStats SET baseTrueElo = ?, basePerfElo = ?, hall = ?, dateLogged = ? WHERE id = ?";
-                        try (PreparedStatement pstmt = conn.prepareStatement(updateSQL)) {
-                            pstmt.setInt(1, entry.trueElo);
-                            pstmt.setObject(2, entry.perfElo);
-                            pstmt.setString(3, entry.hall);
-                            pstmt.setString(4, currentTimestamp);
-                            pstmt.setInt(5, existingId);
-                            pstmt.executeUpdate();
-                        }
-                        discordLog.batchInfo(String.format("Updated player: %s (hall: %s)",
-                            entry.name, entry.hall != null ? entry.hall : "none"));
-                        telegramLog.batchInfo(String.format("Updated player: %s (hall: %s)",
-                            entry.name, entry.hall != null ? entry.hall : "none"));
-                    } else {
-                        // Insert new player - name, base ELO, and hall. capped defaults to 0 (false)
-                        String insertSQL = "INSERT INTO A1_PlayerStats (name, hall, capped, baseTrueElo, basePerfElo, dateLogged) VALUES (?, ?, 0, ?, ?, ?)";
-                        try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
-                            pstmt.setString(1, entry.name);
-                            pstmt.setString(2, entry.hall);
-                            pstmt.setInt(3, entry.trueElo);
-                            pstmt.setObject(4, entry.perfElo);
-                            pstmt.setString(5, currentTimestamp);
-                            pstmt.executeUpdate();
-                        }
-                        discordLog.batchInfo(String.format("Created new player: %s (hall: %s)",
-                            entry.name, entry.hall != null ? entry.hall : "none"));
-                        telegramLog.batchInfo(String.format("Created new player: %s (hall: %s)",
-                            entry.name, entry.hall != null ? entry.hall : "none"));
-                    }
+                String sql = "DELETE FROM A1_PlayerStats";
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.executeUpdate(sql);
                 }
-
+                
                 conn.commit();
-
             } catch (SQLException e) {
                 conn.rollback();
-                throw new Exception("Database transaction failed: " + e.getMessage());
+                throw new Exception("Failed to delete player data: " + e.getMessage());
             }
-
         } catch (SQLException e) {
             throw new Exception("Database connection failed: " + e.getMessage());
         }

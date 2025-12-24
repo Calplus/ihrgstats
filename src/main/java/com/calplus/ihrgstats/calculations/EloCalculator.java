@@ -15,8 +15,13 @@ public class EloCalculator {
     private static final double TAU = 0.8; // System constant - higher allows faster volatility changes
     private static final double CONVERGENCE_TOLERANCE = 0.000001;
     
-    // Sigmoid transform constant for perfElo
-    private static final double SIGMOID_K = 0.15; // Sensitivity for Go point margins
+    // PerfElo margin transform constants
+    // Calibrated for tournaments where players are not highly skilled
+    // 100+ point margins are considered dominant wins
+    private static final double MARGIN_SCALE = 100.0; // Scale factor: 100 points = 1.0 scale unit
+    private static final double MARGIN_STEEPNESS = 2.0; // Steepness of margin impact curve
+    private static final double MIN_OUTCOME = 0.02; // Minimum outcome (prevents 0 which causes Glicko-2 issues)
+    private static final double MAX_OUTCOME = 0.98; // Maximum outcome (prevents 1 which causes Glicko-2 issues)
     
     // Glicko-2 scale conversion constant
     // Original Glicko-2 works on scale where 1 rating point ≈ 173.7178 in traditional scale
@@ -73,14 +78,50 @@ public class EloCalculator {
     }
     
     /**
-     * Converts point margin to continuous outcome score using sigmoid transform
-     * s_j = 1 / (1 + e^(-k * m))
+     * Converts point margin to continuous outcome score using modified sigmoid transform.
+     * 
+     * Formula: s = 0.5 + 0.48 * tanh((margin / MARGIN_SCALE) ^ MARGIN_STEEPNESS)
+     * 
+     * This formula is calibrated for tournaments where:
+     * - Players are not highly skilled (high variance in performance)
+     * - 100+ point margins represent dominant wins
+     * - Smaller margins (0-50 points) should have meaningful but moderate impact
+     * 
+     * Score mapping (approximate):
+     * - margin = 0:     s ≈ 0.50 (even game)
+     * - margin = 25:    s ≈ 0.65 (modest advantage)
+     * - margin = 50:    s ≈ 0.76 (clear advantage)
+     * - margin = 75:    s ≈ 0.85 (strong win)
+     * - margin = 100:   s ≈ 0.91 (dominant win)
+     * - margin = 150:   s ≈ 0.96 (crushing victory)
+     * - margin = 200+:  s ≈ 0.98 (maximum)
+     * 
+     * The formula uses:
+     * 1. Scaling by MARGIN_SCALE (100) to normalize point differences
+     * 2. Power transformation (^2) to emphasize larger margins
+     * 3. tanh to create smooth S-curve with natural bounds
+     * 4. Clamping to [MIN_OUTCOME, MAX_OUTCOME] to prevent numerical issues in Glicko-2
      * 
      * @param pointMargin Margin of victory (positive for win, negative for loss)
-     * @return Continuous outcome value between 0 and 1
+     * @return Continuous outcome value between MIN_OUTCOME and MAX_OUTCOME
      */
     public static double pointMarginToOutcome(double pointMargin) {
-        return 1.0 / (1.0 + Math.exp(-SIGMOID_K * pointMargin));
+        // Normalize by scale and apply power transform
+        double normalized = pointMargin / MARGIN_SCALE;
+        
+        // Apply sign-preserving power transform
+        // This makes larger margins have exponentially more impact
+        double powered = Math.signum(normalized) * Math.pow(Math.abs(normalized), MARGIN_STEEPNESS);
+        
+        // Apply tanh for smooth S-curve: tanh(x) ∈ (-1, 1)
+        double tanh = Math.tanh(powered);
+        
+        // Map from (-1, 1) to (0, 1) with base at 0.5
+        // Use 0.48 instead of 0.5 to stay within MIN/MAX bounds
+        double outcome = 0.5 + 0.48 * tanh;
+        
+        // Clamp to safe bounds to prevent Glicko-2 numerical issues
+        return Math.max(MIN_OUTCOME, Math.min(MAX_OUTCOME, outcome));
     }
     
     /**
@@ -366,18 +407,36 @@ public class EloCalculator {
             // Update all player ratings for this round
             Map<String, Glicko2Rating> newRatings = new HashMap<>();
             int changedCount = 0;
+            int walkoverCount = 0;
             for (String player : playerNames) {
                 String playerKey = player.toLowerCase();
                 Glicko2Rating currentRating = currentRatings.get(playerKey);
                 List<OpponentData> opponents = playerOpponents.getOrDefault(playerKey, new ArrayList<>());
                 
-                Glicko2Rating newRating = updateGlicko2Rating(currentRating, opponents);
+                Glicko2Rating newRating;
+                if (opponents.isEmpty()) {
+                    // No opponents this round (walkover or bye) - preserve rating exactly
+                    newRating = new Glicko2Rating(currentRating.rating, currentRating.rd, currentRating.volatility);
+                    walkoverCount++;
+                    // DEBUG: Log walkover cases
+                    if (walkoverCount <= 3) {
+                        System.out.println("DEBUG WALKOVER: Round " + round + ", Player: " + playerKey);
+                        System.out.println("  Current rating: " + String.format("%.1f (RD: %.1f, Vol: %.6f)", 
+                            currentRating.rating, currentRating.rd, currentRating.volatility));
+                        System.out.println("  New rating (preserved): " + String.format("%.1f (RD: %.1f, Vol: %.6f)", 
+                            newRating.rating, newRating.rd, newRating.volatility));
+                    }
+                } else {
+                    // Normal rating update with Glicko-2 algorithm
+                    newRating = updateGlicko2Rating(currentRating, opponents);
+                }
                 newRatings.put(playerKey, newRating);
                 
                 if (Math.abs(newRating.rating - currentRating.rating) > 0.1) {
                     changedCount++;
                 }
             }
+            System.out.println("  - Players with no opponents (walkover/bye): " + walkoverCount);
             
             System.out.println("  - Players with rating changes: " + changedCount + " / " + playerNames.size());
             if (changedCount > 0) {

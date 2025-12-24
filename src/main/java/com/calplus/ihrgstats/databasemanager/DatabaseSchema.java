@@ -157,6 +157,7 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("name", "TEXT"));
         playerStatsColumns.add(new ColumnDefinition("hall", "TEXT"));
         playerStatsColumns.add(new ColumnDefinition("capped", "BOOLEAN"));
+        playerStatsColumns.add(new ColumnDefinition("active", "BOOLEAN"));
 
         // Elo Rating - Base values
         playerStatsColumns.add(new ColumnDefinition("baseTrueElo", "INTEGER"));

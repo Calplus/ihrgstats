@@ -41,14 +41,25 @@ public class CommandExportLatestPlayerData {
         String name;
         Integer trueElo;
         Integer perfElo;
+        Double rdTrueElo;
+        Double volTrueElo;
+        Double rdPerfElo;
+        Double volPerfElo;
         String lastRound;
         String lastHall;
         boolean capped;
 
-        PlayerExportData(String name, Integer trueElo, Integer perfElo, String lastRound, String lastHall, boolean capped) {
+        PlayerExportData(String name, Integer trueElo, Integer perfElo, 
+                        Double rdTrueElo, Double volTrueElo, 
+                        Double rdPerfElo, Double volPerfElo,
+                        String lastRound, String lastHall, boolean capped) {
             this.name = name;
             this.trueElo = trueElo;
             this.perfElo = perfElo;
+            this.rdTrueElo = rdTrueElo;
+            this.volTrueElo = volTrueElo;
+            this.rdPerfElo = rdPerfElo;
+            this.volPerfElo = volPerfElo;
             this.lastRound = lastRound;
             this.lastHall = lastHall;
             this.capped = capped;
@@ -77,21 +88,39 @@ public class CommandExportLatestPlayerData {
                         String hall = rs.getString("hall");
                         boolean capped = rs.getInt("capped") == 1;
                         
-                        // Find latest round with non-null trueElo
+                        // Find latest round where player actually played (has opponent data)
                         Integer latestTrueElo = null;
                         Integer latestPerfElo = null;
+                        Double latestRdTrueElo = null;
+                        Double latestVolTrueElo = null;
+                        Double latestRdPerfElo = null;
+                        Double latestVolPerfElo = null;
                         String lastRound = null;
 
-                        // Check rounds in reverse order to find the latest
+                        // Check rounds in reverse order to find the latest round where player actually played
                         for (int i = ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
                             String round = ROUND_SEQUENCE.get(i);
                             String trueEloCol = getRoundColumnName("trueElo", round);
                             String perfEloCol = getRoundColumnName("perfElo", round);
+                            String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
+                            String volTrueEloCol = getRoundColumnName("volTrueElo", round);
+                            String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
+                            String volPerfEloCol = getRoundColumnName("volPerfElo", round);
+                            String oppNameCol = getRoundColumnName("oppName", round);
 
+                            // Check if player actually played this round (has opponent name)
+                            String oppName = rs.getString(oppNameCol);
                             Integer trueElo = (Integer) rs.getObject(trueEloCol);
-                            if (trueElo != null) {
+                            
+                            // Player actually played if they have an opponent name (even if it's "WALKOVER")
+                            // or if they have trueElo but no opponent columns exist yet (backwards compatibility)
+                            if (oppName != null && !oppName.trim().isEmpty() && trueElo != null) {
                                 latestTrueElo = trueElo;
                                 latestPerfElo = (Integer) rs.getObject(perfEloCol);
+                                latestRdTrueElo = (Double) rs.getObject(rdTrueEloCol);
+                                latestVolTrueElo = (Double) rs.getObject(volTrueEloCol);
+                                latestRdPerfElo = (Double) rs.getObject(rdPerfEloCol);
+                                latestVolPerfElo = (Double) rs.getObject(volPerfEloCol);
                                 lastRound = round;
                                 break;
                             }
@@ -101,12 +130,18 @@ public class CommandExportLatestPlayerData {
                         if (latestTrueElo == null) {
                             latestTrueElo = (Integer) rs.getObject("baseTrueElo");
                             latestPerfElo = (Integer) rs.getObject("basePerfElo");
+                            latestRdTrueElo = (Double) rs.getObject("baseRdTrueElo");
+                            latestVolTrueElo = (Double) rs.getObject("baseVolTrueElo");
+                            latestRdPerfElo = (Double) rs.getObject("baseRdPerfElo");
+                            latestVolPerfElo = (Double) rs.getObject("baseVolPerfElo");
                             lastRound = "base";
                         }
 
                         // Only export if we have at least trueElo
                         if (latestTrueElo != null) {
-                            exportData.add(new PlayerExportData(name, latestTrueElo, latestPerfElo, lastRound, hall, capped));
+                            exportData.add(new PlayerExportData(name, latestTrueElo, latestPerfElo,
+                                latestRdTrueElo, latestVolTrueElo, latestRdPerfElo, latestVolPerfElo,
+                                lastRound, hall, capped));
                         }
                     }
                 }
@@ -128,14 +163,18 @@ public class CommandExportLatestPlayerData {
 
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvPath.toFile()))) {
                 // Write header
-                writer.write("name,trueElo,perfElo,lastRound,lastHall,capped\n");
+                writer.write("name,trueElo,perfElo,rdTrueElo,volTrueElo,rdPerfElo,volPerfElo,lastRound,lastHall,capped\n");
 
                 // Write data
                 for (PlayerExportData data : exportData) {
-                    writer.write(String.format("%s,%d,%s,%s,%s,%s\n",
+                    writer.write(String.format("%s,%d,%s,%s,%s,%s,%s,%s,%s,%s\n",
                         escapeCsvField(data.name),
                         data.trueElo,
                         data.perfElo != null ? data.perfElo.toString() : "",
+                        data.rdTrueElo != null ? String.format("%.4f", data.rdTrueElo) : "",
+                        data.volTrueElo != null ? String.format("%.6f", data.volTrueElo) : "",
+                        data.rdPerfElo != null ? String.format("%.4f", data.rdPerfElo) : "",
+                        data.volPerfElo != null ? String.format("%.6f", data.volPerfElo) : "",
                         data.lastRound,
                         escapeCsvField(data.lastHall),
                         data.capped ? "true" : "false"));

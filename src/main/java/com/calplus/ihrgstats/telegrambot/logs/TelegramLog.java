@@ -37,6 +37,10 @@ public class TelegramLog {
     private final StringBuilder batchBuffer;
     private long batchStartTime;
     private final Object batchLock;
+    
+    // INFO message batching - accumulate INFO logs until a terminal log type (SUCCESS/ERROR/WARNING)
+    private final StringBuilder infoBatchBuffer;
+    private final Object infoBatchLock;
 
     private static class QueuedMessage {
         String message;
@@ -56,10 +60,13 @@ public class TelegramLog {
         this.batchBuffer = new StringBuilder();
         this.batchStartTime = 0;
         this.batchLock = new Object();
+        this.infoBatchBuffer = new StringBuilder();
+        this.infoBatchLock = new Object();
         
         // Add shutdown hook to ensure all messages are sent before exit
         if (telegramEnabled) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                flushInfoBatch(); // Send any pending INFO messages
                 flushBatch(); // Send any pending batch messages
                 flush();
             }));
@@ -83,8 +90,10 @@ public class TelegramLog {
                 System.err.println("WARNING: telegram.bot.token not found in application.properties. Telegram logging disabled.");
                 return false;
             }
+            
+            // If devChatId is empty, disable Telegram logging entirely
             if (this.chatId == null || this.chatId.isEmpty()) {
-                System.err.println("WARNING: telegram.chatId not found in application.properties. Telegram logging disabled.");
+                System.out.println("INFO: telegram.devChatId not found in application.properties. Telegram logging disabled.");
                 return false;
             }
             
@@ -113,10 +122,10 @@ public class TelegramLog {
             String className = element.getClassName();
             String fileName = element.getFileName();
 
-            // Skip Thread, TelegramLog, and internal classes
+            // Skip Thread, TelegramLog (check full class path), and internal classes
             if (fileName != null && 
                 !className.equals("java.lang.Thread") &&
-                !className.equals("telegrambot.logs.TelegramLog") &&
+                !className.endsWith(".TelegramLog") &&
                 !className.startsWith("java.") &&
                 !className.startsWith("sun.")) {
                 return fileName;
@@ -332,6 +341,10 @@ public class TelegramLog {
         }
         
         System.err.println(formattedMessage);
+        
+        // Flush any accumulated INFO messages before sending error
+        flushInfoBatch();
+        
         return queueMessage(formattedMessage);
     }
 
@@ -344,7 +357,11 @@ public class TelegramLog {
         String filename = getCallerFilename();
         String formattedMessage = formatMessage("🟢", "SUCCESS", message, filename);
         System.out.println(formattedMessage);
-        return queueMessage(formattedMessage);
+        
+        // Combine accumulated INFO messages with success message
+        String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
+        
+        return queueMessage(combinedMessage);
     }
 
     /**
@@ -356,19 +373,32 @@ public class TelegramLog {
         String filename = getCallerFilename();
         String formattedMessage = formatMessage("🟡", "WARNING", message, filename);
         System.out.println(formattedMessage);
-        return queueMessage(formattedMessage);
+        
+        // Combine accumulated INFO messages with warning message
+        String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
+        
+        return queueMessage(combinedMessage);
     }
 
     /**
-     * Sends an info log message to the Telegram chat
-     * @param message The info message to send
-     * @return CompletableFuture that resolves to true if successful, false otherwise
+     * Adds an info log message to the INFO batch buffer
+     * INFO messages are accumulated and sent together with the next SUCCESS/ERROR/WARNING message
+     * @param message The info message to add
+     * @return CompletableFuture that resolves to true (immediately)
      */
     public CompletableFuture<Boolean> logInfo(String message) {
         String filename = getCallerFilename();
         String formattedMessage = formatMessage("🔵", "INFO", message, filename);
         System.out.println(formattedMessage);
-        return queueMessage(formattedMessage);
+        
+        synchronized (infoBatchLock) {
+            if (infoBatchBuffer.length() > 0) {
+                infoBatchBuffer.append("\n");
+            }
+            infoBatchBuffer.append(formattedMessage);
+        }
+        
+        return CompletableFuture.completedFuture(true);
     }
 
     /**
@@ -502,6 +532,34 @@ public class TelegramLog {
         }
     }
 
+    /**
+     * Flushes any accumulated INFO messages without sending them
+     * (Used internally when error occurs to clear the buffer)
+     */
+    private void flushInfoBatch() {
+        synchronized (infoBatchLock) {
+            infoBatchBuffer.setLength(0);
+        }
+    }
+    
+    /**
+     * Combines accumulated INFO messages with a terminal message (SUCCESS/ERROR/WARNING)
+     * and clears the INFO buffer
+     * @param terminalMessage The terminal message to append
+     * @return Combined message with all INFO logs followed by the terminal message
+     */
+    private String combineInfoBatchWithMessage(String terminalMessage) {
+        synchronized (infoBatchLock) {
+            if (infoBatchBuffer.length() == 0) {
+                return terminalMessage;
+            }
+            
+            String combined = infoBatchBuffer.toString() + "\n" + terminalMessage;
+            infoBatchBuffer.setLength(0);
+            return combined;
+        }
+    }
+    
     /**
      * Main method for testing
      */

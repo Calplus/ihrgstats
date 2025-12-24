@@ -37,10 +37,12 @@ public class TelegramListener {
     private String publicChatId;
     private String publicChatIdFileupload;
     private String devChatId;  // The dev chat ID for status messages
+    private String devChatIdLog;  // The dev chat ID for log messages
     private String publicChatIdStatus;
     private String publicChatIdCommands;
     private String adminUserId;
     private boolean allowNonAdminUploads;
+    private boolean allowAllChannelsProcessing;
     
     private String webhookUrl;
     private int webhookPort;
@@ -55,7 +57,9 @@ public class TelegramListener {
     
     // Pending confirmations: using a single key for file processing confirmations
     private final Map<String, ConfirmationRequest> pendingConfirmations = new ConcurrentHashMap<>();
+    private final Map<String, MultiChoiceConfirmationRequest> pendingMultiChoiceConfirmations = new ConcurrentHashMap<>();
     private static final String FILE_PROCESSING_CONFIRMATION_KEY = "file_processing";
+    private static final String FILE_PROCESSING_MULTI_CHOICE_KEY = "file_processing_multi";
     
     private static class ConfirmationRequest {
         String message;
@@ -64,6 +68,20 @@ public class TelegramListener {
         
         ConfirmationRequest(String message, CompletableFuture<Boolean> future) {
             this.message = message;
+            this.future = future;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+    
+    private static class MultiChoiceConfirmationRequest {
+        String message;
+        String[] options;
+        CompletableFuture<Integer> future;
+        long timestamp;
+        
+        MultiChoiceConfirmationRequest(String message, String[] options, CompletableFuture<Integer> future) {
+            this.message = message;
+            this.options = options;
             this.future = future;
             this.timestamp = System.currentTimeMillis();
         }
@@ -92,10 +110,12 @@ public class TelegramListener {
             this.publicChatId = PropertyResolver.getProperty("telegram.publicChatId", "");
             this.publicChatIdFileupload = PropertyResolver.getProperty("telegram.publicChatId.fileupload", "");
             this.devChatId = PropertyResolver.getProperty("telegram.devChatId", "");  // Load dev chat ID
+            this.devChatIdLog = PropertyResolver.getProperty("telegram.devChatId.log", "");  // Load dev chat log ID
             this.publicChatIdStatus = PropertyResolver.getProperty("telegram.devChatId.status", "");
             this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
             this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
             this.allowNonAdminUploads = Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowNonAdminUploads", "true"));
+            this.allowAllChannelsProcessing = Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowAllChannelsProcessing", "false"));
             
             this.webhookUrl = PropertyResolver.getProperty("internet.webhook.url", "");
             String portStr = PropertyResolver.getProperty("internet.webhook.port", "8443");
@@ -110,6 +130,74 @@ public class TelegramListener {
             System.err.println("Error loading configuration: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Helper methods for intelligent chat/thread routing
+     * These methods determine the correct chat ID and thread ID to use based on:
+     * 1. Whether sub-channel values exist (prefer sub-channel over main channel)
+     * 2. Whether main channel is configured (fallback to main if sub-channel empty)
+     * 3. Current context (allowAllChannelsProcessing, original message context)
+     */
+
+    /**
+     * Gets the chat ID and thread ID for upload messages
+     * @return String[] with [chatId, threadId] or [chatId, null] if no thread
+     */
+    private String[] getUploadChatIdAndThread() {
+        // If subchannel exists, use it (it's a thread in the main channel)
+        if (!publicChatIdFileupload.isEmpty()) {
+            return new String[]{publicChatId, publicChatIdFileupload};
+        }
+        // Otherwise use main channel without thread
+        return new String[]{publicChatId, null};
+    }
+
+    /**
+     * Gets the chat ID and thread ID for command responses
+     * @return String[] with [chatId, threadId] or [chatId, null] if no thread
+     */
+    private String[] getCommandsChatIdAndThread() {
+        // If subchannel exists, use it (it's a thread in the main channel)
+        if (!publicChatIdCommands.isEmpty()) {
+            return new String[]{publicChatId, publicChatIdCommands};
+        }
+        // Otherwise use main channel without thread
+        return new String[]{publicChatId, null};
+    }
+
+    /**
+     * Gets the chat ID and thread ID for status messages
+     * @return String[] with [chatId, threadId] or [chatId, null] if no thread, or null if devChatId is empty
+     */
+    private String[] getStatusChatIdAndThread() {
+        // If devChatId is empty, don't send status messages
+        if (devChatId.isEmpty()) {
+            return null;
+        }
+        // If subchannel exists, use it (it's a thread in the dev channel)
+        if (!publicChatIdStatus.isEmpty()) {
+            return new String[]{devChatId, publicChatIdStatus};
+        }
+        // Otherwise use dev channel without thread
+        return new String[]{devChatId, null};
+    }
+
+    /**
+     * Gets the chat ID and thread ID for log messages
+     * @return String[] with [chatId, threadId] or [chatId, null] if no thread, or null if devChatId is empty
+     */
+    private String[] getLogChatIdAndThread() {
+        // If devChatId is empty, don't send log messages
+        if (devChatId.isEmpty()) {
+            return null;
+        }
+        // If subchannel exists, use it (it's a thread in the dev channel)
+        if (!devChatIdLog.isEmpty()) {
+            return new String[]{devChatId, devChatIdLog};
+        }
+        // Otherwise use dev channel without thread
+        return new String[]{devChatId, null};
     }
 
     /**
@@ -131,11 +219,12 @@ public class TelegramListener {
             return;
         }
 
+        // If publicChatId is empty, the bot will accept messages from any channel
         if (publicChatId.isEmpty()) {
-            String errorMsg = "Telegram publicChatId not configured. Cannot start listener.";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-            return;
+            discordLog.logInfo("Telegram publicChatId not configured. Bot will process messages from any channel it has access to.");
+            telegramLog.logInfo("Telegram publicChatId not configured. Bot will process messages from any channel it has access to.");
+            // Set allowAllChannelsProcessing to true when publicChatId is empty
+            this.allowAllChannelsProcessing = true;
         }
 
         isRunning = true;
@@ -364,6 +453,13 @@ public class TelegramListener {
                 long updateId = update.get("update_id").getAsLong();
                 lastUpdateId = Math.max(lastUpdateId, updateId);
                 
+                // Handle callback queries (button clicks)
+                if (update.has("callback_query")) {
+                    JsonObject callbackQuery = update.getAsJsonObject("callback_query");
+                    handleCallbackQuery(callbackQuery);
+                    continue;
+                }
+                
                 if (!update.has("message")) continue;
                 JsonObject message = update.getAsJsonObject("message");
                 
@@ -371,35 +467,85 @@ public class TelegramListener {
                 JsonObject chat = message.getAsJsonObject("chat");
                 String chatId = chat.get("id").getAsString();
             
-            // Check chat match
-            boolean isPublicChat = chatId.equals(publicChatId);
-            boolean hasThreadId = false;
-            
-            // If we're waiting for a confirmation, accept ANY message from the correct chat
-            boolean waitingForConfirmation = pendingConfirmations.containsKey(FILE_PROCESSING_CONFIRMATION_KEY);
-            
-            if (waitingForConfirmation) {
-                // Accept any message from the correct chat while waiting for confirmation
-                hasThreadId = true;
-                String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : "none";
-                System.out.println("[CONFIRMATION MODE] Accepting message from chat " + chatId + " with thread ID: " + msgThreadId);
-            } else if (!publicChatIdFileupload.isEmpty()) {
-                // Normal mode - check message_thread_id if specified
-                if (message.has("message_thread_id")) {
-                    String threadId = message.get("message_thread_id").getAsString();
-                    if (threadId.equals(publicChatIdFileupload)) {
-                        hasThreadId = true;
-                    }
-                }
+            // If allowAllChannelsProcessing is true OR publicChatId is empty, accept messages from any channel
+            if (allowAllChannelsProcessing || publicChatId.isEmpty()) {
+                // Accept message from any channel - no filtering needed
+                // When publicChatId is empty, the bot processes messages from any channel it has access to
             } else {
-                hasThreadId = true; // No thread requirement
-            }
-            
-            if (!isPublicChat || !hasThreadId) {
+                // Check chat match
+                boolean isPublicChat = chatId.equals(publicChatId);
+                boolean hasValidThread = false;
+                
+                // If we're waiting for a confirmation, accept ANY message from the correct chat
+                boolean waitingForConfirmation = pendingConfirmations.containsKey(FILE_PROCESSING_CONFIRMATION_KEY);
+                
                 if (waitingForConfirmation) {
-                    System.out.println("[CONFIRMATION MODE] Rejecting message - isPublicChat: " + isPublicChat + ", hasThreadId: " + hasThreadId);
+                    // Accept any message from the correct chat while waiting for confirmation
+                    hasValidThread = true;
+                    String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : "none";
+                    System.out.println("[CONFIRMATION MODE] Accepting message from chat " + chatId + " with thread ID: " + msgThreadId);
+                } else if (message.has("message_thread_id")) {
+                    // Normal mode - validate based on message type
+                    String threadId = message.get("message_thread_id").getAsString();
+                    
+                    // Check if message contains a document (file upload)
+                    boolean isFileUpload = message.has("document");
+                    // Check if message contains text starting with / (command)
+                    boolean isCommand = message.has("text") && message.get("text").getAsString().trim().startsWith("/");
+                    
+                    if (isFileUpload) {
+                        // File uploads should ONLY be accepted from fileupload thread
+                        if (!publicChatIdFileupload.isEmpty() && threadId.equals(publicChatIdFileupload)) {
+                            hasValidThread = true;
+                        }
+                    } else if (isCommand) {
+                        // Commands should ONLY be accepted from commands thread
+                        if (!publicChatIdCommands.isEmpty() && threadId.equals(publicChatIdCommands)) {
+                            hasValidThread = true;
+                        }
+                    } else {
+                        // Other text messages (confirmations, etc.) - accept from both threads
+                        if (!publicChatIdFileupload.isEmpty() && threadId.equals(publicChatIdFileupload)) {
+                            hasValidThread = true;
+                        }
+                        if (!publicChatIdCommands.isEmpty() && threadId.equals(publicChatIdCommands)) {
+                            hasValidThread = true;
+                        }
+                    }
+                } else {
+                    // No thread ID in message - accept if both fileupload and commands are empty (base chat)
+                    hasValidThread = publicChatIdFileupload.isEmpty() && publicChatIdCommands.isEmpty();
                 }
-                continue; // Not from target chat/thread
+                
+                if (!isPublicChat || !hasValidThread) {
+                    if (waitingForConfirmation) {
+                        System.out.println("[CONFIRMATION MODE] Rejecting message - isPublicChat: " + isPublicChat + ", hasValidThread: " + hasValidThread);
+                    } else {
+                        // Send error message if user is trying to interact from wrong channel
+                        if (message.has("text") || message.has("document")) {
+                            // Determine specific error message based on what they're trying to do
+                            String errorMsg;
+                            if (message.has("document")) {
+                                errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
+                            } else if (message.has("text") && message.get("text").getAsString().trim().startsWith("/")) {
+                                errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to Thread ID " + publicChatIdCommands + " (commands channel)";
+                            } else {
+                                errorMsg = "❌ **Wrong Channel**\n\nPlease use:\n";
+                                if (!publicChatIdFileupload.isEmpty()) {
+                                    errorMsg += "• Thread ID " + publicChatIdFileupload + " for file uploads\n";
+                                }
+                                if (!publicChatIdCommands.isEmpty()) {
+                                    errorMsg += "• Thread ID " + publicChatIdCommands + " for commands\n";
+                                }
+                            }
+                            // Get thread ID from original message if available
+                            String msgThreadId = message.has("message_thread_id") ? 
+                                message.get("message_thread_id").getAsString() : null;
+                            sendMessageToChat(chatId, errorMsg, msgThreadId);
+                        }
+                    }
+                    continue; // Not from target chat/thread
+                }
             }
             
             // Check for text message (might be confirmation response or command)
@@ -425,6 +571,81 @@ public class TelegramListener {
         }
     }
 
+    /**
+     * Handles callback queries from inline keyboard buttons
+     */
+    private void handleCallbackQuery(JsonObject callbackQuery) {
+        try {
+            String callbackId = callbackQuery.get("id").getAsString();
+            String data = callbackQuery.get("data").getAsString();
+            JsonObject from = callbackQuery.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            String userName = from.has("username") ? from.get("username").getAsString() : "User";
+            
+            discordLog.logInfo(String.format("Button clicked by %s (ID: %s): %s", userName, userId, data));
+            telegramLog.logInfo(String.format("Button clicked by %s (ID: %s): %s", userName, userId, data));
+            
+            // Answer the callback query to remove loading state
+            answerCallbackQuery(callbackId);
+            
+            // Handle multi-choice confirmation
+            MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
+            if (request != null) {
+                // Parse the callback data (format: "choice_0", "choice_1", etc.)
+                if (data.startsWith("choice_")) {
+                    try {
+                        int choice = Integer.parseInt(data.substring(7));
+                        if (choice >= 0 && choice < request.options.length) {
+                            String selectedOption = request.options[choice];
+                            discordLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
+                            telegramLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
+                            
+                            // Send confirmation message to chat
+                            String confirmMsg = String.format("✅ Selected: %s", selectedOption);
+                            sendMessageToUploadChat(confirmMsg);
+                            
+                            request.future.complete(choice);
+                            pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        } else {
+                            sendMessageToUploadChat("❌ Invalid choice index");
+                        }
+                    } catch (NumberFormatException e) {
+                        sendMessageToUploadChat("❌ Invalid callback data format");
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            discordLog.logError("Error handling callback query: " + e.getMessage());
+            telegramLog.logError("Error handling callback query: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Answers a callback query to remove loading state from button
+     */
+    private void answerCallbackQuery(String callbackId) {
+        try {
+            String url = String.format("https://api.telegram.org/bot%s/answerCallbackQuery", botToken);
+            
+            JsonObject payload = new JsonObject();
+            payload.addProperty("callback_query_id", callbackId);
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+        } catch (Exception e) {
+            // Non-critical error, just log
+            System.err.println("Error answering callback query: " + e.getMessage());
+        }
+    }
+    
     /**
      * Handles text messages (possibly confirmation responses or commands)
      */
@@ -472,6 +693,42 @@ public class TelegramListener {
             discordLog.logInfo(String.format("File upload detected: %s from user %s (ID: %s)", fileName, username, userId));
             telegramLog.logInfo(String.format("File upload detected: %s from user %s (ID: %s)", fileName, username, userId));
             
+            // Additional safety check: validate file upload channel when allowAllChannelsProcessing is false
+            if (!allowAllChannelsProcessing && !publicChatId.isEmpty()) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                
+                boolean isValidChannel = false;
+                
+                // Check if message is from correct chat
+                if (chatId.equals(publicChatId)) {
+                    // Check thread ID
+                    if (!publicChatIdFileupload.isEmpty()) {
+                        // Must be in fileupload thread
+                        if (message.has("message_thread_id")) {
+                            String threadId = message.get("message_thread_id").getAsString();
+                            if (threadId.equals(publicChatIdFileupload)) {
+                                isValidChannel = true;
+                            }
+                        }
+                    } else {
+                        // No specific fileupload thread configured, accept from base chat
+                        isValidChannel = !message.has("message_thread_id");
+                    }
+                }
+                
+                if (!isValidChannel) {
+                    String errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
+                    String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+                    sendMessageToChat(chatId, errorMsg, msgThreadId);
+                    
+                    String logMsg = String.format("File upload rejected from wrong channel. User: %s, File: %s", username, fileName);
+                    discordLog.logWarning(logMsg);
+                    telegramLog.logWarning(logMsg);
+                    return;
+                }
+            }
+            
             // Check admin status
             boolean isAdmin = userId.equals(adminUserId);
             
@@ -500,7 +757,7 @@ public class TelegramListener {
             // This is CRITICAL - if we process synchronously, the polling thread can't receive
             // the "yes/no" confirmation responses!
             Thread processingThread = new Thread(() -> {
-                processFile(fileId, fileName, userId);
+                processFile(fileId, fileName, userId, message);
             });
             processingThread.setDaemon(true);
             processingThread.start();
@@ -541,8 +798,24 @@ public class TelegramListener {
     /**
      * Processes a file based on its name
      */
-    private void processFile(String fileId, String fileName, String userId) {
+    private void processFile(String fileId, String fileName, String userId, JsonObject originalMessage) {
         fileName = fileName.toLowerCase();
+        
+        // Extract chat and thread info from original message for response routing
+        // Make these final for use in lambda expressions
+        final String responseChatId;
+        final String responseThreadId;
+        
+        if (allowAllChannelsProcessing && originalMessage != null) {
+            // Use the channel where the file was uploaded
+            JsonObject chat = originalMessage.getAsJsonObject("chat");
+            responseChatId = chat.get("id").getAsString();
+            responseThreadId = originalMessage.has("message_thread_id") ? 
+                originalMessage.get("message_thread_id").getAsString() : null;
+        } else {
+            responseChatId = publicChatId;
+            responseThreadId = publicChatIdFileupload;
+        }
         
         // Download file
         TelegramFileDownloader downloader = new TelegramFileDownloader(botToken);
@@ -552,8 +825,8 @@ public class TelegramListener {
             String errorMsg = "Failed to download file from Telegram";
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
-            // Send error to upload chat
-            sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+            // Send error to chat where file was uploaded
+            sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             return;
         }
         
@@ -567,7 +840,7 @@ public class TelegramListener {
                 
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
-                    sendMessageToUploadChat(msg);
+                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
                 });
                 
                 boolean success = processor.processCappedList(downloadedFile.toString());
@@ -576,8 +849,8 @@ public class TelegramListener {
                     String errorMsg = "Failed to process cappedlist.csv";
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
-                    // Send error to upload chat
-                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                    // Send error to chat where file was uploaded
+                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
                 
             } else if (fileName.matches("round_[1-6t1628]+(\\d+)?\\.csv")) {
@@ -588,8 +861,8 @@ public class TelegramListener {
                     String errorMsg = "Invalid round filename format: " + fileName;
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
-                    // Send error to upload chat
-                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                    // Send error to chat where file was uploaded
+                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
                 
@@ -622,9 +895,32 @@ public class TelegramListener {
                     }
                 });
                 
+                // Set up multi-choice callback for Telegram with buttons
+                processor.setMultiChoiceCallback((msg, options) -> {
+                    // Send message with inline keyboard buttons
+                    sendMessageWithButtons(msg, options);
+                    
+                    // Wait for button click response
+                    CompletableFuture<Integer> future = new CompletableFuture<>();
+                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
+                        new MultiChoiceConfirmationRequest(msg, options, future));
+                    
+                    try {
+                        return future.get(120, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        sendMessageToUploadChat("⏱️ Button selection timeout - processing cancelled.");
+                        return -1;
+                    } catch (Exception e) {
+                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        telegramLog.logError("Error waiting for button selection: " + e.getMessage());
+                        return -1;
+                    }
+                });
+                
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
-                    sendMessageToUploadChat(msg);
+                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
                 });
                 
                 boolean success = processor.processRound(downloadedFile.toString(), roundName);
@@ -633,8 +929,8 @@ public class TelegramListener {
                     String errorMsg = String.format("Failed to process round_%s.csv", roundName);
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
-                    // Send error to upload chat
-                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                    // Send error to chat where file was uploaded
+                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
                 
             } else if (fileName.matches("playerexport_\\d{8}_\\d{6}\\.csv")) {
@@ -644,9 +940,32 @@ public class TelegramListener {
                 
                 A1_PlayerStats processor = new A1_PlayerStats();
                 
+                // Set up multi-choice callback for Telegram with buttons
+                processor.setMultiChoiceCallback((msg, options) -> {
+                    // Send message with inline keyboard buttons
+                    sendMessageWithButtons(msg, options);
+                    
+                    // Wait for button click response
+                    CompletableFuture<Integer> future = new CompletableFuture<>();
+                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
+                        new MultiChoiceConfirmationRequest(msg, options, future));
+                    
+                    try {
+                        return future.get(120, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        sendMessageToChatWithThread(responseChatId, "⏱️ Button selection timeout - processing cancelled.", responseThreadId);
+                        return -1;
+                    } catch (Exception e) {
+                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        telegramLog.logError("Error waiting for button selection: " + e.getMessage());
+                        return -1;
+                    }
+                });
+                
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
-                    sendMessageToUploadChat(msg);
+                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
                 });
                 
                 boolean success = processor.importPlayerExport(downloadedFile.toString());
@@ -655,16 +974,16 @@ public class TelegramListener {
                     String errorMsg = "Failed to import player export file: " + fileName;
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
-                    // Send error to upload chat
-                    sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                    // Send error to chat where file was uploaded
+                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
                 
             } else {
                 String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, round_[n].csv, playerExport_[datetime].csv", fileName);
                 discordLog.logError(errorMsg);
                 telegramLog.logError(errorMsg);
-                // Send error to upload chat
-                sendMessageToUploadChat(formatStatusMessage("🔴", "ERROR", errorMsg));
+                // Send error to chat where file was uploaded
+                sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             }
             
         } finally {
@@ -701,13 +1020,35 @@ public class TelegramListener {
      * Handles commands (e.g., /exportplayers)
      */
     private void handleCommand(String command, JsonObject message) {
+        // Strip @botname suffix from command (e.g., /exportplayers@h4weiqi_bot -> /exportplayers)
+        int atIndex = command.indexOf('@');
+        if (atIndex > 0) {
+            command = command.substring(0, atIndex);
+        }
+        
         // Check if message is in commands channel/thread
         boolean isCommandsChannel = false;
-        if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
-            if (message.has("message_thread_id")) {
-                String threadId = message.get("message_thread_id").getAsString();
-                if (threadId.equals(publicChatIdCommands)) {
-                    isCommandsChannel = true;
+        
+        if (allowAllChannelsProcessing) {
+            // If allowAllChannelsProcessing is true, accept commands from any channel
+            isCommandsChannel = true;
+        } else if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
+            // Get chat ID from message
+            String messageChatId = null;
+            if (message.has("chat")) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                if (chat.has("id")) {
+                    messageChatId = chat.get("id").getAsString();
+                }
+            }
+            
+            // Check if message is in the public chat and has the correct thread ID
+            if (messageChatId != null && messageChatId.equals(publicChatId)) {
+                if (message.has("message_thread_id")) {
+                    String threadId = message.get("message_thread_id").getAsString();
+                    if (threadId.equals(publicChatIdCommands)) {
+                        isCommandsChannel = true;
+                    }
                 }
             }
         } else {
@@ -716,11 +1057,19 @@ public class TelegramListener {
         }
 
         if (!isCommandsChannel) {
-            System.out.println("Command received but not in commands channel: " + command);
+            // Send error message to the channel where command was sent
+            JsonObject chat = message.getAsJsonObject("chat");
+            String chatId = chat.get("id").getAsString();
+            String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+            
+            String errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to Thread ID " + publicChatIdCommands + " (commands channel)";
+            sendMessageToChat(chatId, errorMsg, threadId);
+            
+            System.out.println("Command received but not in commands channel: " + command + " - Error sent to user");
             return;
         }
 
-        // Parse command
+        // Parse command (already stripped of @botname)
         if (command.equalsIgnoreCase("/exportplayers")) {
             handleExportPlayersCommand(message);
         } else {
@@ -773,6 +1122,28 @@ public class TelegramListener {
             byte[] fileBytes = java.nio.file.Files.readAllBytes(filePath);
             String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
             
+            // Determine where to send the file
+            String targetChatId;
+            String targetThreadId = null;
+            
+            if (allowAllChannelsProcessing && message != null) {
+                // Send to the same channel where the command was received
+                JsonObject chat = message.getAsJsonObject("chat");
+                targetChatId = chat.get("id").getAsString();
+                if (message.has("message_thread_id")) {
+                    targetThreadId = message.get("message_thread_id").getAsString();
+                }
+            } else {
+                // Send to the configured commands channel using helper method
+                String[] chatAndThread = getCommandsChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                    System.err.println("Cannot send file: commands chat ID is not configured");
+                    return;
+                }
+                targetChatId = chatAndThread[0];
+                targetThreadId = chatAndThread[1];
+            }
+            
             // Build multipart request body
             java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
             java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
@@ -781,14 +1152,14 @@ public class TelegramListener {
             writer.append("--" + boundary).append("\r\n");
             writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
             writer.append("\r\n");
-            writer.append(publicChatId).append("\r\n");
+            writer.append(targetChatId).append("\r\n");
             
             // Add message_thread_id if specified
-            if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
+            if (targetThreadId != null && !targetThreadId.isEmpty()) {
                 writer.append("--" + boundary).append("\r\n");
                 writer.append("Content-Disposition: form-data; name=\"message_thread_id\"").append("\r\n");
                 writer.append("\r\n");
-                writer.append(publicChatIdCommands).append("\r\n");
+                writer.append(targetThreadId).append("\r\n");
             }
             
             // Add file
@@ -824,19 +1195,41 @@ public class TelegramListener {
 
     /**
      * Sends a message to the commands channel
+     * Intelligently routes based on allowAllChannelsProcessing and subchannel configuration
      */
     private void sendMessageToCommandsChannel(String message, JsonObject originalMessage) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             
             JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", publicChatId);
-            payload.addProperty("text", message);
             
-            // Add thread ID if specified
-            if (publicChatIdCommands != null && !publicChatIdCommands.isEmpty()) {
-                payload.addProperty("message_thread_id", publicChatIdCommands);
+            // Determine where to send the message
+            if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
+                // Send to the same channel where the command was received
+                JsonObject chat = originalMessage.getAsJsonObject("chat");
+                payload.addProperty("chat_id", chat.get("id").getAsString());
+                
+                // Add thread ID if the original message was in a thread
+                if (originalMessage.has("message_thread_id")) {
+                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                }
+            } else {
+                // Send to the configured commands channel using helper method
+                String[] chatAndThread = getCommandsChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                    System.err.println("Cannot send command response: commands chat ID is not configured");
+                    return;
+                }
+                
+                payload.addProperty("chat_id", chatAndThread[0]);
+                
+                // Add thread ID if specified
+                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
+                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                }
             }
+            
+            payload.addProperty("text", message);
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -858,13 +1251,9 @@ public class TelegramListener {
      * Starts the status heartbeat that sends a message every 5 minutes
      */
     private void startStatusHeartbeat() {
-        if (devChatId == null || devChatId.isEmpty()) {
-            System.out.println("Dev chat ID not configured, heartbeat disabled");
-            return;
-        }
-        
-        if (publicChatIdStatus == null || publicChatIdStatus.isEmpty()) {
-            System.out.println("Status thread ID not configured, heartbeat disabled");
+        String[] chatAndThread = getStatusChatIdAndThread();
+        if (chatAndThread == null) {
+            System.out.println("Dev chat ID not configured, status heartbeat disabled");
             return;
         }
 
@@ -910,28 +1299,36 @@ public class TelegramListener {
 
     /**
      * Sends a message to the status chat/thread
+     * Intelligently routes to subchannel if exists, otherwise main dev channel
      */
     private void sendMessageToStatusChat(String message) {
         try {
-            if (devChatId == null || devChatId.isEmpty()) {
-                System.err.println("Cannot send status message: devChatId is empty or null");
+            String[] chatAndThread = getStatusChatIdAndThread();
+            if (chatAndThread == null) {
+                System.err.println("Cannot send status message: devChatId is not configured");
                 return;
             }
+            
+            String chatId = chatAndThread[0];
+            String threadId = chatAndThread[1];
             
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             
             JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", devChatId);  // Use devChatId, not publicChatId!
+            payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
             
-            // Add status thread ID if specified (convert to integer)
-            if (publicChatIdStatus != null && !publicChatIdStatus.isEmpty()) {
+            // Add thread ID if specified
+            if (threadId != null && !threadId.isEmpty()) {
                 try {
-                    int threadId = Integer.parseInt(publicChatIdStatus);
-                    payload.addProperty("message_thread_id", threadId);  // Pass as integer, not string
+                    int threadIdInt = Integer.parseInt(threadId);
+                    payload.addProperty("message_thread_id", threadIdInt);
+                    System.out.println("Sending status to chat " + chatId + " with thread ID " + threadId);
                 } catch (NumberFormatException e) {
-                    System.err.println("Invalid thread ID format: " + publicChatIdStatus + " - sending without thread ID");
+                    System.err.println("Invalid thread ID format: " + threadId + " - sending without thread ID");
                 }
+            } else {
+                System.out.println("Sending status to chat " + chatId + " without thread ID");
             }
             
             HttpRequest request = HttpRequest.newBuilder()
@@ -945,7 +1342,7 @@ public class TelegramListener {
             if (response.statusCode() != 200) {
                 System.err.println("Failed to send status message (HTTP " + response.statusCode() + "): " + response.body());
             } else {
-                System.out.println("Status heartbeat sent successfully to chat " + devChatId + " thread " + publicChatIdStatus);
+                System.out.println("Status message sent successfully");
             }
         } catch (Exception e) {
             System.err.println("Error sending status message: " + e.getMessage());
@@ -954,28 +1351,105 @@ public class TelegramListener {
     }
 
     /**
+     * Sends a message with inline keyboard buttons to the upload chat
+     * Intelligently routes to subchannel if exists, otherwise main channel
+     */
+    private void sendMessageWithButtons(String message, String[] options) {
+        try {
+            String[] chatAndThread = getUploadChatIdAndThread();
+            if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                System.err.println("Cannot send message with buttons: upload chat ID is not configured");
+                return;
+            }
+            
+            String chatId = chatAndThread[0];
+            String threadId = chatAndThread[1];
+            
+            String url = String.format("https://api.telegram.org/bot%s/sendMessage", botToken);
+            
+            JsonObject payload = new JsonObject();
+            payload.addProperty("chat_id", chatId);
+            
+            // Add thread ID if specified
+            if (threadId != null && !threadId.isEmpty()) {
+                try {
+                    payload.addProperty("message_thread_id", Integer.parseInt(threadId));
+                } catch (NumberFormatException e) {
+                    // Ignore if not a valid number
+                }
+            }
+            
+            // Don't use Markdown parse mode with buttons - it can cause conflicts
+            // Send message as plain text to avoid parsing errors
+            payload.addProperty("text", message);
+            
+            // Create inline keyboard with buttons
+            JsonObject replyMarkup = new JsonObject();
+            JsonArray keyboard = new JsonArray();
+            
+            for (int i = 0; i < options.length; i++) {
+                JsonArray row = new JsonArray();
+                JsonObject button = new JsonObject();
+                button.addProperty("text", options[i]);
+                button.addProperty("callback_data", "choice_" + i);
+                row.add(button);
+                keyboard.add(row);
+            }
+            
+            replyMarkup.add("inline_keyboard", keyboard);
+            payload.add("reply_markup", replyMarkup);
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() != 200) {
+                String errorMsg = String.format("Failed to send message with buttons. Status: %d, Response: %s", 
+                    response.statusCode(), response.body());
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                System.err.println("[Button Error] " + errorMsg);
+            }
+            
+        } catch (Exception e) {
+            discordLog.logError("Error sending message with buttons: " + e.getMessage());
+            telegramLog.logError("Error sending message with buttons: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
      * Sends a message to the upload chat/thread
+     * Intelligently routes to subchannel if exists, otherwise main channel
      */
     private void sendMessageToUploadChat(String message) {
         try {
-            if (publicChatId == null || publicChatId.isEmpty()) {
-                System.err.println("Cannot send message: publicChatId is empty or null");
-                discordLog.logWarning("Cannot send message to Telegram: publicChatId not configured");
+            String[] chatAndThread = getUploadChatIdAndThread();
+            if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                System.err.println("Cannot send message: upload chat ID is not configured");
+                discordLog.logWarning("Cannot send message to Telegram: upload chat not configured");
                 return;
             }
+            
+            String chatId = chatAndThread[0];
+            String threadId = chatAndThread[1];
             
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             
             JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", publicChatId); // Use main chat ID, not thread ID
+            payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
             
             // Add thread ID if specified
-            if (publicChatIdFileupload != null && !publicChatIdFileupload.isEmpty()) {
-                payload.addProperty("message_thread_id", publicChatIdFileupload);
-                System.out.println("Sending to chat " + publicChatId + " with thread ID " + publicChatIdFileupload);
+            if (threadId != null && !threadId.isEmpty()) {
+                payload.addProperty("message_thread_id", threadId);
+                System.out.println("Sending to upload chat " + chatId + " with thread ID " + threadId);
             } else {
-                System.out.println("Sending to chat " + publicChatId + " without thread ID");
+                System.out.println("Sending to upload chat " + chatId + " without thread ID");
             }
             
             HttpRequest request = HttpRequest.newBuilder()
@@ -1003,6 +1477,13 @@ public class TelegramListener {
      * Sends a message to a specific Telegram chat
      */
     private void sendMessageToChat(String chatId, String message) {
+        sendMessageToChat(chatId, message, null);
+    }
+
+    /**
+     * Sends a message to a specific Telegram chat with optional thread ID
+     */
+    private void sendMessageToChat(String chatId, String message, String threadId) {
         try {
             if (chatId == null || chatId.isEmpty()) {
                 System.err.println("Cannot send message: chatId is empty or null");
@@ -1015,6 +1496,15 @@ public class TelegramListener {
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
+            
+            // Add thread ID if provided
+            if (threadId != null && !threadId.isEmpty()) {
+                try {
+                    payload.addProperty("message_thread_id", Integer.parseInt(threadId));
+                } catch (NumberFormatException e) {
+                    // Ignore if not a valid number
+                }
+            }
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -1034,6 +1524,48 @@ public class TelegramListener {
             System.err.println("Error sending message to chat: " + e.getMessage());
             e.printStackTrace();
             discordLog.logError("Error sending Telegram message: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Sends a message to a specific chat with thread
+     */
+    private void sendMessageToChatWithThread(String chatId, String message, String threadId) {
+        try {
+            if (chatId == null || chatId.isEmpty()) {
+                System.err.println("Cannot send message: chatId is empty or null");
+                return;
+            }
+            
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            
+            JsonObject payload = new JsonObject();
+            payload.addProperty("chat_id", chatId);
+            payload.addProperty("text", message);
+            
+            // Add thread ID if specified
+            if (threadId != null && !threadId.isEmpty()) {
+                try {
+                    payload.addProperty("message_thread_id", Integer.parseInt(threadId));
+                } catch (NumberFormatException e) {
+                    // Ignore if not a valid number
+                }
+            }
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() != 200) {
+                System.err.println("Failed to send message (HTTP " + response.statusCode() + "): " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Error sending message: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
