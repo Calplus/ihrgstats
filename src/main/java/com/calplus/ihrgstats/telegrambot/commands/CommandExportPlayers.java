@@ -3,6 +3,7 @@ package com.calplus.ihrgstats.telegrambot.commands;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.PropertyResolver;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -16,7 +17,7 @@ import java.util.*;
  * Command handler for /exportplayers command.
  * Exports latest player data (ELO ratings, hall, capped status) to a CSV file.
  */
-public class CommandExportLatestPlayerData {
+public class CommandExportPlayers {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
     private final String dbPath;
@@ -24,7 +25,7 @@ public class CommandExportLatestPlayerData {
     // Round sequence
     private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
 
-    public CommandExportLatestPlayerData() {
+    public CommandExportPlayers() {
         // Load environment variables
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
@@ -154,6 +155,9 @@ public class CommandExportLatestPlayerData {
                 return null;
             }
 
+            // Get home hall setting
+            String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
+
             // Create CSV file
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
             String filename = String.format("playerExport_%s.csv", timestamp);
@@ -167,6 +171,12 @@ public class CommandExportLatestPlayerData {
 
                 // Write data
                 for (PlayerExportData data : exportData) {
+                    // Add asterisk if this player's hall matches home hall
+                    String lastHallValue = data.lastHall;
+                    if (!homeHall.isEmpty() && homeHall.equals(data.lastHall)) {
+                        lastHallValue = data.lastHall + "*";
+                    }
+                    
                     writer.write(String.format("%s,%d,%s,%s,%s,%s,%s,%s,%s,%s\n",
                         escapeCsvField(data.name),
                         data.trueElo,
@@ -176,7 +186,7 @@ public class CommandExportLatestPlayerData {
                         data.rdPerfElo != null ? String.format("%.4f", data.rdPerfElo) : "",
                         data.volPerfElo != null ? String.format("%.6f", data.volPerfElo) : "",
                         data.lastRound,
-                        escapeCsvField(data.lastHall),
+                        escapeCsvField(lastHallValue),
                         data.capped ? "true" : "false"));
                 }
             }
@@ -222,7 +232,7 @@ public class CommandExportLatestPlayerData {
      * Main method for testing
      */
     public static void main(String[] args) {
-        CommandExportLatestPlayerData exporter = new CommandExportLatestPlayerData();
+        CommandExportPlayers exporter = new CommandExportPlayers();
         Path csvPath = exporter.exportLatestPlayerData();
         
         if (csvPath != null) {

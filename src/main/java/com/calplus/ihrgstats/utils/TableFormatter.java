@@ -1,0 +1,291 @@
+package com.calplus.ihrgstats.utils;
+
+import java.util.*;
+
+/**
+ * Utility class for formatting data as monospace tables for Telegram messages
+ */
+public class TableFormatter {
+    
+    /**
+     * Alignment options for table columns
+     */
+    public enum Alignment {
+        LEFT, CENTER, RIGHT
+    }
+    
+    /**
+     * Formats data as a monospace table
+     * @param headers Column headers
+     * @param rows Data rows (each row is a list of cell values)
+     * @param alignments Alignment for each column
+     * @param columnWidths Width for each column (in characters)
+     * @return Formatted table as string (wrapped in ```monospace``` tags)
+     */
+    public static String formatTable(String[] headers, List<String[]> rows, 
+                                    Alignment[] alignments, int[] columnWidths) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("```\n");
+        
+        // Format header row with | separators
+        sb.append(formatRow(headers, alignments, columnWidths, true)).append("\n");
+        
+        // Add === separator after header
+        sb.append(createHeaderSeparator(columnWidths)).append("\n");
+        
+        // Format data rows with | separators
+        int rowCount = 0;
+        for (String[] row : rows) {
+            sb.append(formatRow(row, alignments, columnWidths, true)).append("\n");
+            rowCount++;
+            
+            // Add --- separator every 10 rows (but not after the last row)
+            if (rowCount % 10 == 0 && rowCount < rows.size()) {
+                sb.append(createRowSeparator(columnWidths)).append("\n");
+            }
+        }
+        
+        sb.append("```");
+        return sb.toString();
+    }
+    
+    /**
+     * Formats a single row
+     */
+    private static String formatRow(String[] cells, Alignment[] alignments, int[] columnWidths, boolean useSeparators) {
+        StringBuilder row = new StringBuilder();
+        
+        if (useSeparators) {
+            row.append("| ");
+        }
+        
+        for (int i = 0; i < cells.length; i++) {
+            String cell = cells[i];
+            Alignment align = alignments[i];
+            int width = columnWidths[i];
+            
+            // Truncate if too long
+            if (cell.length() > width) {
+                cell = cell.substring(0, width);
+            }
+            
+            // Pad according to alignment
+            String formatted = padString(cell, width, align);
+            row.append(formatted);
+            
+            // Add separator between columns
+            if (useSeparators) {
+                if (i < cells.length - 1) {
+                    row.append(" | ");
+                } else {
+                    row.append(" |");
+                }
+            } else {
+                // Old format - just space
+                if (i < cells.length - 1) {
+                    row.append(" ");
+                }
+            }
+        }
+        
+        return row.toString();
+    }
+    
+    /**
+     * Pads a string to the specified width according to alignment
+     */
+    private static String padString(String str, int width, Alignment alignment) {
+        if (str.length() >= width) {
+            return str.substring(0, width);
+        }
+        
+        int padding = width - str.length();
+        
+        switch (alignment) {
+            case LEFT:
+                return str + repeatChar(' ', padding);
+            case RIGHT:
+                return repeatChar(' ', padding) + str;
+            case CENTER:
+                int leftPad = padding / 2;
+                int rightPad = padding - leftPad;
+                return repeatChar(' ', leftPad) + str + repeatChar(' ', rightPad);
+            default:
+                return str;
+        }
+    }
+    
+    /**
+     * Creates a header separator line (===)
+     */
+    private static String createHeaderSeparator(int[] columnWidths) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("| ");
+        for (int i = 0; i < columnWidths.length; i++) {
+            sb.append(repeatChar('=', columnWidths[i]));
+            if (i < columnWidths.length - 1) {
+                sb.append(" | ");
+            } else {
+                sb.append(" |");
+            }
+        }
+        return sb.toString();
+    }
+    
+    /**
+     * Creates a row separator line (---)
+     */
+    private static String createRowSeparator(int[] columnWidths) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("| ");
+        for (int i = 0; i < columnWidths.length; i++) {
+            sb.append(repeatChar('-', columnWidths[i]));
+            if (i < columnWidths.length - 1) {
+                sb.append(" | ");
+            } else {
+                sb.append(" |");
+            }
+        }
+        return sb.toString();
+    }
+    
+    /**
+     * Repeats a character n times
+     */
+    private static String repeatChar(char c, int count) {
+        StringBuilder sb = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+    
+    /**
+     * Shortens a player name to fit within maxLength characters
+     * Shortens the longest part of the name to just its first letter until it fits
+     * @param name The full name
+     * @param maxLength Maximum length
+     * @return Shortened name
+     */
+    public static String shortenPlayerName(String name, int maxLength) {
+        if (name.length() <= maxLength) {
+            return name;
+        }
+        
+        String[] parts = name.split("\\s+");
+        
+        // Keep shortening the longest part until the name fits
+        while (getTotalLength(parts) > maxLength && hasLongPart(parts)) {
+            int longestIndex = findLongestPartIndex(parts);
+            if (parts[longestIndex].length() > 1) {
+                parts[longestIndex] = parts[longestIndex].substring(0, 1) + ".";
+            }
+        }
+        
+        String result = String.join(" ", parts);
+        
+        // If still too long, just truncate
+        if (result.length() > maxLength) {
+            result = result.substring(0, maxLength);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Gets total length of name parts including spaces
+     */
+    private static int getTotalLength(String[] parts) {
+        int total = 0;
+        for (int i = 0; i < parts.length; i++) {
+            total += parts[i].length();
+            if (i < parts.length - 1) {
+                total++; // Space between parts
+            }
+        }
+        return total;
+    }
+    
+    /**
+     * Checks if there's a part longer than 2 characters (not already shortened)
+     */
+    private static boolean hasLongPart(String[] parts) {
+        for (String part : parts) {
+            if (part.length() > 2 && !part.endsWith(".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Finds the index of the longest part (that's not already shortened)
+     */
+    private static int findLongestPartIndex(String[] parts) {
+        int maxLength = 0;
+        int maxIndex = 0;
+        
+        for (int i = 0; i < parts.length; i++) {
+            // Skip already shortened parts
+            if (parts[i].endsWith(".")) {
+                continue;
+            }
+            
+            if (parts[i].length() > maxLength) {
+                maxLength = parts[i].length();
+                maxIndex = i;
+            }
+        }
+        
+        return maxIndex;
+    }
+    
+    /**
+     * Shortens a hall name to 2 letters
+     * @param hall The hall name
+     * @return 2-letter abbreviation
+     */
+    public static String shortenHallName(String hall) {
+        if (hall == null || hall.isEmpty()) {
+            return "??";
+        }
+        
+        String lowerHall = hall.toLowerCase();
+        
+        switch (lowerHall) {
+            case "banyan":
+                return "BY";
+            case "binjai":
+                return "BJ";
+            case "crescent":
+                return "CS";
+            case "pioneer":
+                return "PR";
+            case "saraca":
+                return "SC";
+            case "tamarind":
+                return "TM";
+            case "tanjong":
+                return "TJ";
+            default:
+                // Take first 2 letters and uppercase
+                if (hall.length() >= 2) {
+                    return hall.substring(0, 2).toUpperCase();
+                } else {
+                    return hall.toUpperCase();
+                }
+        }
+    }
+    
+    /**
+     * Shortens round name for display
+     * @param round The round name (e.g., "1", "t16")
+     * @return Shortened version
+     */
+    public static String shortenRoundName(String round) {
+        if (round == null || round.isEmpty()) {
+            return "";
+        }
+        return round.toUpperCase();
+    }
+}

@@ -1,0 +1,407 @@
+package com.calplus.ihrgstats.telegrambot.commands;
+
+import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
+import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.PropertyManager;
+import com.calplus.ihrgstats.utils.PropertyResolver;
+
+import java.nio.file.Paths;
+import java.sql.*;
+import java.util.*;
+
+/**
+ * Command handler for /settings command.
+ * Allows admin to view and toggle boolean settings from application.properties
+ */
+public class CommandSettings {
+    private final DiscordLog discordLog;
+    private final TelegramLog telegramLog;
+    private final String adminUserId;
+    private final String dbPath;
+
+    public CommandSettings() {
+        // Load environment variables
+        EnvironmentManager envManager = new EnvironmentManager();
+        envManager.loadIntoSystemProperties();
+        
+        this.discordLog = new DiscordLog();
+        this.telegramLog = new TelegramLog();
+        this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
+        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
+    }
+
+    /**
+     * Checks if a user is an admin
+     * @param userId The user ID to check
+     * @return true if user is admin, false otherwise
+     */
+    public boolean isAdmin(String userId) {
+        return !adminUserId.isEmpty() && adminUserId.equals(userId);
+    }
+
+    /**
+     * Handles the /settings command
+     * @param userId The user ID who issued the command
+     * @return SettingsResponse containing the message and button options
+     */
+    public SettingsResponse handleCommand(String userId) {
+        discordLog.logInfo(String.format("User %s requested /settings command", userId));
+        telegramLog.logInfo(String.format("User %s requested /settings command", userId));
+
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can use the /settings command.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to use /settings", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to use /settings", userId));
+            return new SettingsResponse(errorMsg, null);
+        }
+
+        // Get all settings properties
+        Map<String, String> settings = PropertyManager.getPropertiesByPrefix("settings.");
+        
+        if (settings.isEmpty()) {
+            String errorMsg = "⚠️ No configurable settings found in application.properties";
+            discordLog.logWarning("No settings.* properties found");
+            telegramLog.logWarning("No settings.* properties found");
+            return new SettingsResponse(errorMsg, null);
+        }
+
+        // Build message
+        StringBuilder message = new StringBuilder();
+        message.append("⚙️ **Application Settings**\n\n");
+        message.append("Configure boolean settings below:\n\n");
+
+        List<String> buttonLabels = new ArrayList<>();
+        List<String> buttonCallbacks = new ArrayList<>();
+
+        for (Map.Entry<String, String> entry : settings.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            String description = PropertyManager.getSettingDescription(key);
+            
+            // Special handling for homeHall (non-boolean)
+            if (key.equals("settings.homeHall")) {
+                String currentHall = value.isEmpty() ? "Not set" : value;
+                message.append(String.format("🏠 **Home Hall: %s**\n", currentHall));
+                message.append(String.format("   %s\n\n", description));
+                
+                // Create button for homeHall selection
+                buttonLabels.add("🏠 Change Home Hall");
+                buttonCallbacks.add("setting_homeHall_select");
+                continue;
+            }
+            
+            // Determine current status (for boolean settings)
+            boolean isEnabled = value.equalsIgnoreCase("true");
+            String statusEmoji = isEnabled ? "✅" : "❌";
+            String statusText = isEnabled ? "Enabled" : "Disabled";
+            
+            message.append(String.format("%s **%s**\n", statusEmoji, statusText));
+            message.append(String.format("   %s\n\n", description));
+
+            // Create button label and callback
+            String toggleText = isEnabled ? "Disable" : "Enable";
+            String buttonLabel = String.format("%s %s", toggleText, extractSettingName(key));
+            String buttonCallback = String.format("setting_toggle_%s", key);
+            
+            buttonLabels.add(buttonLabel);
+            buttonCallbacks.add(buttonCallback);
+        }
+        
+        // Add cancel button
+        buttonLabels.add("❌ Cancel");
+        buttonCallbacks.add("settings_cancel");
+
+        discordLog.logSuccess(String.format("Sent settings list to admin user %s", userId));
+        telegramLog.logSuccess(String.format("Sent settings list to admin user %s", userId));
+
+        return new SettingsResponse(message.toString(), 
+            new ButtonConfig(buttonLabels.toArray(new String[0]), 
+                           buttonCallbacks.toArray(new String[0])));
+    }
+    
+    /**
+     * Handles settings cancellation
+     * @param userId The user ID who cancelled
+     * @return Response message
+     */
+    public String handleCancel(String userId) {
+        discordLog.logInfo(String.format("User %s cancelled settings", userId));
+        telegramLog.logInfo(String.format("User %s cancelled settings", userId));
+        return "ℹ️ Settings menu closed.";
+    }
+
+    /**
+     * Handles a settings toggle callback
+     * @param callbackData The callback data from the button (e.g., "setting_toggle_settings.perfElo.enabled")
+     * @param userId The user ID who clicked the button
+     * @return Response message after toggling the setting
+     */
+    public String handleToggle(String callbackData, String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to toggle setting", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to toggle setting", userId));
+            return errorMsg;
+        }
+
+        // Extract setting key from callback data
+        if (!callbackData.startsWith("setting_toggle_")) {
+            return "❌ Error: Invalid callback data";
+        }
+
+        String settingKey = callbackData.substring("setting_toggle_".length());
+        
+        discordLog.logInfo(String.format("Admin %s toggling setting: %s", userId, settingKey));
+        telegramLog.logInfo(String.format("Admin %s toggling setting: %s", userId, settingKey));
+
+        // Get current value
+        String currentValue = PropertyResolver.getProperty(settingKey);
+        if (currentValue == null) {
+            String errorMsg = String.format("❌ Error: Setting not found: %s", settingKey);
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+
+        // Toggle value
+        boolean currentBool = currentValue.equalsIgnoreCase("true");
+        boolean newBool = !currentBool;
+        String newValue = String.valueOf(newBool);
+
+        // Update property
+        boolean success = PropertyManager.updateProperty(settingKey, newValue);
+        
+        if (success) {
+            String settingName = extractSettingName(settingKey);
+            String statusEmoji = newBool ? "✅" : "❌";
+            String statusText = newBool ? "enabled" : "disabled";
+            String successMsg = String.format("%s Successfully %s **%s**\n\nUse /settings to see updated configuration.", 
+                statusEmoji, statusText, settingName);
+            
+            discordLog.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
+            telegramLog.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
+            
+            return successMsg;
+        } else {
+            String errorMsg = String.format("❌ Error: Failed to update setting %s", settingKey);
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+    }
+
+    /**
+     * Handles the home hall selection request
+     * @param userId The user ID who requested hall selection
+     * @return Response containing hall selection buttons
+     */
+    public SettingsResponse handleHomeHallSelection(String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to change home hall", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to change home hall", userId));
+            return new SettingsResponse(errorMsg, null);
+        }
+
+        discordLog.logInfo(String.format("Admin %s requested home hall selection", userId));
+        telegramLog.logInfo(String.format("Admin %s requested home hall selection", userId));
+
+        try {
+            // Query database for all distinct halls
+            List<String> halls = new ArrayList<>();
+            String jdbcUrl = "jdbc:sqlite:" + dbPath;
+            try (Connection conn = DriverManager.getConnection(jdbcUrl);
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT DISTINCT hall FROM A1_PlayerStats WHERE hall IS NOT NULL AND hall != '' ORDER BY hall")) {
+                
+                while (rs.next()) {
+                    String hall = rs.getString("hall");
+                    if (hall != null && !hall.trim().isEmpty()) {
+                        halls.add(hall);
+                    }
+                }
+            }
+
+            if (halls.isEmpty()) {
+                String errorMsg = "⚠️ No halls found in database.";
+                discordLog.logWarning(errorMsg);
+                telegramLog.logWarning(errorMsg);
+                return new SettingsResponse(errorMsg, null);
+            }
+
+            // Sort halls: numeric first, then alphabetic
+            halls.sort((h1, h2) -> {
+                boolean h1Numeric = h1.matches("\\d+");
+                boolean h2Numeric = h2.matches("\\d+");
+                
+                if (h1Numeric && h2Numeric) {
+                    // Both numeric, compare as integers
+                    return Integer.compare(Integer.parseInt(h1), Integer.parseInt(h2));
+                } else if (h1Numeric) {
+                    // h1 is numeric, h2 is not - h1 comes first
+                    return -1;
+                } else if (h2Numeric) {
+                    // h2 is numeric, h1 is not - h2 comes first
+                    return 1;
+                } else {
+                    // Both non-numeric, compare alphabetically
+                    return h1.compareToIgnoreCase(h2);
+                }
+            });
+
+            // Get current home hall
+            String currentHomeHall = PropertyResolver.getProperty("settings.homeHall", "");
+
+            // Build message
+            StringBuilder message = new StringBuilder();
+            message.append("🏠 **Select Your Home Hall**\n\n");
+            message.append("Choose your home hall from the list below.\n");
+            if (!currentHomeHall.isEmpty()) {
+                message.append(String.format("Current home hall: **%s**\n", currentHomeHall));
+            }
+            message.append("\nSelect a hall or choose manual input:");
+
+            // Create buttons in 4-column layout
+            List<String> buttonLabels = new ArrayList<>();
+            List<String> buttonCallbacks = new ArrayList<>();
+
+            for (String hall : halls) {
+                buttonLabels.add(hall);
+                buttonCallbacks.add("setting_homeHall_" + hall);
+            }
+
+            // Add manual input and cancel buttons
+            buttonLabels.add("✏️ Manual Input");
+            buttonCallbacks.add("setting_homeHall_manual");
+            buttonLabels.add("❌ Cancel");
+            buttonCallbacks.add("settings_cancel");
+
+            discordLog.logSuccess(String.format("Sent hall selection menu to admin %s with %d halls", userId, halls.size()));
+            telegramLog.logSuccess(String.format("Sent hall selection menu to admin %s with %d halls", userId, halls.size()));
+
+            return new SettingsResponse(message.toString(), 
+                new ButtonConfig(buttonLabels.toArray(new String[0]), 
+                               buttonCallbacks.toArray(new String[0]), 
+                               4)); // 4 columns per row
+
+        } catch (Exception e) {
+            String errorMsg = "❌ Error: Failed to load halls from database: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return new SettingsResponse(errorMsg, null);
+        }
+    }
+
+    /**
+     * Handles a home hall selection callback
+     * @param callbackData The callback data from the button (e.g., "setting_homeHall_4")
+     * @param userId The user ID who clicked the button
+     * @return Response message after setting the home hall
+     */
+    public String handleHomeHallCallback(String callbackData, String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to set home hall", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to set home hall", userId));
+            return errorMsg;
+        }
+
+        // Handle manual input request
+        if (callbackData.equals("setting_homeHall_manual")) {
+            discordLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
+            telegramLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
+            return "✏️ Please type your desired home hall value and update it manually in application.properties.\n\nCurrent setting: settings.homeHall";
+        }
+
+        // Extract hall value from callback data
+        if (!callbackData.startsWith("setting_homeHall_")) {
+            return "❌ Error: Invalid callback data";
+        }
+
+        String hallValue = callbackData.substring("setting_homeHall_".length());
+        
+        discordLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, hallValue));
+        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, hallValue));
+
+        // Update property
+        boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
+        
+        if (success) {
+            String successMsg = String.format("🏠 Successfully set home hall to **%s**\n\nUse /settings to see updated configuration.", hallValue);
+            
+            discordLog.logSuccess(String.format("Home hall set to %s", hallValue));
+            telegramLog.logSuccess(String.format("Home hall set to %s", hallValue));
+            
+            return successMsg;
+        } else {
+            String errorMsg = "❌ Error: Failed to update home hall setting";
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+    }
+
+    /**
+     * Extracts a user-friendly setting name from the property key
+     */
+    private String extractSettingName(String key) {
+        // Remove "settings." prefix
+        String name = key.replace("settings.", "");
+        
+        // Convert camelCase/dot notation to space-separated words
+        name = name.replaceAll("([a-z])([A-Z])", "$1 $2");
+        name = name.replace(".", " ");
+        
+        // Capitalize first letter of each word
+        String[] words = name.split("\\s+");
+        StringBuilder result = new StringBuilder();
+        for (String word : words) {
+            if (word.length() > 0) {
+                result.append(Character.toUpperCase(word.charAt(0)));
+                if (word.length() > 1) {
+                    result.append(word.substring(1));
+                }
+                result.append(" ");
+            }
+        }
+        
+        return result.toString().trim();
+    }
+
+    /**
+     * Response object containing message and button configuration
+     */
+    public static class SettingsResponse {
+        public final String message;
+        public final ButtonConfig buttons;
+
+        public SettingsResponse(String message, ButtonConfig buttons) {
+            this.message = message;
+            this.buttons = buttons;
+        }
+    }
+
+    /**
+     * Button configuration for inline keyboard
+     */
+    public static class ButtonConfig {
+        public final String[] labels;
+        public final String[] callbacks;
+        public final int columnsPerRow; // Number of columns per row (default: 1)
+
+        public ButtonConfig(String[] labels, String[] callbacks) {
+            this(labels, callbacks, 1);
+        }
+
+        public ButtonConfig(String[] labels, String[] callbacks, int columnsPerRow) {
+            this.labels = labels;
+            this.callbacks = callbacks;
+            this.columnsPerRow = columnsPerRow;
+        }
+    }
+}

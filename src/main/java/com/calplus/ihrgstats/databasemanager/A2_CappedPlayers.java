@@ -209,6 +209,7 @@ public class A2_CappedPlayers {
     /**
      * Updates the A2_CappedPlayers table with the capped player entries
      * Clears existing data and inserts new entries
+     * Also marks players in A1_PlayerStats as capped if they exist
      * @param entries List of capped player entries
      * @throws Exception if database operation fails
      */
@@ -219,7 +220,29 @@ public class A2_CappedPlayers {
             conn.setAutoCommit(false);
 
             try {
-                // Clear existing data
+                // Check if A1_PlayerStats has any data
+                boolean a1HasData = false;
+                String checkA1SQL = "SELECT COUNT(*) FROM A1_PlayerStats";
+                try (Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery(checkA1SQL)) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        a1HasData = true;
+                        discordLog.batchInfo("A1_PlayerStats contains data. Will mark capped players accordingly.");
+                        telegramLog.batchInfo("A1_PlayerStats contains data. Will mark capped players accordingly.");
+                    }
+                }
+                
+                // First, reset all capped flags in A1_PlayerStats to 0
+                if (a1HasData) {
+                    String resetCappedSQL = "UPDATE A1_PlayerStats SET capped = 0";
+                    try (Statement stmt = conn.createStatement()) {
+                        int resetCount = stmt.executeUpdate(resetCappedSQL);
+                        discordLog.batchInfo(String.format("Reset capped status for all %d players in A1_PlayerStats", resetCount));
+                        telegramLog.batchInfo(String.format("Reset capped status for all %d players in A1_PlayerStats", resetCount));
+                    }
+                }
+                
+                // Clear existing data in A2_CappedPlayers
                 String deleteSQL = "DELETE FROM A2_CappedPlayers";
                 try (Statement stmt = conn.createStatement()) {
                     int deletedRows = stmt.executeUpdate(deleteSQL);
@@ -227,13 +250,68 @@ public class A2_CappedPlayers {
                     telegramLog.batchInfo(String.format("Cleared %d existing entries from A2_CappedPlayers", deletedRows));
                 }
 
-                // Insert new entries
+                // Insert new entries and update A1_PlayerStats if player exists
                 String insertSQL = "INSERT INTO A2_CappedPlayers (name, prevHall, mapped) VALUES (?, ?, ?)";
+                int mappedCount = 0;
+                int a1UpdatedCount = 0;
+                
                 try (PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
                     for (CappedPlayerEntry entry : entries) {
                         pstmt.setString(1, entry.name);
                         pstmt.setString(2, entry.prevHall);
-                        pstmt.setInt(3, 0); // Default mapped to false (0)
+                        
+                        // Check if player exists in A1_PlayerStats (case-insensitive)
+                        boolean existsInA1 = false;
+                        String matchedName = null;
+                        
+                        if (a1HasData) {
+                            // Try exact match first (case-sensitive)
+                            String checkExactSQL = "SELECT name FROM A1_PlayerStats WHERE name = ?";
+                            try (PreparedStatement checkStmt = conn.prepareStatement(checkExactSQL)) {
+                                checkStmt.setString(1, entry.name);
+                                try (ResultSet rs = checkStmt.executeQuery()) {
+                                    if (rs.next()) {
+                                        existsInA1 = true;
+                                        matchedName = rs.getString("name");
+                                    }
+                                }
+                            }
+                            
+                            // If no exact match, try case-insensitive match
+                            if (!existsInA1) {
+                                String checkCaseInsensitiveSQL = "SELECT name FROM A1_PlayerStats WHERE LOWER(name) = LOWER(?)";
+                                try (PreparedStatement checkStmt = conn.prepareStatement(checkCaseInsensitiveSQL)) {
+                                    checkStmt.setString(1, entry.name);
+                                    try (ResultSet rs = checkStmt.executeQuery()) {
+                                        if (rs.next()) {
+                                            existsInA1 = true;
+                                            matchedName = rs.getString("name");
+                                            
+                                            // Log name mismatch
+                                            String warningMsg = String.format("Name mismatch: cappedlist has '%s', A1 has '%s'", 
+                                                entry.name, matchedName);
+                                            discordLog.batchWarning(warningMsg);
+                                            telegramLog.batchWarning(warningMsg);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // If player found, update their capped status in A1_PlayerStats
+                            if (existsInA1 && matchedName != null) {
+                                String updateCappedSQL = "UPDATE A1_PlayerStats SET capped = 1 WHERE name = ?";
+                                try (PreparedStatement updateStmt = conn.prepareStatement(updateCappedSQL)) {
+                                    updateStmt.setString(1, matchedName);
+                                    int updated = updateStmt.executeUpdate();
+                                    if (updated > 0) {
+                                        a1UpdatedCount++;
+                                    }
+                                }
+                                mappedCount++;
+                            }
+                        }
+                        
+                        pstmt.setInt(3, existsInA1 ? 1 : 0); // Set mapped to 1 if found in A1
                         pstmt.addBatch();
                     }
                     pstmt.executeBatch();
@@ -241,6 +319,13 @@ public class A2_CappedPlayers {
 
                 discordLog.batchInfo(String.format("Inserted %d new entries into A2_CappedPlayers", entries.size()));
                 telegramLog.batchInfo(String.format("Inserted %d new entries into A2_CappedPlayers", entries.size()));
+                
+                if (a1HasData && mappedCount > 0) {
+                    discordLog.batchInfo(String.format("Marked %d players as capped (found in A1_PlayerStats)", mappedCount));
+                    telegramLog.batchInfo(String.format("Marked %d players as capped (found in A1_PlayerStats)", mappedCount));
+                    discordLog.batchInfo(String.format("Updated capped field in A1_PlayerStats for %d players", a1UpdatedCount));
+                    telegramLog.batchInfo(String.format("Updated capped field in A1_PlayerStats for %d players", a1UpdatedCount));
+                }
 
                 conn.commit();
                 
