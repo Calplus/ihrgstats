@@ -162,6 +162,7 @@ public class A1_PlayerStats {
         Map<String, String> oppNameByRound = new HashMap<>();
         Map<String, Integer> oppTrueEloByRound = new HashMap<>();
         Map<String, Integer> oppPerfEloByRound = new HashMap<>();
+        Map<String, Integer> outcomeByRound = new HashMap<>(); // 1=win, 0=draw, -1=loss
         boolean existsInDb = false;
         int dbId = -1;
     }
@@ -1240,6 +1241,7 @@ public class A1_PlayerStats {
                         String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
                         String volPerfEloCol = getRoundColumnName("volPerfElo", round);
                         String seatCol = getRoundColumnName("seat", round);
+                        String outcomeCol = getRoundColumnName("outcome", round);
                         String oppHallCol = getRoundColumnName("oppHall", round);
                         String oppNameCol = getRoundColumnName("oppName", round);
                         String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
@@ -1252,6 +1254,7 @@ public class A1_PlayerStats {
                         player.rdPerfEloByRound.put(round, (Double) rs.getObject(rdPerfEloCol));
                         player.volPerfEloByRound.put(round, (Double) rs.getObject(volPerfEloCol));
                         player.seatByRound.put(round, (Integer) rs.getObject(seatCol));
+                        player.outcomeByRound.put(round, (Integer) rs.getObject(outcomeCol));
                         player.oppHallByRound.put(round, rs.getString(oppHallCol));
                         player.oppNameByRound.put(round, rs.getString(oppNameCol));
                         player.oppTrueEloByRound.put(round, (Integer) rs.getObject(oppTrueEloCol));
@@ -1734,6 +1737,33 @@ public class A1_PlayerStats {
     }
 
     /**
+     * Calculates match outcome for a player
+     * @param playerWinby The player's winby field from CSV
+     * @param opponentWinby The opponent's winby field from CSV
+     * @param opponentIsWalkover True if opponent is WALKOVER
+     * @return 1 for win, 0 for draw, -1 for loss
+     */
+    private int calculateMatchOutcome(String playerWinby, String opponentWinby, boolean opponentIsWalkover) {
+        // If opponent is walkover, player wins
+        if (opponentIsWalkover) {
+            return 1;
+        }
+        
+        // Check for draw (both players have winby="draw")
+        if (playerWinby.equalsIgnoreCase("draw") && opponentWinby.equalsIgnoreCase("draw")) {
+            return 0;
+        }
+        
+        // If player has a winby value (not empty and not "draw" when opponent also has "draw"), player wins
+        if (!playerWinby.isEmpty()) {
+            return 1;
+        }
+        
+        // Otherwise, player lost
+        return -1;
+    }
+
+    /**
      * Calculates seating arrangements for players and records opponent information
      */
     private void calculateSeating(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, String roundName) {
@@ -1759,6 +1789,10 @@ public class A1_PlayerStats {
                         player1.oppHallByRound.put(roundName, game.hall2);
                         // ELO fields will be populated after calculation
                     }
+                    // Calculate and store outcome for player 1
+                    boolean player2IsWalkover = game.name2.equalsIgnoreCase("WALKOVER");
+                    int outcome1 = calculateMatchOutcome(game.winby1, game.winby2, player2IsWalkover);
+                    player1.outcomeByRound.put(roundName, outcome1);
                 }
             }
 
@@ -1781,6 +1815,10 @@ public class A1_PlayerStats {
                         player2.oppHallByRound.put(roundName, game.hall1);
                         // ELO fields will be populated after calculation
                     }
+                    // Calculate and store outcome for player 2
+                    boolean player1IsWalkover = game.name1.equalsIgnoreCase("WALKOVER");
+                    int outcome2 = calculateMatchOutcome(game.winby2, game.winby1, player1IsWalkover);
+                    player2.outcomeByRound.put(roundName, outcome2);
                 }
             }
         }
@@ -2201,6 +2239,7 @@ public class A1_PlayerStats {
                 Integer prevTrueElo = null;
                 Integer prevPerfElo = null;
                 Integer prevSeat = null;
+                Integer prevOutcome = null;
 
                 // Search backwards from previous round
                 int prevRoundIdx = ROUND_SEQUENCE.indexOf(previousRound);
@@ -2211,6 +2250,7 @@ public class A1_PlayerStats {
                         prevTrueElo = trueElo;
                         prevPerfElo = dbPlayer.perfEloByRound.get(checkRound);
                         prevSeat = dbPlayer.seatByRound.get(checkRound);
+                        prevOutcome = dbPlayer.outcomeByRound.get(checkRound);
                         break;
                     }
                 }
@@ -2219,6 +2259,7 @@ public class A1_PlayerStats {
                 dbPlayer.trueEloByRound.put(roundName, prevTrueElo != null ? prevTrueElo : BASE_ELO);
                 dbPlayer.perfEloByRound.put(roundName, perfEloEnabled ? (prevPerfElo != null ? prevPerfElo : BASE_ELO) : null);
                 dbPlayer.seatByRound.put(roundName, null); // No seat if didn't play
+                dbPlayer.outcomeByRound.put(roundName, null); // No outcome if didn't play
                 
                 // No opponent data since player didn't play
                 dbPlayer.oppHallByRound.put(roundName, null);
@@ -2242,6 +2283,7 @@ public class A1_PlayerStats {
                 player.trueEloByRound.put(futureRound, null);
                 player.perfEloByRound.put(futureRound, null);
                 player.seatByRound.put(futureRound, null);
+                player.outcomeByRound.put(futureRound, null);
                 player.oppHallByRound.put(futureRound, null);
                 player.oppNameByRound.put(futureRound, null);
                 player.oppTrueEloByRound.put(futureRound, null);
@@ -2355,6 +2397,7 @@ public class A1_PlayerStats {
             String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
             String volPerfEloCol = getRoundColumnName("volPerfElo", round);
             String seatCol = getRoundColumnName("seat", round);
+            String outcomeCol = getRoundColumnName("outcome", round);
             String oppHallCol = getRoundColumnName("oppHall", round);
             String oppNameCol = getRoundColumnName("oppName", round);
             String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
@@ -2367,6 +2410,7 @@ public class A1_PlayerStats {
             Double rdPerfElo = player.rdPerfEloByRound.get(round);
             Double volPerfElo = player.volPerfEloByRound.get(round);
             Integer seat = player.seatByRound.get(round);
+            Integer outcome = player.outcomeByRound.get(round);
             String oppHall = player.oppHallByRound.get(round);
             String oppName = player.oppNameByRound.get(round);
             Integer oppTrueElo = player.oppTrueEloByRound.get(round);
@@ -2392,6 +2436,9 @@ public class A1_PlayerStats {
 
             sql.append(seatCol).append(" = ?, ");
             params.add(seat);
+
+            sql.append(outcomeCol).append(" = ?, ");
+            params.add(outcome);
 
             sql.append(oppHallCol).append(" = ?, ");
             params.add(oppHall);
@@ -2452,6 +2499,7 @@ public class A1_PlayerStats {
             String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
             String volPerfEloCol = getRoundColumnName("volPerfElo", round);
             String seatCol = getRoundColumnName("seat", round);
+            String outcomeCol = getRoundColumnName("outcome", round);
             String oppHallCol = getRoundColumnName("oppHall", round);
             String oppNameCol = getRoundColumnName("oppName", round);
             String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
@@ -2464,12 +2512,13 @@ public class A1_PlayerStats {
             sql.append(", ").append(rdPerfEloCol);
             sql.append(", ").append(volPerfEloCol);
             sql.append(", ").append(seatCol);
+            sql.append(", ").append(outcomeCol);
             sql.append(", ").append(oppHallCol);
             sql.append(", ").append(oppNameCol);
             sql.append(", ").append(oppTrueEloCol);
             sql.append(", ").append(oppPerfEloCol);
             
-            values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
+            values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
             // Fill previous rounds with base ELO, current round with calculated, future rounds with null
             int currentIdx = ROUND_SEQUENCE.indexOf(currentRound);
@@ -2484,6 +2533,7 @@ public class A1_PlayerStats {
                 params.add(perfEloEnabled ? (player.baseRdPerfElo != null ? player.baseRdPerfElo : 350.0) : null);
                 params.add(perfEloEnabled ? (player.baseVolPerfElo != null ? player.baseVolPerfElo : 0.06) : null);
                 params.add(null); // seat
+                params.add(null); // outcome
                 params.add(null); // oppHall
                 params.add(null); // oppName
                 params.add(null); // oppTrueElo
@@ -2497,6 +2547,7 @@ public class A1_PlayerStats {
                 params.add(player.rdPerfEloByRound.get(round));
                 params.add(player.volPerfEloByRound.get(round));
                 params.add(player.seatByRound.get(round));
+                params.add(player.outcomeByRound.get(round));
                 params.add(player.oppHallByRound.get(round));
                 params.add(player.oppNameByRound.get(round));
                 params.add(player.oppTrueEloByRound.get(round));
@@ -2510,6 +2561,7 @@ public class A1_PlayerStats {
                 params.add(null); // rdPerfElo
                 params.add(null); // volPerfElo
                 params.add(null); // seat
+                params.add(null); // outcome
                 params.add(null); // oppHall
                 params.add(null); // oppName
                 params.add(null); // oppTrueElo

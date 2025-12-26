@@ -1550,6 +1550,12 @@ public class TelegramListener {
                 }
             }
             
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            // Note: Markdown in button text itself is not supported, but message text can use it
+            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
+            
             // Don't use Markdown parse mode with buttons - it can cause conflicts
             // Send message as plain text to avoid parsing errors
             payload.addProperty("text", message);
@@ -1614,6 +1620,11 @@ public class TelegramListener {
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
+            
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
             
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
@@ -2163,6 +2174,11 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
+            
             // Create inline keyboard with support for multiple columns
             JsonObject replyMarkup = new JsonObject();
             JsonArray keyboard = new JsonArray();
@@ -2231,6 +2247,11 @@ public class TelegramListener {
             }
             
             payload.addProperty("text", message);
+            
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
             
             // Create inline keyboard
             JsonObject replyMarkup = new JsonObject();

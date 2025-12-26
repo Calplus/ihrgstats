@@ -253,6 +253,18 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("seatT4", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("seatT2", "INTEGER"));
 
+        // Match Outcomes
+        playerStatsColumns.add(new ColumnDefinition("outcomeR1", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeR2", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeR3", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeR4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeR5", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeR6", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeT16", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeT8", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeT4", "INTEGER"));
+        playerStatsColumns.add(new ColumnDefinition("outcomeT2", "INTEGER"));
+
         // Opponent: Hall
         playerStatsColumns.add(new ColumnDefinition("oppHallR1", "TEXT"));
         playerStatsColumns.add(new ColumnDefinition("oppHallR2", "TEXT"));
