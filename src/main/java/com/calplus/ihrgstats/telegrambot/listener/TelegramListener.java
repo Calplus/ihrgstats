@@ -746,6 +746,12 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle compare halls callbacks
+            if (data.startsWith("comparehalls_")) {
+                handleCompareHallsCallback(callbackQuery, data, userId);
+                return;
+            }
+            
             // Handle multi-choice confirmation
             MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
             if (request != null) {
@@ -1238,6 +1244,8 @@ public class TelegramListener {
             handleRankPlayersCommand(message);
         } else if (command.equalsIgnoreCase("/rankhalls")) {
             handleRankHallsCommand(message);
+        } else if (command.equalsIgnoreCase("/comparehalls")) {
+            handleCompareHallsCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -1877,6 +1885,102 @@ public class TelegramListener {
     }
 
     /**
+     * Handles /comparehalls command
+     */
+    private void handleCompareHallsCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls compareCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response = 
+                compareCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /comparehalls command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles compare halls callback queries
+     */
+    private void handleCompareHallsCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls compareCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("comparehalls_cancel")) {
+                    response = compareCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("comparehalls_select1_")) {
+                    String hall = data.substring("comparehalls_select1_".length());
+                    response = compareCommand.handleFirstHallSelection(userId, hall);
+                    
+                    // Send message with buttons for second selection
+                    if (response.buttonConfig != null) {
+                        sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("comparehalls_select2_")) {
+                    String hall = data.substring("comparehalls_select2_".length());
+                    response = compareCommand.handleSecondHallSelection(userId, hall);
+                    
+                    // Send message with buttons for round selection
+                    if (response.buttonConfig != null) {
+                        sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("comparehalls_selectround_")) {
+                    String round = data.substring("comparehalls_selectround_".length());
+                    response = compareCommand.handleRoundSelection(userId, round);
+                    
+                    // Send message
+                    sendLongMessageToCommandsChannel(response.message, message);
+                    
+                    // Send image if available
+                    if (response.imagePath != null) {
+                        sendImageToCommandsChannel(response.imagePath, message);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing compare halls callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * Sends a long message to the commands channel, splitting if necessary
      * Telegram has a 4096 character limit per message
      */
@@ -2280,6 +2384,80 @@ public class TelegramListener {
         } catch (Exception e) {
             discordLog.logError("Error sending export buttons: " + e.getMessage());
             telegramLog.logError("Error sending export buttons: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Sends a message with compare halls buttons (4-column layout)
+     */
+    private void sendMessageWithCompareHallsButtons(String message, 
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.ButtonConfig buttonConfig, 
+            JsonObject originalMessage) {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            
+            JsonObject payload = new JsonObject();
+            
+            // Determine where to send
+            if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
+                JsonObject chat = originalMessage.getAsJsonObject("chat");
+                payload.addProperty("chat_id", chat.get("id").getAsString());
+                
+                if (originalMessage.has("message_thread_id")) {
+                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                }
+            } else {
+                String[] chatAndThread = getCommandsChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null) return;
+                
+                payload.addProperty("chat_id", chatAndThread[0]);
+                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
+                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                }
+            }
+            
+            payload.addProperty("text", message);
+            
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
+            
+            // Create inline keyboard with 4 columns
+            JsonObject replyMarkup = new JsonObject();
+            JsonArray keyboard = new JsonArray();
+            
+            int columnsPerRow = 4;
+            JsonArray currentRow = new JsonArray();
+            
+            for (int i = 0; i < buttonConfig.labels.length; i++) {
+                JsonObject button = new JsonObject();
+                button.addProperty("text", buttonConfig.labels[i]);
+                button.addProperty("callback_data", buttonConfig.callbacks[i]);
+                currentRow.add(button);
+                
+                // Add row when we reach 4 columns or it's the last button (except for cancel)
+                if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
+                    keyboard.add(currentRow);
+                    currentRow = new JsonArray();
+                }
+            }
+            
+            replyMarkup.add("inline_keyboard", keyboard);
+            payload.add("reply_markup", replyMarkup);
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            
+        } catch (Exception e) {
+            discordLog.logError("Error sending compare halls buttons: " + e.getMessage());
+            telegramLog.logError("Error sending compare halls buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }

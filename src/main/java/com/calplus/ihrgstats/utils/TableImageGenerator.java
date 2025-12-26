@@ -4,6 +4,7 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -30,9 +31,9 @@ public class TableImageGenerator {
     private static final Color RED_LIGHTER = new Color(255, 228, 225);  // MistyRose
     
     private static final Color TEXT_COLOR = Color.BLACK;
-    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 20);
-    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 50);
-    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 25);
+    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
+    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 48);
+    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 24);
     
     /**
      * Image metadata for headers
@@ -521,24 +522,23 @@ public class TableImageGenerator {
     }
     
     /**
-     * Loads a hall icon image
+     * Loads a hall icon image from resources
      */
     private static BufferedImage loadHallIcon(String hallName) {
         try {
-            // Construct path to hall image
-            String resourcePath = "halls/" + hallName.toLowerCase() + ".png";
-            Path imagePath = Paths.get(System.getProperty("user.dir"), "src", "main", "resources", resourcePath);
+            // Load from resources using getResourceAsStream (JAR-compatible)
+            String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
+            InputStream is = TableImageGenerator.class.getResourceAsStream(iconPath);
             
-            if (!Files.exists(imagePath)) {
+            if (is == null) {
                 // Try loading unknown.png as fallback
-                imagePath = Paths.get(System.getProperty("user.dir"), "src", "main", "resources", "halls", "unknown.png");
-                
-                if (!Files.exists(imagePath)) {
+                is = TableImageGenerator.class.getResourceAsStream("/halls/unknown.png");
+                if (is == null) {
                     return null;
                 }
             }
             
-            BufferedImage original = ImageIO.read(imagePath.toFile());
+            BufferedImage original = ImageIO.read(is);
             
             // Resize to ICON_SIZE x ICON_SIZE
             BufferedImage resized = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
