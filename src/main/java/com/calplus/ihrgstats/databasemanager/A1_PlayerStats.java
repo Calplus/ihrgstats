@@ -1581,6 +1581,11 @@ public class A1_PlayerStats {
                     mismatch.csvPlayer.existsInDb = true;
                     mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
                     
+                    // CRITICAL FIX: Update CSV player name to match DB name
+                    // This ensures data is saved under the correct database name
+                    String oldCsvName = mismatch.csvPlayer.name;
+                    mismatch.csvPlayer.name = mismatch.dbPlayer.name;
+                    
                     // Copy base ELO values from DB player
                     mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
                     mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
@@ -1603,9 +1608,9 @@ public class A1_PlayerStats {
                     mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
                     
                     discordLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
-                        mismatch.csvPlayer.name, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+                        oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
                     telegramLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
-                        mismatch.csvPlayer.name, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+                        oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
                 }
                 
             } else if (choice == 1) {

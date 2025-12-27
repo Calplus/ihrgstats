@@ -368,6 +368,19 @@ public class CommandCompareHalls {
     }
     
     /**
+     * Formats hall name for image with "Hall" prefix for numbers, suffix for non-numbers
+     */
+    private String formatHallNameForImage(String hallName) {
+        try {
+            Integer num = Integer.parseInt(hallName);
+            return "Hall " + num;
+        } catch (NumberFormatException e) {
+            // Not a pure number, add Hall suffix
+            return hallName + " Hall";
+        }
+    }
+    
+    /**
      * Generates complete comparison data
      */
     private CompareResponse generateComparison(String hall1, String hall2, String selectedRound) throws Exception {
@@ -404,12 +417,16 @@ public class CommandCompareHalls {
         List<PlayerData> players;
         String lastRound;
         Map<String, HallVictoryRecord> victoryRecords;
+        Map<String, Double> hallEloByRound;  // Average ELO of top 5 players per round
+        Map<String, Integer> hallRankByRound;  // Hall rank per round
         List<String> roundsIncluded;
         
         HallData(String hallName, List<String> roundsIncluded) {
             this.hallName = hallName;
             this.players = new ArrayList<>();
             this.victoryRecords = new HashMap<>();
+            this.hallEloByRound = new HashMap<>();
+            this.hallRankByRound = new HashMap<>();
             this.roundsIncluded = roundsIncluded;
         }
     }
@@ -419,19 +436,24 @@ public class CommandCompareHalls {
      */
     private static class PlayerData {
         String name;
-        int rank;
+        String hall;
+        int rank;  // Hall rank
+        int globalRank;  // Global rank across all players
         int elo;
         boolean capped;
+        Map<String, Integer> eloByRound;  // ELO per round for calculating global rank
         Map<String, Integer> seatByRound;
         Map<String, Integer> outcomeByRound;
         Map<String, String> oppNameByRound;
         Map<String, String> oppHallByRound;
         double avgSeat;  // Average seat number
         
-        PlayerData(String name, int elo, boolean capped) {
+        PlayerData(String name, String hall, int elo, boolean capped) {
             this.name = name;
+            this.hall = hall;
             this.elo = elo;
             this.capped = capped;
+            this.eloByRound = new HashMap<>();
             this.seatByRound = new HashMap<>();
             this.outcomeByRound = new HashMap<>();
             this.oppNameByRound = new HashMap<>();
@@ -462,12 +484,14 @@ public class CommandCompareHalls {
         double oppScore;
         String oppHall;
         int outcome;
+        Double oppHallElo;  // Opponent hall ELO
         
         HallVictoryRecord(double hallScore, double oppScore, String oppHall, int outcome) {
             this.hallScore = hallScore;
             this.oppScore = oppScore;
             this.oppHall = oppHall;
             this.outcome = outcome;
+            this.oppHallElo = null;
         }
     }
     
@@ -526,16 +550,18 @@ public class CommandCompareHalls {
                     
                     if (lastElo == null) continue;
                     
-                    PlayerData player = new PlayerData(playerName, lastElo, capped);
+                    PlayerData player = new PlayerData(playerName, hallName, lastElo, capped);
                     
-                    // Load seating, outcomes, and opponents for included rounds
+                    // Load seating, outcomes, opponents, and ELOs for included rounds
                     for (String round : roundsToInclude) {
                         String suffix = getRoundSuffix(round);
+                        Integer elo = (Integer) rs.getObject("trueElo" + suffix);
                         Integer seat = (Integer) rs.getObject("seat" + suffix);
                         Integer outcome = (Integer) rs.getObject("outcome" + suffix);
                         String oppName = rs.getString("oppName" + suffix);
                         String oppHall = rs.getString("oppHall" + suffix);
                         
+                        if (elo != null) player.eloByRound.put(round, elo);
                         if (seat != null) player.seatByRound.put(round, seat);
                         if (outcome != null) player.outcomeByRound.put(round, outcome);
                         if (oppName != null) player.oppNameByRound.put(round, oppName);
@@ -548,18 +574,37 @@ public class CommandCompareHalls {
                     hallData.players.add(player);
                 }
             }
+            
+            // Sort players by ELO (descending)
+            hallData.players.sort((a, b) -> Integer.compare(b.elo, a.elo));
+            
+            // Assign hall ranks
+            for (int i = 0; i < hallData.players.size(); i++) {
+                hallData.players.get(i).rank = i + 1;
+            }
+            
+            // Calculate global ranks for each player
+            // Need to reopen connection for rank calculations
+            try (Connection rankConn = DriverManager.getConnection(jdbcUrl)) {
+                for (PlayerData player : hallData.players) {
+                    // Calculate global rank based on last played ELO
+                    for (int i = roundsToInclude.size() - 1; i >= 0; i--) {
+                        String round = roundsToInclude.get(i);
+                        Integer elo = player.eloByRound.get(round);
+                        if (elo != null) {
+                            player.globalRank = calculateGlobalRankForRound(rankConn, round, elo);
+                            break;
+                        }
+                    }
+                }
+                
+                // Calculate hall ELO and rank per round
+                calculateHallEloPerRound(hallData, rankConn);
+                
+                // Calculate victory records
+                calculateHallVictoryRecords(hallData, rankConn);
+            }
         }
-        
-        // Sort players by ELO (descending)
-        hallData.players.sort((a, b) -> Integer.compare(b.elo, a.elo));
-        
-        // Assign ranks
-        for (int i = 0; i < hallData.players.size(); i++) {
-            hallData.players.get(i).rank = i + 1;
-        }
-        
-        // Calculate victory records
-        calculateHallVictoryRecords(hallData);
         
         return hallData;
     }
@@ -577,7 +622,7 @@ public class CommandCompareHalls {
     /**
      * Calculates hall victory records per round
      */
-    private void calculateHallVictoryRecords(HallData hallData) {
+    private void calculateHallVictoryRecords(HallData hallData, Connection conn) throws SQLException {
         for (String round : hallData.roundsIncluded) {
             List<PlayerData> playingPlayers = hallData.players.stream()
                 .filter(p -> p.seatByRound.containsKey(round))
@@ -625,9 +670,202 @@ public class CommandCompareHalls {
             if (primaryOppHall != null) {
                 double oppScore = oppScores.getOrDefault(primaryOppHall, 0.0);
                 int outcome = hallScore > oppScore ? 1 : (hallScore < oppScore ? -1 : 0);
-                hallData.victoryRecords.put(round, new HallVictoryRecord(hallScore, oppScore, primaryOppHall, outcome));
+                HallVictoryRecord record = new HallVictoryRecord(hallScore, oppScore, primaryOppHall, outcome);
+                
+                // Fetch opponent hall ELO for this round
+                if (!"WALKOVER".equalsIgnoreCase(primaryOppHall)) {
+                    record.oppHallElo = fetchOpponentHallElo(conn, primaryOppHall, round);
+                }
+                
+                hallData.victoryRecords.put(round, record);
             }
         }
+    }
+    
+    /**
+     * Fetches the opponent hall's ELO for a specific round
+     * Calculates it the same way as hall ELO (average of top 5 players)
+     */
+    private Double fetchOpponentHallElo(Connection conn, String oppHallName, String round) throws SQLException {
+        String roundSuffix = getRoundSuffix(round);
+        String sql = "SELECT trueElo" + roundSuffix + " FROM A1_PlayerStats WHERE Hall = ? AND trueElo" + roundSuffix + " IS NOT NULL ORDER BY trueElo" + roundSuffix + " DESC LIMIT 5";
+        
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, oppHallName);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                List<Integer> elos = new ArrayList<>();
+                while (rs.next()) {
+                    Integer elo = (Integer) rs.getObject("trueElo" + roundSuffix);
+                    if (elo != null) {
+                        elos.add(elo);
+                    }
+                }
+                
+                if (!elos.isEmpty()) {
+                    int sum = 0;
+                    for (Integer elo : elos) {
+                        sum += elo;
+                    }
+                    return (double) sum / elos.size();
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Calculates hall ELO for each round (average of top 5 players' TrueElo)
+     * Same logic as CommandRankHalls
+     */
+    private void calculateHallEloPerRound(HallData hallData, Connection conn) throws SQLException {
+        for (String round : hallData.roundsIncluded) {
+            String roundSuffix = getRoundSuffix(round);
+            
+            // Get all players from this hall who have played up to this round
+            List<PlayerEloData> playersInRound = new ArrayList<>();
+            
+            for (PlayerData player : hallData.players) {
+                Integer elo = player.eloByRound.get(round);
+                if (elo != null) {
+                    playersInRound.add(new PlayerEloData(player.name, elo));
+                }
+            }
+            
+            if (!playersInRound.isEmpty()) {
+                // Sort by ELO descending
+                playersInRound.sort((p1, p2) -> Integer.compare(p2.elo, p1.elo));
+                
+                // Take top 5 (or all if less than 5)
+                int count = Math.min(5, playersInRound.size());
+                int sum = 0;
+                for (int i = 0; i < count; i++) {
+                    sum += playersInRound.get(i).elo;
+                }
+                
+                double avgElo = (double) sum / count;
+                hallData.hallEloByRound.put(round, avgElo);
+                
+                // Calculate rank for this hall ELO in this round
+                int rank = calculateHallRankForRound(conn, round, avgElo);
+                hallData.hallRankByRound.put(round, rank);
+            }
+        }
+    }
+    
+    /**
+     * Helper class for player ELO data
+     */
+    private static class PlayerEloData {
+        String name;
+        int elo;
+        
+        PlayerEloData(String name, int elo) {
+            this.name = name;
+            this.elo = elo;
+        }
+    }
+    
+    /**
+     * Calculates hall rank for a specific round
+     * Compares this hall's ELO against all other halls' ELOs in the same round
+     */
+    private int calculateHallRankForRound(Connection conn, String round, double hallElo) throws SQLException {
+        String roundSuffix = getRoundSuffix(round);
+        
+        // Get all halls and their top 5 players' average ELO for this round
+        String sql = "SELECT hall, trueElo" + roundSuffix + " FROM A1_PlayerStats WHERE trueElo" + roundSuffix + " IS NOT NULL AND active = 1";
+        
+        Map<String, List<Integer>> hallElos = new HashMap<>();
+        
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String hall = rs.getString("hall");
+                int elo = rs.getInt("trueElo" + roundSuffix);
+                
+                hallElos.computeIfAbsent(hall, k -> new ArrayList<>()).add(elo);
+            }
+        }
+        
+        // Calculate average ELO for each hall (top 5)
+        int higherRankedHalls = 0;
+        for (Map.Entry<String, List<Integer>> entry : hallElos.entrySet()) {
+            List<Integer> elos = entry.getValue();
+            elos.sort((a, b) -> Integer.compare(b, a));  // Descending
+            
+            int count = Math.min(5, elos.size());
+            int sum = 0;
+            for (int i = 0; i < count; i++) {
+                sum += elos.get(i);
+            }
+            
+            double avgElo = (double) sum / count;
+            if (avgElo > hallElo) {
+                higherRankedHalls++;
+            }
+        }
+        
+        return higherRankedHalls + 1;
+    }
+    
+    /**
+     * Calculates global rank for a player in a specific round
+     * Uses same logic as CommandComparePlayers - ranks among ALL players who have played up to that round
+     */
+    private int calculateGlobalRankForRound(Connection conn, String round, int playerElo) throws SQLException {
+        int currentRoundIndex = ROUND_SEQUENCE.indexOf(round);
+        if (currentRoundIndex == -1) {
+            return 0;
+        }
+        
+        // Build list of round suffixes up to current round
+        List<String> roundSuffixes = new ArrayList<>();
+        for (int i = 0; i <= currentRoundIndex; i++) {
+            String suffix = getRoundSuffix(ROUND_SEQUENCE.get(i));
+            if (suffix != null && !suffix.isEmpty()) {
+                roundSuffixes.add(suffix);
+            }
+        }
+        
+        if (roundSuffixes.isEmpty()) {
+            return 0;
+        }
+        
+        // Build WHERE clause
+        StringBuilder whereClause = new StringBuilder("(");
+        for (int i = 0; i < roundSuffixes.size(); i++) {
+            if (i > 0) whereClause.append(" OR ");
+            whereClause.append("trueElo").append(roundSuffixes.get(i)).append(" IS NOT NULL");
+        }
+        whereClause.append(")");
+        
+        // Build expression to get latest ELO (check from current round backwards to R1)
+        // COALESCE requires at least 2 arguments, so for single round use column directly
+        String eloExpr;
+        if (roundSuffixes.size() == 1) {
+            eloExpr = "trueElo" + roundSuffixes.get(0);
+        } else {
+            StringBuilder coalesceExpr = new StringBuilder("COALESCE(");
+            for (int i = roundSuffixes.size() - 1; i >= 0; i--) {
+                if (i < roundSuffixes.size() - 1) coalesceExpr.append(", ");
+                coalesceExpr.append("trueElo").append(roundSuffixes.get(i));
+            }
+            coalesceExpr.append(")");
+            eloExpr = coalesceExpr.toString();
+        }
+        
+        // Count players with higher latest ELO
+        String sql = "SELECT COUNT(*) as rank FROM A1_PlayerStats " +
+                    "WHERE " + whereClause.toString() + " AND " + eloExpr + " > ? AND active = 1";
+        
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, playerElo);
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt("rank") + 1;
+            }
+        }
+        return 0;
     }
     
     /**
@@ -788,14 +1026,92 @@ public class CommandCompareHalls {
         
         sb.append(String.format("━━━ **%s** ━━━\n\n", data.hallName));
         
-        // Player stats table
+        // Hall Elo per round with deltas
+        sb.append("**🏛️ Hall Elo:**\n```\n");
+        sb.append(String.format("%-4s %-8s %-10s %-6s %-10s\n", "Rnd", "Elo", "ΔElo", "Rank", "ΔRank"));
+        sb.append(String.format("%-4s %-8s %-10s %-6s %-10s\n", "----", "--------", "----------", "------", "----------"));
+        
+        Double prevElo = null;
+        Integer prevRank = null;
+        Double lastKnownElo = null;
+        Integer lastKnownRank = null;
+        boolean hasStarted = false;
+        
+        for (String round : data.roundsIncluded) {
+            Double elo = data.hallEloByRound.get(round);
+            Integer rank = data.hallRankByRound.get(round);
+            
+            // Mark as started once we have first data
+            if (elo != null && rank != null) {
+                hasStarted = true;
+                lastKnownElo = elo;
+                lastKnownRank = rank;
+            }
+            
+            // Only display rounds after hall has started
+            if (hasStarted) {
+                // Use current values if available, otherwise last known
+                Double displayElo = (elo != null) ? elo : lastKnownElo;
+                Integer displayRank = (rank != null) ? rank : lastKnownRank;
+                
+                String eloStr = String.format("%.1f", displayElo);
+                String rankStr = String.valueOf(displayRank);
+                
+                // Calculate deltas
+                String eloChange;
+                String rankChange;
+                if (prevElo != null && elo != null) {
+                    double eloDiff = elo - prevElo;
+                    if (eloDiff > 0) {
+                        eloChange = String.format("+%.1f", eloDiff);
+                    } else if (eloDiff < 0) {
+                        eloChange = String.format("-%.1f", -eloDiff);
+                    } else {
+                        eloChange = "= ";
+                    }
+                } else {
+                    eloChange = "- ";
+                }
+                if (prevRank != null && rank != null) {
+                    int rankDiff = prevRank - rank;  // Positive = improved (lower rank number)
+                    if (rankDiff > 0) {
+                        rankChange = String.format("+%d", rankDiff);
+                    } else if (rankDiff < 0) {
+                        rankChange = String.format("-%d", -rankDiff);
+                    } else {
+                        rankChange = "= ";
+                    }
+                } else {
+                    rankChange = "- ";
+                }
+                
+                sb.append(String.format("%-4s %-8s %-10s %-6s %-10s\n",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    eloStr, eloChange, rankStr, rankChange));
+                
+                // Update prevElo/prevRank only if we have actual data for this round
+                if (elo != null) {
+                    prevElo = elo;
+                }
+                if (rank != null) {
+                    prevRank = rank;
+                }
+            } else {
+                sb.append(String.format("%-4s %-8s %-10s %-6s %-10s\n",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    "-", "-", "-", "-"));
+            }
+        }
+        sb.append("```\n\n");
+        
+        // Player stats table with Hall Rank and Global Rank
         sb.append("**📋 Player Stats:**\n```\n");
-        sb.append(String.format("%-4s %-6s %-7s %-20s\n", "Rank", "ELO", "Capped", "Name"));
-        sb.append(String.format("%-4s %-6s %-7s %-20s\n", "----", "------", "-------", "--------------------"));
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "--------", "--------", "------", "-------", "--------------------"));
         for (PlayerData p : data.players) {
             String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
-            sb.append(String.format("%-4d %-6d %-7s %-20s\n", 
-                p.rank, p.elo, p.capped ? "Yes" : "No", name));
+            sb.append(String.format("%-8d %-8d %-6d %-7s %-20s\n", 
+                p.rank, p.globalRank, p.elo, p.capped ? "Yes" : "No", name));
         }
         sb.append("```\n\n");
         
@@ -864,13 +1180,89 @@ public class CommandCompareHalls {
         // Prepare left side data
         List<ComparisonImageGenerator.Section> sections1 = new ArrayList<>();
         
-        // Player stats
+        // Hall Elo per round
+        List<String> hallEloLines1 = new ArrayList<>();
+        hallEloLines1.add(String.format("%-4s %-6s %-8s %-8s %-8s", "Rnd", "Rank", "ΔRank", "Elo", "ΔElo"));
+        
+        Double prevElo1 = null;
+        Integer prevRank1 = null;
+        Double lastKnownElo1 = null;
+        Integer lastKnownRank1 = null;
+        boolean hasStarted1 = false;
+        
+        for (String round : hall1.roundsIncluded) {
+            Double elo = hall1.hallEloByRound.get(round);
+            Integer rank = hall1.hallRankByRound.get(round);
+            
+            // Mark as started once we have first data
+            if (elo != null && rank != null) {
+                hasStarted1 = true;
+                lastKnownElo1 = elo;
+                lastKnownRank1 = rank;
+            }
+            
+            // Only display rounds after hall has started
+            if (hasStarted1) {
+                // Use current values if available, otherwise last known
+                Double displayElo = (elo != null) ? elo : lastKnownElo1;
+                Integer displayRank = (rank != null) ? rank : lastKnownRank1;
+                
+                String eloStr = String.format("%.1f", displayElo);
+                String rankStr = String.valueOf(displayRank);
+                
+                String eloChange;
+                String rankChange;
+                if (prevElo1 != null && elo != null) {
+                    double eloDiff = elo - prevElo1;
+                    if (eloDiff > 0) {
+                        eloChange = String.format("+%.1f", eloDiff);
+                    } else if (eloDiff < 0) {
+                        eloChange = String.format("-%.1f", -eloDiff);
+                    } else {
+                        eloChange = "= ";
+                    }
+                } else {
+                    eloChange = "- ";
+                }
+                if (prevRank1 != null && rank != null) {
+                    int rankDiff = prevRank1 - rank;
+                    if (rankDiff > 0) {
+                        rankChange = String.format("+%d", rankDiff);
+                    } else if (rankDiff < 0) {
+                        rankChange = String.format("-%d", -rankDiff);
+                    } else {
+                        rankChange = "= ";
+                    }
+                } else {
+                    rankChange = "- ";
+                }
+                
+                hallEloLines1.add(String.format("%-4s %-6s %-8s %-8s %-8s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    rankStr, rankChange, eloStr, eloChange));
+                
+                // Update prevElo/prevRank only if we have actual data for this round
+                if (elo != null) {
+                    prevElo1 = elo;
+                }
+                if (rank != null) {
+                    prevRank1 = rank;
+                }
+            } else {
+                hallEloLines1.add(String.format("%-4s %-6s %-8s %-8s %-8s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    "-", "-", "-", "-"));
+            }
+        }
+        sections1.add(new ComparisonImageGenerator.Section("Hall Elo", hallEloLines1));
+        
+        // Player stats with Hall Rank and Global Rank
         List<String> statsLines1 = new ArrayList<>();
-        statsLines1.add(String.format("%-4s %-6s %-7s %-20s", "Rank", "ELO", "Capped", "Name"));
+        statsLines1.add(String.format("%-8s %-8s %-6s %-7s %-20s", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
         for (PlayerData p : hall1.players) {
             String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
-            statsLines1.add(String.format("%-4d %-6d %-7s %-20s", 
-                p.rank, p.elo, p.capped ? "Yes" : "No", name));
+            statsLines1.add(String.format("%-8d %-8d %-6d %-7s %-20s", 
+                p.rank, p.globalRank, p.elo, p.capped ? "Yes" : "No", name));
         }
         sections1.add(new ComparisonImageGenerator.Section("Player Stats", statsLines1));
         
@@ -899,13 +1291,51 @@ public class CommandCompareHalls {
         }
         sections1.add(new ComparisonImageGenerator.Section("Seating", seatLines1));
         
-        // Victory record (centered, emojis flushed)
+        // Victory record (centered, emojis flushed) with hall ELO
         List<String> victoryLines1 = new ArrayList<>();
         for (String round : hall1.roundsIncluded) {
             HallVictoryRecord record = hall1.victoryRecords.get(round);
             if (record != null) {
-                victoryLines1.add(VictoryRecordCalculator.formatHallVictoryRecord(
-                    round, hall1.hallName, record.hallScore, record.oppHall, record.oppScore, record.outcome));
+                // Get hall ELO for this round
+                Double hallElo = hall1.hallEloByRound.get(round);
+                String hallEloStr = hallElo != null ? String.format("%.1f", hallElo) : "?";
+                
+                // Get opponent hall ELO from the fetched data
+                String oppEloStr = record.oppHallElo != null ? String.format("%.1f", record.oppHallElo) : "?";
+                
+                // Get emojis
+                String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(record.outcome);
+                Integer oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
+                String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
+                
+                // Format hall name for image
+                String hallFormatted = formatHallNameForImage(hall1.hallName);
+                String oppHallFormatted = record.oppHall != null ? formatHallNameForImage(record.oppHall) : "?";
+                
+                // Format score - use integers if whole numbers
+                String score;
+                if (record.hallScore == Math.floor(record.hallScore) && record.oppScore == Math.floor(record.oppScore)) {
+                    score = String.format("%d-%d", (int)record.hallScore, (int)record.oppScore);
+                } else {
+                    score = String.format("%.1f-%.1f", record.hallScore, record.oppScore);
+                }
+                
+                // Handle WALKOVER
+                if ("WALKOVER".equalsIgnoreCase(record.oppHall)) {
+                    oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
+                    oppEloStr = "-";
+                }
+                
+                // Format: "round hallEmoji hallElo hallName score oppName oppElo oppEmoji"
+                victoryLines1.add(String.format("%s %s %s %s %s %s %s %s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    hallEmoji,
+                    hallEloStr,
+                    hallFormatted,
+                    score,
+                    oppHallFormatted,
+                    oppEloStr,
+                    oppEmoji));
             } else {
                 victoryLines1.add(String.format("%-3s  -NA-", VictoryRecordCalculator.getRoundDisplayName(round)));
             }
@@ -919,13 +1349,89 @@ public class CommandCompareHalls {
         // Prepare right side data (similar structure)
         List<ComparisonImageGenerator.Section> sections2 = new ArrayList<>();
         
-        // Player stats
+        // Hall Elo per round
+        List<String> hallEloLines2 = new ArrayList<>();
+        hallEloLines2.add(String.format("%-4s %-6s %-8s %-8s %-8s", "Rnd", "Rank", "ΔRank", "Elo", "ΔElo"));
+        
+        Double prevElo2 = null;
+        Integer prevRank2 = null;
+        Double lastKnownElo2 = null;
+        Integer lastKnownRank2 = null;
+        boolean hasStarted2 = false;
+        
+        for (String round : hall2.roundsIncluded) {
+            Double elo = hall2.hallEloByRound.get(round);
+            Integer rank = hall2.hallRankByRound.get(round);
+            
+            // Mark as started once we have first data
+            if (elo != null && rank != null) {
+                hasStarted2 = true;
+                lastKnownElo2 = elo;
+                lastKnownRank2 = rank;
+            }
+            
+            // Only display rounds after hall has started
+            if (hasStarted2) {
+                // Use current values if available, otherwise last known
+                Double displayElo = (elo != null) ? elo : lastKnownElo2;
+                Integer displayRank = (rank != null) ? rank : lastKnownRank2;
+                
+                String eloStr = String.format("%.1f", displayElo);
+                String rankStr = String.valueOf(displayRank);
+                
+                String eloChange;
+                String rankChange;
+                if (prevElo2 != null && elo != null) {
+                    double eloDiff = elo - prevElo2;
+                    if (eloDiff > 0) {
+                        eloChange = String.format("+%.1f", eloDiff);
+                    } else if (eloDiff < 0) {
+                        eloChange = String.format("-%.1f", -eloDiff);
+                    } else {
+                        eloChange = "= ";
+                    }
+                } else {
+                    eloChange = "- ";
+                }
+                if (prevRank2 != null && rank != null) {
+                    int rankDiff = prevRank2 - rank;
+                    if (rankDiff > 0) {
+                        rankChange = String.format("+%d", rankDiff);
+                    } else if (rankDiff < 0) {
+                        rankChange = String.format("-%d", -rankDiff);
+                    } else {
+                        rankChange = "= ";
+                    }
+                } else {
+                    rankChange = "- ";
+                }
+                
+                hallEloLines2.add(String.format("%-4s %-6s %-8s %-8s %-8s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    rankStr, rankChange, eloStr, eloChange));
+                
+                // Update prevElo/prevRank only if we have actual data for this round
+                if (elo != null) {
+                    prevElo2 = elo;
+                }
+                if (rank != null) {
+                    prevRank2 = rank;
+                }
+            } else {
+                hallEloLines2.add(String.format("%-4s %-6s %-8s %-8s %-8s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    "-", "-", "-", "-"));
+            }
+        }
+        sections2.add(new ComparisonImageGenerator.Section("Hall Elo", hallEloLines2));
+        
+        // Player stats with Hall Rank and Global Rank
         List<String> statsLines2 = new ArrayList<>();
-        statsLines2.add(String.format("%-4s %-6s %-7s %-20s", "Rank", "ELO", "Capped", "Name"));
+        statsLines2.add(String.format("%-8s %-8s %-6s %-7s %-20s", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
         for (PlayerData p : hall2.players) {
             String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
-            statsLines2.add(String.format("%-4d %-6d %-7s %-20s",
-                p.rank, p.elo, p.capped ? "Yes" : "No", name));
+            statsLines2.add(String.format("%-8d %-8d %-6d %-7s %-20s",
+                p.rank, p.globalRank, p.elo, p.capped ? "Yes" : "No", name));
         }
         sections2.add(new ComparisonImageGenerator.Section("Player Stats", statsLines2));
         
@@ -954,13 +1460,51 @@ public class CommandCompareHalls {
         }
         sections2.add(new ComparisonImageGenerator.Section("Seating", seatLines2));
         
-        // Victory record
+        // Victory record with hall ELO
         List<String> victoryLines2 = new ArrayList<>();
         for (String round : hall2.roundsIncluded) {
             HallVictoryRecord record = hall2.victoryRecords.get(round);
             if (record != null) {
-                victoryLines2.add(VictoryRecordCalculator.formatHallVictoryRecord(
-                    round, hall2.hallName, record.hallScore, record.oppHall, record.oppScore, record.outcome));
+                // Get hall ELO for this round
+                Double hallElo = hall2.hallEloByRound.get(round);
+                String hallEloStr = hallElo != null ? String.format("%.1f", hallElo) : "?";
+                
+                // Get opponent hall ELO from the fetched data
+                String oppEloStr = record.oppHallElo != null ? String.format("%.1f", record.oppHallElo) : "?";
+                
+                // Get emojis
+                String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(record.outcome);
+                Integer oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
+                String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
+                
+                // Format hall name for image
+                String hallFormatted = formatHallNameForImage(hall2.hallName);
+                String oppHallFormatted = record.oppHall != null ? formatHallNameForImage(record.oppHall) : "?";
+                
+                // Format score - use integers if whole numbers
+                String score;
+                if (record.hallScore == Math.floor(record.hallScore) && record.oppScore == Math.floor(record.oppScore)) {
+                    score = String.format("%d-%d", (int)record.hallScore, (int)record.oppScore);
+                } else {
+                    score = String.format("%.1f-%.1f", record.hallScore, record.oppScore);
+                }
+                
+                // Handle WALKOVER
+                if ("WALKOVER".equalsIgnoreCase(record.oppHall)) {
+                    oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
+                    oppEloStr = "-";
+                }
+                
+                // Format: "round hallEmoji hallElo hallName score oppName oppElo oppEmoji"
+                victoryLines2.add(String.format("%s %s %s %s %s %s %s %s",
+                    VictoryRecordCalculator.getRoundDisplayName(round),
+                    hallEmoji,
+                    hallEloStr,
+                    hallFormatted,
+                    score,
+                    oppHallFormatted,
+                    oppEloStr,
+                    oppEmoji));
             } else {
                 victoryLines2.add(String.format("%-3s  -NA-", VictoryRecordCalculator.getRoundDisplayName(round)));
             }

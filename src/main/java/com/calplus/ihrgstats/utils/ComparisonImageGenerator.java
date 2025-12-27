@@ -96,6 +96,93 @@ public class ComparisonImageGenerator {
     }
     
     /**
+     * Structured data for a victory record entry (Hall format)
+     */
+    public static class HallVictoryEntry {
+        public String round;
+        public String hallEmoji;
+        public String hallElo;
+        public String hallName;
+        public String score;
+        public String oppName;
+        public String oppElo;
+        public String oppEmoji;
+        public boolean isNA;
+        
+        public HallVictoryEntry(String round, String hallEmoji, String hallElo, String hallName,
+                               String score, String oppName, String oppElo, String oppEmoji) {
+            this.round = round;
+            this.hallEmoji = hallEmoji;
+            this.hallElo = hallElo;
+            this.hallName = hallName;
+            this.score = score;
+            this.oppName = oppName;
+            this.oppElo = oppElo;
+            this.oppEmoji = oppEmoji;
+            this.isNA = false;
+        }
+        
+        public HallVictoryEntry(String round, boolean isNA) {
+            this.round = round;
+            this.isNA = isNA;
+        }
+        
+        public String toFormattedString() {
+            if (isNA) {
+                return String.format("%s -NA-", round);
+            }
+            return String.format("%s %s %s %s %s %s %s %s",
+                round, hallEmoji, hallElo, hallName, score, oppName, oppElo, oppEmoji);
+        }
+    }
+    
+    /**
+     * Structured data for a victory record entry (Player format)
+     */
+    public static class PlayerVictoryEntry {
+        public String round;
+        public String hallEmoji;
+        public String playerHall;
+        public String playerElo;
+        public String playerName;
+        public String score;
+        public String oppName;
+        public String oppElo;
+        public String oppHall;
+        public String oppEmoji;
+        public boolean isNA;
+        
+        public PlayerVictoryEntry(String round, String hallEmoji, String playerHall, String playerElo,
+                                 String playerName, String score, String oppName, String oppElo,
+                                 String oppHall, String oppEmoji) {
+            this.round = round;
+            this.hallEmoji = hallEmoji;
+            this.playerHall = playerHall;
+            this.playerElo = playerElo;
+            this.playerName = playerName;
+            this.score = score;
+            this.oppName = oppName;
+            this.oppElo = oppElo;
+            this.oppHall = oppHall;
+            this.oppEmoji = oppEmoji;
+            this.isNA = false;
+        }
+        
+        public PlayerVictoryEntry(String round, boolean isNA) {
+            this.round = round;
+            this.isNA = isNA;
+        }
+        
+        public String toFormattedString() {
+            if (isNA) {
+                return String.format("%s -NA-", round);
+            }
+            return String.format("%s %s %s %s %s %s %s %s %s %s",
+                round, hallEmoji, playerHall, playerElo, playerName, score, oppName, oppElo, oppHall, oppEmoji);
+        }
+    }
+    
+    /**
      * Generates a comparison image with left and right sides
      */
     public static Path generateComparisonImage(String title, ComparisonData leftData, 
@@ -121,7 +208,8 @@ public class ComparisonImageGenerator {
         
         // Image dimensions
         int imageWidth = sideWidth * 2 + DIVIDER_WIDTH + PADDING * 4;
-        int imageHeight = headerHeight + contentHeight + PADDING * 2;
+        // Add extra bottom padding (40px) to prevent image from getting cut off
+        int imageHeight = headerHeight + contentHeight + PADDING * 2 + 40;
         
         // Create image
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
@@ -142,9 +230,9 @@ public class ComparisonImageGenerator {
         g2d.fillRect(leftSideWidth, headerHeight, imageWidth - leftSideWidth, imageHeight - headerHeight);
         
         // Draw tiled backgrounds (constrained to each side)
-        drawTiledBackground(g2d, leftData.hallName, 0, headerHeight, leftSideWidth, 
+        drawTiledBackground(g2d, extractHallIdentifier(leftData.hallName), 0, headerHeight, leftSideWidth, 
                            imageHeight - headerHeight);
-        drawTiledBackground(g2d, rightData.hallName, leftSideWidth, headerHeight, 
+        drawTiledBackground(g2d, extractHallIdentifier(rightData.hallName), leftSideWidth, headerHeight, 
                            imageWidth - leftSideWidth, imageHeight - headerHeight);
         
         // Draw header section
@@ -260,8 +348,8 @@ public class ComparisonImageGenerator {
         currentY += metaFm.getHeight() + 15;
         
         // Draw hall icons
-        BufferedImage leftIcon = loadHallIcon(leftData.hallName);
-        BufferedImage rightIcon = loadHallIcon(rightData.hallName);
+        BufferedImage leftIcon = loadHallIcon(extractHallIdentifier(leftData.hallName));
+        BufferedImage rightIcon = loadHallIcon(extractHallIdentifier(rightData.hallName));
         
         if (leftIcon != null) {
             int leftIconX = leftSideWidth / 2 - LARGE_ICON_SIZE / 2;
@@ -297,6 +385,10 @@ public class ComparisonImageGenerator {
      * Non-numeric halls: "Binjai Hall"
      */
     private static String formatHallName(String hallName) {
+        // If hallName contains parentheses, it's already formatted (e.g., "Name (Hall 4)")
+        if (hallName.contains("(")) {
+            return hallName;
+        }
         try {
             Integer.parseInt(hallName);
             return "Hall " + hallName;
@@ -304,6 +396,28 @@ public class ComparisonImageGenerator {
             return hallName + " Hall";
         }
     }
+    
+    /**
+     * Extracts the hall identifier from a subtitle string like "Name (Hall 4)" or "Name (Binjai Hall)"
+     * Returns just "4" or "binjai" for hall icon loading
+     */
+    private static String extractHallIdentifier(String subtitle) {
+        // If subtitle contains parentheses, extract what's inside
+        if (subtitle.contains("(") && subtitle.contains(")")) {
+            int start = subtitle.indexOf("(") + 1;
+            int end = subtitle.indexOf(")");
+            String hallPart = subtitle.substring(start, end).trim();
+            
+            // Remove "Hall" prefix/suffix if present
+            hallPart = hallPart.replace("Hall ", "").replace(" Hall", "").trim();
+            
+            return hallPart;
+        }
+        
+        // Otherwise, assume it's just the hall identifier
+        return subtitle.trim();
+    }
+
     
     /**
      * Draws tiled background pattern (constrained to specified region)
@@ -414,142 +528,265 @@ public class ComparisonImageGenerator {
     }
     
     /**
-     * Draws a victory record line with proper formatting:
-     * Left flush: Round number + hall emoji
-     * Center: Score (or -NA- if not playing)
-     * Left of score: Hall name
-     * Right of score: Opponent hall name
-     * Right flush: Opponent emoji
-     * Format from VictoryRecordCalculator: "round hallEmoji hallName score oppName oppEmoji"
+     * Draws a victory record line using structured parsing.
+     * Automatically detects hall vs player format and renders appropriately.
      */
     private static void drawVictoryRecordLine(Graphics2D g2d, String line, int x, int y, 
                                              int width, FontMetrics fm, boolean isLeft) {
         String trimmed = line.trim();
+        g2d.setColor(TEXT_COLOR);
         
-        // Check for -NA- format: "round -NA-"
+        // Handle -NA- format
         if (trimmed.contains("-NA-")) {
-            String[] parts = trimmed.split("\\s+");
-            if (parts.length >= 2) {
-                String round = parts[0];
-                
-                // Left flush: round number (padded)
-                String paddedRound = String.format("%-3s", round);
-                g2d.drawString(paddedRound, x + 5, y);
-                
-                // Center: -NA-
-                int naWidth = fm.stringWidth("-NA-");
-                g2d.drawString("-NA-", x + (width - naWidth) / 2, y);
-            } else {
-                // Fallback: center entire line
-                int lineWidth = fm.stringWidth(trimmed);
-                g2d.drawString(trimmed, x + (width - lineWidth) / 2, y);
-            }
+            drawNALine(g2d, trimmed, x, y, width, fm);
             return;
         }
         
+        // Parse the line
         String[] parts = trimmed.split("\\s+");
         if (parts.length < 6) {
-            // Invalid format, just draw left-aligned
-            g2d.drawString(line, x + 5, y);
+            g2d.drawString(trimmed, x + 5, y);
             return;
         }
         
-        // Find score token (contains dash)
-        int scoreIndex = -1;
-        for (int i = 0; i < parts.length; i++) {
+        // Find score index
+        int scoreIndex = findScoreIndex(parts);
+        if (scoreIndex == -1) {
+            g2d.drawString(trimmed, x + 5, y);
+            return;
+        }
+        
+        // Determine format and draw
+        if (parts.length == 10 && scoreIndex == 5) {
+            drawPlayerVictoryLine(g2d, parts, x, y, width, fm);
+        } else if (parts.length == 8 && scoreIndex == 4) {
+            drawHallVictoryLine(g2d, parts, x, y, width, fm);
+        } else {
+            g2d.drawString(trimmed, x + 5, y);
+        }
+    }
+    
+    /**
+     * Draws -NA- format line
+     */
+    private static void drawNALine(Graphics2D g2d, String line, int x, int y, int width, FontMetrics fm) {
+        String[] parts = line.split("\\s+");
+        if (parts.length >= 2) {
+            String round = parts[0];
+            String naText = "-NA-";
+            int totalWidth = fm.stringWidth(round + " " + naText);
+            int centerX = x + width / 2;
+            int startX = centerX - totalWidth / 2;
+            g2d.drawString(round, startX, y);
+            g2d.drawString(naText, startX + fm.stringWidth(round + " "), y);
+        } else {
+            int lineWidth = fm.stringWidth(line);
+            g2d.drawString(line, x + (width - lineWidth) / 2, y);
+        }
+    }
+    
+    /**
+     * Finds the score index in parts array
+     */
+    private static int findScoreIndex(String[] parts) {
+        for (int i = 2; i < parts.length; i++) {
             if (parts[i].contains("-") && !parts[i].equals("-NA-")) {
-                scoreIndex = i;
-                break;
+                return i;
             }
         }
-        
-        if (scoreIndex == -1 || scoreIndex < 2) {
-            // No valid score found
-            g2d.drawString(line, x + 5, y);
-            return;
-        }
-        
-        // Parse components:
-        // parts[0] = round
-        // parts[1] = hall emoji
-        // parts[2 to scoreIndex-1] = hall name (multi-word)
-        // parts[scoreIndex] = score
-        // parts[scoreIndex+1 to length-2] = opponent hall name (multi-word)
-        // parts[length-1] = opponent emoji
-        
+        return -1;
+    }
+    
+    /**
+     * Draws player victory record line
+     * Format: round emoji playerHall playerElo playerName score oppName oppElo oppHall oppEmoji
+     */
+    private static void drawPlayerVictoryLine(Graphics2D g2d, String[] parts, int x, int y, 
+                                             int width, FontMetrics fm) {
+        // Extract parts
         String round = parts[0];
-        String hallEmoji = parts[1];
+        String emoji = parts[1];
+        String playerHall = parts[2];
+        String playerElo = parts[3];
+        String playerName = parts[4];
+        String score = parts[5];
+        String oppName = parts[6];
+        String oppElo = parts[7];
+        String oppHall = parts[8];
+        String oppEmoji = parts[9];
         
-        // Build hall name from parts[2] to parts[scoreIndex-1]
-        StringBuilder hallNameBuilder = new StringBuilder();
-        for (int i = 2; i < scoreIndex; i++) {
-            if (i > 2) hallNameBuilder.append(" ");
-            hallNameBuilder.append(parts[i]);
-        }
-        String hallName = hallNameBuilder.toString();
+        // Fixed widths for alignment
+        int roundColWidth = fm.stringWidth("T16 ");
         
-        String score = parts[scoreIndex];
-        
-        // Build opponent hall name from parts[scoreIndex+1] to parts[length-2]
-        StringBuilder oppHallBuilder = new StringBuilder();
-        for (int i = scoreIndex + 1; i < parts.length - 1; i++) {
-            if (i > scoreIndex + 1) oppHallBuilder.append(" ");
-            oppHallBuilder.append(parts[i]);
-        }
-        String oppHall = oppHallBuilder.toString();
-        
-        String oppEmoji = parts[parts.length - 1];
-        
-        // Layout:
-        // Left flush: round + hall emoji
-        String paddedRound = String.format("%-3s", round);
+        // Draw left flush: round, emoji, playerHall, playerElo
         int leftX = x + 5;
-        g2d.drawString(paddedRound, leftX, y);
-        leftX += fm.stringWidth("T16 ");
-        g2d.drawString(hallEmoji, leftX, y);
+        g2d.drawString(String.format("%-3s", round), leftX, y);
+        leftX += roundColWidth;
         
-        // Right flush: opponent emoji
-        int rightX = x + width - 5 - fm.stringWidth(oppEmoji);
+        g2d.drawString(emoji, leftX, y);
+        leftX += fm.stringWidth(emoji) + 3;
+        
+        g2d.drawString(playerHall, leftX, y);
+        leftX += fm.stringWidth(playerHall) + 3;
+        
+        g2d.drawString(playerElo, leftX, y);
+        leftX += fm.stringWidth(playerElo) + 8;
+        
+        // Draw right flush: oppElo, oppHall (padded), oppEmoji
+        String paddedOppHall = String.format("%3s", oppHall);
+        int rightX = x + width - 5;
+        
+        rightX -= fm.stringWidth(oppEmoji);
         g2d.drawString(oppEmoji, rightX, y);
+        rightX -= 3;
         
-        // Center: score
-        int scoreWidth = fm.stringWidth(score);
+        rightX -= fm.stringWidth(paddedOppHall);
+        g2d.drawString(paddedOppHall, rightX, y);
+        rightX -= 3;
+        
+        rightX -= fm.stringWidth(oppElo);
+        g2d.drawString(oppElo, rightX, y);
+        rightX -= 8;
+        
+        // Draw center: playerName, score, oppName
         int centerX = x + width / 2;
-        g2d.drawString(score, centerX - scoreWidth / 2, y);
+        int scoreWidth = fm.stringWidth(score);
+        int scoreX = centerX - scoreWidth / 2;
+        g2d.drawString(score, scoreX, y);
         
-        // Left of score: hall name (but don't overlap with left emoji)
-        int hallNameWidth = fm.stringWidth(hallName);
-        int hallNameX = centerX - scoreWidth / 2 - 8 - hallNameWidth;
-        if (hallNameX < leftX + fm.stringWidth(hallEmoji) + 10) {
-            // Truncate if needed
-            hallNameX = leftX + fm.stringWidth(hallEmoji) + 10;
-            // Calculate how much space we have
-            int availableWidth = centerX - scoreWidth / 2 - 8 - hallNameX;
-            if (hallNameWidth > availableWidth && availableWidth > 30) {
-                while (hallNameWidth > availableWidth && hallName.length() > 1) {
-                    hallName = hallName.substring(0, hallName.length() - 1);
-                    hallNameWidth = fm.stringWidth(hallName + "...");
-                }
-                hallName += "...";
-            }
+        // Draw names with truncation
+        int playerNameSpace = scoreX - 8 - leftX;
+        if (playerNameSpace > 20) {
+            String displayName = shortenNameWithInitials(playerName, playerNameSpace, fm);
+            int nameWidth = fm.stringWidth(displayName);
+            g2d.drawString(displayName, scoreX - 8 - nameWidth, y);
         }
-        g2d.drawString(hallName, hallNameX, y);
         
-        // Right of score: opponent name (but don't overlap with right emoji)
-        int oppNameX = centerX + scoreWidth / 2 + 8;
-        int oppNameWidth = fm.stringWidth(oppHall);
-        if (oppNameX + oppNameWidth > rightX - 10) {
-            // Truncate if needed
-            int availableWidth = rightX - 10 - oppNameX;
-            if (oppNameWidth > availableWidth && availableWidth > 30) {
-                while (oppNameWidth > availableWidth && oppHall.length() > 1) {
-                    oppHall = oppHall.substring(0, oppHall.length() - 1);
-                    oppNameWidth = fm.stringWidth(oppHall + "...");
-                }
-                oppHall += "...";
-            }
+        int oppNameSpace = rightX - (scoreX + scoreWidth + 8);
+        if (oppNameSpace > 20) {
+            String displayName = shortenNameWithInitials(oppName, oppNameSpace, fm);
+            g2d.drawString(displayName, scoreX + scoreWidth + 8, y);
         }
-        g2d.drawString(oppHall, oppNameX, y);
+    }
+    
+    /**
+     * Draws hall victory record line
+     * Format: round emoji hallElo hallName score oppName oppElo oppEmoji
+     */
+    private static void drawHallVictoryLine(Graphics2D g2d, String[] parts, int x, int y,
+                                           int width, FontMetrics fm) {
+        // Extract parts
+        String round = parts[0];
+        String emoji = parts[1];
+        String hallElo = parts[2];
+        String hallName = parts[3];
+        String score = parts[4];
+        String oppName = parts[5];
+        String oppElo = parts[6];
+        String oppEmoji = parts[7];
+        
+        // Fixed widths for alignment
+        int roundColWidth = fm.stringWidth("T16 ");
+        
+        // Draw left flush: round, emoji, hallElo
+        int leftX = x + 5;
+        g2d.drawString(String.format("%-3s", round), leftX, y);
+        leftX += roundColWidth;
+        
+        g2d.drawString(emoji, leftX, y);
+        leftX += fm.stringWidth(emoji) + 3;
+        
+        g2d.drawString(hallElo, leftX, y);
+        leftX += fm.stringWidth(hallElo) + 8;
+        
+        // Draw right flush: oppElo, oppEmoji
+        int rightX = x + width - 5;
+        
+        rightX -= fm.stringWidth(oppEmoji);
+        g2d.drawString(oppEmoji, rightX, y);
+        rightX -= 3;
+        
+        rightX -= fm.stringWidth(oppElo);
+        g2d.drawString(oppElo, rightX, y);
+        rightX -= 8;
+        
+        // Draw center: hallName, score, oppName
+        int centerX = x + width / 2;
+        int scoreWidth = fm.stringWidth(score);
+        int scoreX = centerX - scoreWidth / 2;
+        g2d.drawString(score, scoreX, y);
+        
+        // Draw names with truncation
+        int hallNameSpace = scoreX - 8 - leftX;
+        if (hallNameSpace > 20) {
+            String displayName = shortenNameWithInitials(hallName, hallNameSpace, fm);
+            int nameWidth = fm.stringWidth(displayName);
+            g2d.drawString(displayName, scoreX - 8 - nameWidth, y);
+        }
+        
+        int oppNameSpace = rightX - (scoreX + scoreWidth + 8);
+        if (oppNameSpace > 20) {
+            String displayName = shortenNameWithInitials(oppName, oppNameSpace, fm);
+            g2d.drawString(displayName, scoreX + scoreWidth + 8, y);
+        }
+    }
+    
+    /**
+     * Shortens a name by converting words to initials until it fits in the available width.
+     * Always shortens the longest word first.
+     * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
+     */
+    private static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+        if (fm.stringWidth(name) <= availableWidth) {
+            return name;
+        }
+        
+        // Split name into words
+        String[] words = name.split("\\s+");
+        if (words.length == 1) {
+            // Single word - just truncate with ellipsis
+            String shortened = name;
+            while (fm.stringWidth(shortened + "...") > availableWidth && shortened.length() > 1) {
+                shortened = shortened.substring(0, shortened.length() - 1);
+            }
+            return shortened + "...";
+        }
+        
+        // Track which words are already initials
+        boolean[] isInitial = new boolean[words.length];
+        
+        // Keep shortening until it fits or all words are initials
+        while (true) {
+            // Check if current name fits
+            StringBuilder current = new StringBuilder();
+            for (int i = 0; i < words.length; i++) {
+                if (i > 0) current.append(" ");
+                current.append(words[i]);
+            }
+            
+            if (fm.stringWidth(current.toString()) <= availableWidth) {
+                return current.toString();
+            }
+            
+            // Find longest non-initial word
+            int longestIndex = -1;
+            int longestLength = 0;
+            for (int i = 0; i < words.length; i++) {
+                if (!isInitial[i] && words[i].length() > longestLength) {
+                    longestLength = words[i].length();
+                    longestIndex = i;
+                }
+            }
+            
+            if (longestIndex == -1) {
+                // All words are already initials, can't shorten more
+                return current.toString();
+            }
+            
+            // Shorten the longest word to initial
+            words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
+            isInitial[longestIndex] = true;
+        }
     }
     
     /**
