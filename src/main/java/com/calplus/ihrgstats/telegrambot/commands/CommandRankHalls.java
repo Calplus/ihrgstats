@@ -4,6 +4,7 @@ import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.RoundDetector;
 import com.calplus.ihrgstats.utils.TableFormatter;
 import com.calplus.ihrgstats.utils.TableFormatter.Alignment;
 import com.calplus.ihrgstats.utils.TableImageGenerator;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Command handler for /rankhalls command.
@@ -24,6 +26,18 @@ public class CommandRankHalls {
 
     // Round sequence to find last played round
     private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
+
+    // State management for round selection (static so it persists across instances)
+    private static final Map<String, SelectionState> userSelectionStates = new HashMap<>();
+    
+    private static class SelectionState {
+        String selectedRound;  // "all" or specific round
+        long timestamp;
+        
+        SelectionState() {
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
 
     public CommandRankHalls() {
         // Load environment variables
@@ -85,31 +99,88 @@ public class CommandRankHalls {
     }
 
     /**
-     * Handles the /rankhalls command
-     * @return Response with message and image
+     * Handles the /rankhalls command - shows round selection UI
+     * @param userId User ID for state tracking
+     * @return Response with round selection buttons
      */
-    public RankResponse handleCommand() {
-        discordLog.logInfo("Processing /rankhalls command");
-        telegramLog.logInfo("Processing /rankhalls command");
+    public RankResponse handleCommand(String userId) {
+        discordLog.logInfo("Processing /rankhalls command for user " + userId);
+        telegramLog.logInfo("Processing /rankhalls command for user " + userId);
 
-        // Fetch all players with their Elo
-        List<PlayerEloData> players = fetchPlayerData();
+        // Get available rounds from database (excluding skipped rounds)
+        List<String> availableRounds = RoundDetector.getAvailableRounds(dbPath);
+        
+        if (availableRounds.isEmpty()) {
+            String errorMsg = "ℹ️ No rounds with data found in database.";
+            discordLog.logWarning("No available rounds found");
+            telegramLog.logWarning("No available rounds found");
+            return new RankResponse(errorMsg, (Path) null);
+        }
+
+        // Build button labels and callbacks
+        List<String> labels = new ArrayList<>();
+        List<String> callbacks = new ArrayList<>();
+        
+        // Add "All Rounds" button first
+        labels.add("All Rounds");
+        callbacks.add("rankhalls_round_all");
+        
+        // Add round buttons
+        for (String round : availableRounds) {
+            labels.add(round.toUpperCase());
+            callbacks.add("rankhalls_round_" + round.toLowerCase());
+        }
+        
+        // Add "Cancel" button last
+        labels.add("❌ Cancel");
+        callbacks.add("rankhalls_cancel");
+
+        String message = "🏆 **Hall Rankings**\n\n" +
+                        "Select which round to rank halls up to:";
+
+        ButtonConfig buttonConfig = new ButtonConfig(
+            labels.toArray(new String[0]), 
+            callbacks.toArray(new String[0])
+        );
+        
+        return new RankResponse(message, buttonConfig);
+    }
+
+    /**
+     * Handles round selection callback
+     * @param userId User ID
+     * @param selectedRound Selected round ("all" or specific round like "1", "t16")
+     * @return Response with rankings for selected round
+     */
+    public RankResponse handleRoundSelection(String userId, String selectedRound) {
+        discordLog.logInfo("User " + userId + " selected round: " + selectedRound);
+        telegramLog.logInfo("User " + userId + " selected round: " + selectedRound);
+
+        // Store selection state
+        SelectionState state = new SelectionState();
+        state.selectedRound = selectedRound.toLowerCase();
+        userSelectionStates.put(userId, state);
+
+        // Fetch all players with their Elo (filtered by round)
+        List<PlayerEloData> players = fetchPlayerData(selectedRound);
 
         if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No player data found in database.";
-            discordLog.logWarning("No players found for hall ranking");
-            telegramLog.logWarning("No players found for hall ranking");
-            return new RankResponse(errorMsg, null);
+            String errorMsg = "ℹ️ No player data found for round " + selectedRound.toUpperCase() + ".";
+            discordLog.logWarning("No players found for hall ranking in round " + selectedRound);
+            telegramLog.logWarning("No players found for hall ranking in round " + selectedRound);
+            userSelectionStates.remove(userId);
+            return new RankResponse(errorMsg, (Path) null);
         }
 
         // Group by hall and calculate averages
         List<HallRankData> halls = calculateHallRankings(players);
 
         if (halls.isEmpty()) {
-            String errorMsg = "ℹ️ No hall rankings could be calculated.";
+            String errorMsg = "ℹ️ No hall rankings could be calculated for round " + selectedRound.toUpperCase() + ".";
             discordLog.logWarning("No hall rankings calculated");
             telegramLog.logWarning("No hall rankings calculated");
-            return new RankResponse(errorMsg, null);
+            userSelectionStates.remove(userId);
+            return new RankResponse(errorMsg, (Path) null);
         }
 
         // Sort by average Elo descending
@@ -121,7 +192,8 @@ public class CommandRankHalls {
         // Format as table
         String table = formatHallsTable(halls, homeHallForText);
 
-        String message = "🏆 **Hall Rankings**\n\n" +
+        String roundDisplay = selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound.toUpperCase();
+        String message = "🏆 **Hall Rankings** (" + roundDisplay + ")\n\n" +
                         "Halls ranked by average TrueElo of top 5 players\n\n" +
                         table;
 
@@ -146,6 +218,9 @@ public class CommandRankHalls {
             telegramLog.logWarning("Failed to generate table image: " + e.getMessage());
         }
 
+        // Clean up state
+        userSelectionStates.remove(userId);
+
         discordLog.logSuccess(String.format("Ranked %d halls", halls.size()));
         telegramLog.logSuccess(String.format("Ranked %d halls", halls.size()));
 
@@ -153,9 +228,21 @@ public class CommandRankHalls {
     }
 
     /**
-     * Fetches player data from database
+     * Handles cancel action
+     * @param userId User ID
+     * @return Response confirming cancellation
      */
-    private List<PlayerEloData> fetchPlayerData() {
+    public RankResponse handleCancel(String userId) {
+        userSelectionStates.remove(userId);
+        String message = "❌ Hall ranking cancelled.";
+        return new RankResponse(message, (Path) null);
+    }
+
+    /**
+     * Fetches player data from database, optionally filtering by round
+     * @param round The round to fetch data up to ("all" for all rounds, or specific round like "1", "t16")
+     */
+    private List<PlayerEloData> fetchPlayerData(String round) {
         List<PlayerEloData> players = new ArrayList<>();
 
         try {
@@ -171,8 +258,8 @@ public class CommandRankHalls {
                         String hall = rs.getString("hall");
                         boolean capped = rs.getInt("capped") == 1;
 
-                        // Find last round played and corresponding TrueElo
-                        LastRoundData lastRound = findLastRoundData(conn, name);
+                        // Find last round played and corresponding TrueElo (up to selected round)
+                        LastRoundData lastRound = findLastRoundData(conn, name, round);
                         
                         if (lastRound != null && lastRound.trueElo != null) {
                             players.add(new PlayerEloData(name, hall, lastRound.trueElo, lastRound.roundName, capped));
@@ -190,14 +277,29 @@ public class CommandRankHalls {
     }
 
     /**
-     * Finds the last round data (round name and TrueElo) for a player
+     * Finds the last round data (round name and TrueElo) for a player, up to the specified round
+     * @param round The round to check up to ("all" for all rounds)
      */
-    private LastRoundData findLastRoundData(Connection conn, String playerName) throws SQLException {
+    private LastRoundData findLastRoundData(Connection conn, String playerName, String round) throws SQLException {
+        // Determine which rounds to check based on selected round
+        List<String> roundsToCheck;
+        if (round.equalsIgnoreCase("all")) {
+            roundsToCheck = ROUND_SEQUENCE;
+        } else {
+            // Find index of selected round and only check rounds up to that point
+            int selectedIndex = ROUND_SEQUENCE.indexOf(round.toLowerCase());
+            if (selectedIndex == -1) {
+                roundsToCheck = ROUND_SEQUENCE;  // Fallback to all rounds
+            } else {
+                roundsToCheck = ROUND_SEQUENCE.subList(0, selectedIndex + 1);
+            }
+        }
+        
         // Check rounds in reverse order
-        for (int i = ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
-            String round = ROUND_SEQUENCE.get(i);
-            String roundCol = getRoundColumnName("trueElo", round);
-            String oppNameCol = getRoundColumnName("oppName", round);
+        for (int i = roundsToCheck.size() - 1; i >= 0; i--) {
+            String checkRound = roundsToCheck.get(i);
+            String roundCol = getRoundColumnName("trueElo", checkRound);
+            String oppNameCol = getRoundColumnName("oppName", checkRound);
 
             String sql = String.format(
                 "SELECT %s, %s FROM A1_PlayerStats WHERE name = ?",
@@ -214,7 +316,7 @@ public class CommandRankHalls {
 
                         // Player actually played if they have an opponent
                         if (trueElo != null && oppName != null && !oppName.isEmpty()) {
-                            return new LastRoundData(round, trueElo);
+                            return new LastRoundData(checkRound, trueElo);
                         }
                     }
                 }
@@ -379,10 +481,31 @@ public class CommandRankHalls {
     public static class RankResponse {
         public final String message;
         public final Path imagePath;
+        public final ButtonConfig buttonConfig;
         
         public RankResponse(String message, Path imagePath) {
             this.message = message;
             this.imagePath = imagePath;
+            this.buttonConfig = null;
+        }
+        
+        public RankResponse(String message, ButtonConfig buttonConfig) {
+            this.message = message;
+            this.imagePath = null;
+            this.buttonConfig = buttonConfig;
+        }
+    }
+    
+    /**
+     * Button configuration for inline keyboard
+     */
+    public static class ButtonConfig {
+        public final String[] labels;
+        public final String[] callbacks;
+        
+        public ButtonConfig(String[] labels, String[] callbacks) {
+            this.labels = labels;
+            this.callbacks = callbacks;
         }
     }
 }

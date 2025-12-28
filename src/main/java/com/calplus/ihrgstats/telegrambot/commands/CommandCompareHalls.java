@@ -288,30 +288,9 @@ public class CommandCompareHalls {
      * Gets available rounds from database
      */
     private List<String> getAvailableRounds() {
-        Set<String> roundsSet = new HashSet<>();
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
-        
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
-            // Check each round column for non-null values
-            for (String round : ROUND_SEQUENCE) {
-                String col = "trueElo" + getRoundSuffix(round);
-                String sql = "SELECT COUNT(*) as cnt FROM A1_PlayerStats WHERE " + col + " IS NOT NULL AND active = 1";
-                try (Statement stmt = conn.createStatement();
-                     ResultSet rs = stmt.executeQuery(sql)) {
-                    if (rs.next() && rs.getInt("cnt") > 0) {
-                        roundsSet.add(round);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            discordLog.logError("Database error fetching rounds: " + e.getMessage());
-            telegramLog.logError("Database error fetching rounds: " + e.getMessage());
-        }
-        
-        // Return in sequence order
-        return ROUND_SEQUENCE.stream()
-            .filter(roundsSet::contains)
-            .collect(Collectors.toList());
+        // Use RoundDetector to get only rounds that have actually been played
+        // This filters out skipped rounds (e.g., round 6 when transitioning to T16)
+        return RoundDetector.getAvailableRounds(dbPath);
     }
     
     /**
@@ -384,9 +363,20 @@ public class CommandCompareHalls {
      * Generates complete comparison data
      */
     private CompareResponse generateComparison(String hall1, String hall2, String selectedRound) throws Exception {
-        // Determine which rounds to include
-        List<String> roundsToInclude = selectedRound.equals("all") ? 
-            ROUND_SEQUENCE : ROUND_SEQUENCE.subList(0, ROUND_SEQUENCE.indexOf(selectedRound) + 1);
+        // Get available rounds (excluding skipped rounds like round 6 when transitioning to T16)
+        List<String> availableRounds = RoundDetector.getAvailableRounds(dbPath);
+        
+        // Determine which rounds to include based on selected round
+        List<String> roundsToInclude;
+        if (selectedRound.equals("all")) {
+            roundsToInclude = availableRounds;
+        } else {
+            // Include only available rounds up to the selected round
+            int selectedIndex = ROUND_SEQUENCE.indexOf(selectedRound);
+            roundsToInclude = availableRounds.stream()
+                .filter(r -> ROUND_SEQUENCE.indexOf(r) <= selectedIndex)
+                .collect(Collectors.toList());
+        }
         
         // Fetch hall data
         HallData data1 = fetchHallData(hall1, roundsToInclude);

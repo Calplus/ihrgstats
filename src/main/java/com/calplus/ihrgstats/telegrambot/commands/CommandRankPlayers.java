@@ -4,14 +4,17 @@ import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.RoundDetector;
 import com.calplus.ihrgstats.utils.TableFormatter;
 import com.calplus.ihrgstats.utils.TableFormatter.Alignment;
 import com.calplus.ihrgstats.utils.TableImageGenerator;
+import com.calplus.ihrgstats.utils.VictoryRecordCalculator;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Command handler for /rankplayers command.
@@ -24,6 +27,18 @@ public class CommandRankPlayers {
 
     // Round sequence to find last played round
     private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
+
+    // State management for round selection (static so it persists across instances)
+    private static final Map<String, SelectionState> userSelectionStates = new HashMap<>();
+    
+    private static class SelectionState {
+        String selectedRound;  // "all" or specific round
+        long timestamp;
+        
+        SelectionState() {
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
 
     public CommandRankPlayers() {
         // Load environment variables
@@ -55,20 +70,76 @@ public class CommandRankPlayers {
     }
 
     /**
-     * Handles the /rankplayers command
-     * @return Response with message and image
+     * Handles the /rankplayers command - shows round selection UI
+     * @param userId User ID for state tracking
+     * @return Response with round selection buttons
      */
-    public RankResponse handleCommand() {
-        discordLog.logInfo("Processing /rankplayers command");
-        telegramLog.logInfo("Processing /rankplayers command");
+    public RankResponse handleCommand(String userId) {
+        discordLog.logInfo("Processing /rankplayers command for user " + userId);
+        telegramLog.logInfo("Processing /rankplayers command for user " + userId);
 
-        List<PlayerRankData> players = fetchPlayerData();
+        // Get available rounds from database (excluding skipped rounds)
+        List<String> availableRounds = RoundDetector.getAvailableRounds(dbPath);
+        
+        if (availableRounds.isEmpty()) {
+            String errorMsg = "ℹ️ No rounds with data found in database.";
+            discordLog.logWarning("No available rounds found");
+            telegramLog.logWarning("No available rounds found");
+            return new RankResponse(errorMsg, (Path) null);
+        }
+
+        // Build button labels and callbacks
+        List<String> labels = new ArrayList<>();
+        List<String> callbacks = new ArrayList<>();
+        
+        // Add "All Rounds" button first
+        labels.add("All Rounds");
+        callbacks.add("rankplayers_round_all");
+        
+        // Add round buttons
+        for (String round : availableRounds) {
+            labels.add(round.toUpperCase());
+            callbacks.add("rankplayers_round_" + round.toLowerCase());
+        }
+        
+        // Add "Cancel" button last
+        labels.add("❌ Cancel");
+        callbacks.add("rankplayers_cancel");
+
+        String message = "🏆 **Player Rankings**\n\n" +
+                        "Select which round to rank players up to:";
+
+        ButtonConfig buttonConfig = new ButtonConfig(
+            labels.toArray(new String[0]), 
+            callbacks.toArray(new String[0])
+        );
+        
+        return new RankResponse(message, buttonConfig);
+    }
+
+    /**
+     * Handles round selection callback
+     * @param userId User ID
+     * @param selectedRound Selected round ("all" or specific round like "1", "t16")
+     * @return Response with rankings for selected round
+     */
+    public RankResponse handleRoundSelection(String userId, String selectedRound) {
+        discordLog.logInfo("User " + userId + " selected round: " + selectedRound);
+        telegramLog.logInfo("User " + userId + " selected round: " + selectedRound);
+
+        // Store selection state
+        SelectionState state = new SelectionState();
+        state.selectedRound = selectedRound.toLowerCase();
+        userSelectionStates.put(userId, state);
+
+        List<PlayerRankData> players = fetchPlayerData(selectedRound);
 
         if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No player data found in database.";
-            discordLog.logWarning("No players found for ranking");
-            telegramLog.logWarning("No players found for ranking");
-            return new RankResponse(errorMsg, null);
+            String errorMsg = "ℹ️ No player data found for round " + selectedRound.toUpperCase() + ".";
+            discordLog.logWarning("No players found for ranking in round " + selectedRound);
+            telegramLog.logWarning("No players found for ranking in round " + selectedRound);
+            userSelectionStates.remove(userId);
+            return new RankResponse(errorMsg, (Path) null);
         }
 
         // Sort by TrueElo descending
@@ -80,7 +151,8 @@ public class CommandRankPlayers {
         // Format as table
         String table = formatPlayersTable(players, homeHallForText);
 
-        String message = "🏆 **Player Rankings**\n\n" +
+        String roundDisplay = selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound.toUpperCase();
+        String message = "🏆 **Player Rankings** (" + roundDisplay + ")\n\n" +
                         "Players ranked by TrueElo rating\n\n" +
                         table;
 
@@ -104,6 +176,10 @@ public class CommandRankPlayers {
             telegramLog.logWarning("Failed to generate table image: " + e.getMessage());
         }
 
+        // Clean up state
+        userSelectionStates.remove(userId);
+
+
         discordLog.logSuccess(String.format("Ranked %d players", players.size()));
         telegramLog.logSuccess(String.format("Ranked %d players", players.size()));
 
@@ -111,9 +187,21 @@ public class CommandRankPlayers {
     }
 
     /**
-     * Fetches player data from database
+     * Handles cancel action
+     * @param userId User ID
+     * @return Response confirming cancellation
      */
-    private List<PlayerRankData> fetchPlayerData() {
+    public RankResponse handleCancel(String userId) {
+        userSelectionStates.remove(userId);
+        String message = "❌ Player ranking cancelled.";
+        return new RankResponse(message, (Path) null);
+    }
+
+    /**
+     * Fetches player data from database, optionally filtering by round
+     * @param round The round to fetch data up to ("all" for all rounds, or specific round like "1", "t16")
+     */
+    private List<PlayerRankData> fetchPlayerData(String round) {
         List<PlayerRankData> players = new ArrayList<>();
 
         try {
@@ -128,8 +216,8 @@ public class CommandRankPlayers {
                         String name = rs.getString("name");
                         String hall = rs.getString("hall");
 
-                        // Find last round played and corresponding TrueElo
-                        LastRoundData lastRoundData = findLastRoundPlayed(conn, name);
+                        // Find last round played and corresponding TrueElo (up to selected round)
+                        LastRoundData lastRoundData = findLastRoundPlayed(conn, name, round);
                         
                         // Check if player is capped
                         boolean isCapped = isPlayerCapped(conn, name);
@@ -164,14 +252,29 @@ public class CommandRankPlayers {
     }
 
     /**
-     * Finds the last round a player actually played
+     * Finds the last round a player actually played, up to the specified round
+     * @param round The round to check up to ("all" for all rounds)
      */
-    private LastRoundData findLastRoundPlayed(Connection conn, String playerName) throws SQLException {
+    private LastRoundData findLastRoundPlayed(Connection conn, String playerName, String round) throws SQLException {
+        // Determine which rounds to check based on selected round
+        List<String> roundsToCheck;
+        if (round.equalsIgnoreCase("all")) {
+            roundsToCheck = ROUND_SEQUENCE;
+        } else {
+            // Find index of selected round and only check rounds up to that point
+            int selectedIndex = ROUND_SEQUENCE.indexOf(round.toLowerCase());
+            if (selectedIndex == -1) {
+                roundsToCheck = ROUND_SEQUENCE;  // Fallback to all rounds
+            } else {
+                roundsToCheck = ROUND_SEQUENCE.subList(0, selectedIndex + 1);
+            }
+        }
+        
         // Check rounds in reverse order
-        for (int i = ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
-            String round = ROUND_SEQUENCE.get(i);
-            String roundCol = getRoundColumnName("trueElo", round);
-            String oppNameCol = getRoundColumnName("oppName", round);
+        for (int i = roundsToCheck.size() - 1; i >= 0; i--) {
+            String checkRound = roundsToCheck.get(i);
+            String roundCol = getRoundColumnName("trueElo", checkRound);
+            String oppNameCol = getRoundColumnName("oppName", checkRound);
 
             String sql = String.format(
                 "SELECT %s, %s FROM A1_PlayerStats WHERE name = ?",
@@ -188,7 +291,7 @@ public class CommandRankPlayers {
 
                         // Player actually played if they have an opponent (not null and not empty)
                         if (trueElo != null && oppName != null && !oppName.isEmpty()) {
-                            return new LastRoundData(round, trueElo);
+                            return new LastRoundData(checkRound, trueElo);
                         }
                     }
                 }
@@ -329,10 +432,31 @@ public class CommandRankPlayers {
     public static class RankResponse {
         public final String message;
         public final Path imagePath;
+        public final ButtonConfig buttonConfig;
         
         public RankResponse(String message, Path imagePath) {
             this.message = message;
             this.imagePath = imagePath;
+            this.buttonConfig = null;
+        }
+        
+        public RankResponse(String message, ButtonConfig buttonConfig) {
+            this.message = message;
+            this.imagePath = null;
+            this.buttonConfig = buttonConfig;
+        }
+    }
+    
+    /**
+     * Button configuration for inline keyboard
+     */
+    public static class ButtonConfig {
+        public final String[] labels;
+        public final String[] callbacks;
+        
+        public ButtonConfig(String[] labels, String[] callbacks) {
+            this.labels = labels;
+            this.callbacks = callbacks;
         }
     }
 }

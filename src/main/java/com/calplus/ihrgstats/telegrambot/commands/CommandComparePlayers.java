@@ -408,29 +408,9 @@ public class CommandComparePlayers {
      * Gets available rounds from database
      */
     private List<String> getAvailableRounds() {
-        Set<String> roundsSet = new HashSet<>();
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
-        
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
-            for (String round : ROUND_SEQUENCE) {
-                String suffix = getRoundSuffix(round);
-                String sql = "SELECT COUNT(*) as count FROM A1_PlayerStats WHERE trueElo" + suffix + " IS NOT NULL";
-                try (Statement stmt = conn.createStatement();
-                     ResultSet rs = stmt.executeQuery(sql)) {
-                    if (rs.next() && rs.getInt("count") > 0) {
-                        roundsSet.add(round);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            discordLog.logError("Database error fetching rounds: " + e.getMessage());
-            telegramLog.logError("Database error fetching rounds: " + e.getMessage());
-        }
-        
-        // Return in sequence order
-        return ROUND_SEQUENCE.stream()
-            .filter(roundsSet::contains)
-            .collect(Collectors.toList());
+        // Use RoundDetector to get only rounds that have actually been played
+        // This filters out skipped rounds (e.g., round 6 when transitioning to T16)
+        return RoundDetector.getAvailableRounds(dbPath);
     }
     
     /**
@@ -521,9 +501,20 @@ public class CommandComparePlayers {
      */
     private CompareResponse generateComparison(String player1Name, String player1Hall,
                                               String player2Name, String player2Hall, String selectedRound) throws Exception {
-        // Determine which rounds to include
-        List<String> roundsToInclude = selectedRound.equals("all") ? 
-            ROUND_SEQUENCE : ROUND_SEQUENCE.subList(0, ROUND_SEQUENCE.indexOf(selectedRound) + 1);
+        // Get available rounds (excluding skipped rounds like round 6 when transitioning to T16)
+        List<String> availableRounds = RoundDetector.getAvailableRounds(dbPath);
+        
+        // Determine which rounds to include based on selected round
+        List<String> roundsToInclude;
+        if (selectedRound.equals("all")) {
+            roundsToInclude = availableRounds;
+        } else {
+            // Include only available rounds up to the selected round
+            int selectedIndex = ROUND_SEQUENCE.indexOf(selectedRound);
+            roundsToInclude = availableRounds.stream()
+                .filter(r -> ROUND_SEQUENCE.indexOf(r) <= selectedIndex)
+                .collect(Collectors.toList());
+        }
         
         // Fetch player data
         PlayerData data1 = fetchPlayerData(player1Name, player1Hall, roundsToInclude);
@@ -537,10 +528,10 @@ public class CommandComparePlayers {
         }
         
         // Generate text output
-        String textOutput = generateTextOutput(data1, data2);
+        String textOutput = generateTextOutput(data1, data2, roundsToInclude);
         
         // Generate image
-        Path imagePath = generateImage(data1, data2);
+        Path imagePath = generateImage(data1, data2, roundsToInclude);
         
         discordLog.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
             player1Name, player1Hall, player2Name, player2Hall, selectedRound));
@@ -723,7 +714,7 @@ public class CommandComparePlayers {
     /**
      * Generates text output
      */
-    private String generateTextOutput(PlayerData player1, PlayerData player2) {
+    private String generateTextOutput(PlayerData player1, PlayerData player2, List<String> roundsToInclude) {
         StringBuilder sb = new StringBuilder();
         
         sb.append("**👥 Player Comparison**\n\n");
@@ -731,11 +722,11 @@ public class CommandComparePlayers {
             player1.name, player1.hall, player2.name, player2.hall));
         
         // Player 1 details
-        sb.append(generatePlayerDetails(player1));
+        sb.append(generatePlayerDetails(player1, roundsToInclude));
         sb.append("\n");
         
         // Player 2 details
-        sb.append(generatePlayerDetails(player2));
+        sb.append(generatePlayerDetails(player2, roundsToInclude));
         
         return sb.toString();
     }
@@ -743,7 +734,7 @@ public class CommandComparePlayers {
     /**
      * Generates details for one player (text)
      */
-    private String generatePlayerDetails(PlayerData player) {
+    private String generatePlayerDetails(PlayerData player, List<String> roundsToInclude) {
         StringBuilder sb = new StringBuilder();
         
         sb.append(String.format("━━━ **%s (%s)** ━━━\n\n", player.name, player.hall));
@@ -755,31 +746,16 @@ public class CommandComparePlayers {
         
         Integer prevRank = null;
         Integer prevElo = null;
-        Integer lastKnownRank = null;
-        Integer lastKnownElo = null;
-        boolean hasStarted = false;
         
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer rank = player.rankByRound.get(round);
             Integer elo = player.eloByRound.get(round);
             
-            // Mark as started once we have first data
             if (rank != null && elo != null) {
-                hasStarted = true;
-                lastKnownRank = rank;
-                lastKnownElo = elo;
-            }
-            
-            // Only display rounds after player has started
-            if (hasStarted) {
-                // Use current values if available, otherwise last known
-                Integer displayRank = (rank != null) ? rank : lastKnownRank;
-                Integer displayElo = (elo != null) ? elo : lastKnownElo;
-                
                 String deltaRank = "-";
                 String deltaElo = "-";
                 
-                if (prevRank != null && rank != null) {
+                if (prevRank != null) {
                     int rankChange = prevRank - rank; // Positive = improvement (lower rank number)
                     if (rankChange > 0) {
                         deltaRank = "+" + rankChange;
@@ -792,7 +768,7 @@ public class CommandComparePlayers {
                     deltaRank = "- ";
                 }
                 
-                if (prevElo != null && elo != null) {
+                if (prevElo != null) {
                     int eloChange = elo - prevElo;
                     if (eloChange > 0) {
                         deltaElo = "+" + eloChange;
@@ -806,15 +782,10 @@ public class CommandComparePlayers {
                 }
                 
                 sb.append(String.format("%-4s %-6d %-10s %-6d %-10s\n", 
-                    VictoryRecordCalculator.getRoundDisplayName(round), displayRank, deltaRank, displayElo, deltaElo));
+                    VictoryRecordCalculator.getRoundDisplayName(round), rank, deltaRank, elo, deltaElo));
                 
-                // Update prevRank/prevElo only if we have actual data for this round
-                if (rank != null) {
-                    prevRank = rank;
-                }
-                if (elo != null) {
-                    prevElo = elo;
-                }
+                prevRank = rank;
+                prevElo = elo;
             }
         }
         sb.append("```\n\n");
@@ -827,7 +798,7 @@ public class CommandComparePlayers {
         roundsLine.append("Rnd: ");
         seatsLine.append("Seat:");
         
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             String roundName = VictoryRecordCalculator.getRoundDisplayName(round);
             Integer seat = player.seatByRound.get(round);
             String seatStr = seat != null ? String.valueOf(seat) : "-";
@@ -843,7 +814,7 @@ public class CommandComparePlayers {
         
         // Victory record
         sb.append("**🏆 Victory Record:**\n```\n");
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer outcome = player.outcomeByRound.get(round);
             if (outcome == null) {
                 if (player.eloByRound.containsKey(round)) {
@@ -946,7 +917,7 @@ public class CommandComparePlayers {
     /**
      * Generates comparison image
      */
-    private Path generateImage(PlayerData player1, PlayerData player2) throws Exception {
+    private Path generateImage(PlayerData player1, PlayerData player2, List<String> roundsToInclude) throws Exception {
         // Prepare metadata
         String lastRound1 = player1.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(player1.lastRound) : "N/A";
         String lastRound2 = player2.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(player2.lastRound) : "N/A";
@@ -966,7 +937,7 @@ public class CommandComparePlayers {
         
         Integer prevRank1 = null;
         Integer prevElo1 = null;
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer rank = player1.rankByRound.get(round);
             Integer elo = player1.eloByRound.get(round);
             if (rank != null && elo != null) {
@@ -1008,7 +979,7 @@ public class CommandComparePlayers {
         List<String> seatLines1 = new ArrayList<>();
         StringBuilder seatHeader1 = new StringBuilder("Rnd: ");
         StringBuilder seatData1 = new StringBuilder("Seat:");
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             seatHeader1.append(String.format("%-3s|", VictoryRecordCalculator.getRoundDisplayName(round)));
             Integer seat = player1.seatByRound.get(round);
             seatData1.append(String.format("%-3s|", seat != null ? seat : "-"));
@@ -1019,7 +990,7 @@ public class CommandComparePlayers {
         
         // Victory record - use structured data
         List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries1 = new ArrayList<>();
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer outcome = player1.outcomeByRound.get(round);
             if (outcome == null) {
                 if (player1.eloByRound.containsKey(round)) {
@@ -1088,31 +1059,16 @@ public class CommandComparePlayers {
         
         Integer prevRank2 = null;
         Integer prevElo2 = null;
-        Integer lastKnownRank2 = null;
-        Integer lastKnownElo2 = null;
-        boolean hasStarted2 = false;
         
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer rank = player2.rankByRound.get(round);
             Integer elo = player2.eloByRound.get(round);
             
-            // Mark as started once we have first data
             if (rank != null && elo != null) {
-                hasStarted2 = true;
-                lastKnownRank2 = rank;
-                lastKnownElo2 = elo;
-            }
-            
-            // Only display rounds after player has started
-            if (hasStarted2) {
-                // Use current values if available, otherwise last known
-                Integer displayRank = (rank != null) ? rank : lastKnownRank2;
-                Integer displayElo = (elo != null) ? elo : lastKnownElo2;
-                
                 String deltaRank = "-";
                 String deltaElo = "-";
                 
-                if (prevRank2 != null && rank != null) {
+                if (prevRank2 != null) {
                     int rankChange = prevRank2 - rank;
                     if (rankChange > 0) {
                         deltaRank = "+" + rankChange;
@@ -1125,7 +1081,7 @@ public class CommandComparePlayers {
                     deltaRank = "- ";
                 }
                 
-                if (prevElo2 != null && elo != null) {
+                if (prevElo2 != null) {
                     int eloChange = elo - prevElo2;
                     if (eloChange > 0) {
                         deltaElo = "+" + eloChange;
@@ -1139,15 +1095,10 @@ public class CommandComparePlayers {
                 }
                 
                 statsLines2.add(String.format("%-4s %-6d %-10s %-6d %-10s", 
-                    VictoryRecordCalculator.getRoundDisplayName(round), displayRank, deltaRank, displayElo, deltaElo));
+                    VictoryRecordCalculator.getRoundDisplayName(round), rank, deltaRank, elo, deltaElo));
                 
-                // Update prevRank/prevElo only if we have actual data for this round
-                if (rank != null) {
-                    prevRank2 = rank;
-                }
-                if (elo != null) {
-                    prevElo2 = elo;
-                }
+                prevRank2 = rank;
+                prevElo2 = elo;
             }
         }
         sections2.add(new ComparisonImageGenerator.Section("Stats Per Round", statsLines2));
@@ -1156,7 +1107,7 @@ public class CommandComparePlayers {
         List<String> seatLines2 = new ArrayList<>();
         StringBuilder seatHeader2 = new StringBuilder("Rnd: ");
         StringBuilder seatData2 = new StringBuilder("Seat:");
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             seatHeader2.append(String.format("%-3s|", VictoryRecordCalculator.getRoundDisplayName(round)));
             Integer seat = player2.seatByRound.get(round);
             seatData2.append(String.format("%-3s|", seat != null ? seat : "-"));
@@ -1167,7 +1118,7 @@ public class CommandComparePlayers {
         
         // Victory record - use structured data
         List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries2 = new ArrayList<>();
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : roundsToInclude) {
             Integer outcome = player2.outcomeByRound.get(round);
             if (outcome == null) {
                 if (player2.eloByRound.containsKey(round)) {
