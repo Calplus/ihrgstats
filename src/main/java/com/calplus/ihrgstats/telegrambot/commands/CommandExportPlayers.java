@@ -2,8 +2,7 @@ package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
-import com.calplus.ihrgstats.utils.EnvironmentManager;
-import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.*;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -22,9 +21,6 @@ public class CommandExportPlayers {
     private final TelegramLog telegramLog;
     private final String dbPath;
 
-    // Round sequence
-    private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
-
     public CommandExportPlayers() {
         // Load environment variables
         EnvironmentManager envManager = new EnvironmentManager();
@@ -32,7 +28,7 @@ public class CommandExportPlayers {
         
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
-        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
+        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
     }
 
     /**
@@ -78,8 +74,7 @@ public class CommandExportPlayers {
         List<PlayerExportData> exportData = new ArrayList<>();
 
         try {
-            String jdbcUrl = "jdbc:sqlite:" + dbPath;
-            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
                 String sql = "SELECT * FROM A1_PlayerStats";
                 try (Statement stmt = conn.createStatement();
                      ResultSet rs = stmt.executeQuery(sql)) {
@@ -99,15 +94,15 @@ public class CommandExportPlayers {
                         String lastRound = null;
 
                         // Check rounds in reverse order to find the latest round where player actually played
-                        for (int i = ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
-                            String round = ROUND_SEQUENCE.get(i);
-                            String trueEloCol = getRoundColumnName("trueElo", round);
-                            String perfEloCol = getRoundColumnName("perfElo", round);
-                            String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
-                            String volTrueEloCol = getRoundColumnName("volTrueElo", round);
-                            String rdPerfEloCol = getRoundColumnName("rdPerfElo", round);
-                            String volPerfEloCol = getRoundColumnName("volPerfElo", round);
-                            String oppNameCol = getRoundColumnName("oppName", round);
+                        for (int i = Constants.ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
+                            String round = Constants.ROUND_SEQUENCE.get(i);
+                            String trueEloCol = RoundUtils.getRoundColumnName("trueElo", round);
+                            String perfEloCol = RoundUtils.getRoundColumnName("perfElo", round);
+                            String rdTrueEloCol = RoundUtils.getRoundColumnName("rdTrueElo", round);
+                            String volTrueEloCol = RoundUtils.getRoundColumnName("volTrueElo", round);
+                            String rdPerfEloCol = RoundUtils.getRoundColumnName("rdPerfElo", round);
+                            String volPerfEloCol = RoundUtils.getRoundColumnName("volPerfElo", round);
+                            String oppNameCol = RoundUtils.getRoundColumnName("oppName", round);
 
                             // Check if player actually played this round (has opponent name)
                             String oppName = rs.getString(oppNameCol);
@@ -216,16 +211,6 @@ public class CommandExportPlayers {
             return "\"" + field.replace("\"", "\"\"") + "\"";
         }
         return field;
-    }
-
-    /**
-     * Gets the database column name for a round
-     */
-    private String getRoundColumnName(String prefix, String round) {
-        if (round.startsWith("t")) {
-            return prefix + "T" + round.substring(1);
-        }
-        return prefix + "R" + round;
     }
 
     /**

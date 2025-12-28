@@ -3,11 +3,9 @@ package com.calplus.ihrgstats.databasemanager;
 import com.calplus.ihrgstats.calculations.EloCalculator;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
-import com.calplus.ihrgstats.utils.EnvironmentManager;
-import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.*;
 
 import java.io.*;
-import java.nio.file.Paths;
 import java.sql.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -24,10 +22,6 @@ public class A1_PlayerStats {
     private UserConfirmationCallback confirmationCallback;
     private MultiChoiceConfirmationCallback multiChoiceCallback;
     private UploadChatMessageCallback uploadChatCallback;
-
-    // Round sequence
-    private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
-    private final int BASE_ELO = 1000;
 
     /**
      * Interface for user confirmation callbacks (used by Telegram listener)
@@ -57,7 +51,7 @@ public class A1_PlayerStats {
         
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
-        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
+        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
         this.loadConfig();
         this.confirmationCallback = null; // Default to CLI confirmation
         this.multiChoiceCallback = null;
@@ -645,9 +639,8 @@ public class A1_PlayerStats {
      * Imports players into database, creating or updating existing records
      */
     private void importPlayersToDatabase(List<PlayerExportData> importData) throws Exception {
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
         
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
             conn.setAutoCommit(false);
             
             try {
@@ -779,9 +772,9 @@ public class A1_PlayerStats {
      * Validates that the previous round has been processed
      */
     private boolean validateRoundSequence(String roundName) {
-        int roundIndex = ROUND_SEQUENCE.indexOf(roundName);
+        int roundIndex = Constants.ROUND_SEQUENCE.indexOf(roundName);
         if (roundIndex == -1) {
-            String errorMsg = String.format("Invalid round name: %s. Valid rounds: %s", roundName, String.join(", ", ROUND_SEQUENCE));
+            String errorMsg = String.format("Invalid round name: %s. Valid rounds: %s", roundName, String.join(", ", Constants.ROUND_SEQUENCE));
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             
@@ -805,15 +798,14 @@ public class A1_PlayerStats {
         }
 
         // Check if previous round is processed
-        String previousRound = ROUND_SEQUENCE.get(roundIndex - 1);
+        String previousRound = Constants.ROUND_SEQUENCE.get(roundIndex - 1);
         String columnName = "trueEloR" + previousRound.toUpperCase();
         if (previousRound.startsWith("t")) {
             columnName = "trueEloT" + previousRound.substring(1);
         }
 
         try {
-            String jdbcUrl = "jdbc:sqlite:" + dbPath;
-            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+            try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
                 // Check if previous round has been processed
                 String sql = String.format("SELECT COUNT(*) FROM A1_PlayerStats WHERE %s IS NOT NULL", columnName);
                 try (Statement stmt = conn.createStatement();
@@ -826,7 +818,7 @@ public class A1_PlayerStats {
                             " No rounds have been processed yet.";
                         
                         String errorMsg = String.format("Previous round (round_%s) has not been processed yet.%s Please process rounds in order: %s",
-                            previousRound, lastProcessedMsg, String.join(", ", ROUND_SEQUENCE));
+                            previousRound, lastProcessedMsg, String.join(", ", Constants.ROUND_SEQUENCE));
                         discordLog.logError(errorMsg);
                         telegramLog.logError(errorMsg);
                         
@@ -857,7 +849,7 @@ public class A1_PlayerStats {
     private String findLastProcessedRound(Connection conn, int beforeIndex) {
         try {
             for (int i = beforeIndex - 1; i >= 0; i--) {
-                String round = ROUND_SEQUENCE.get(i);
+                String round = Constants.ROUND_SEQUENCE.get(i);
                 String columnName = "trueEloR" + round.toUpperCase();
                 if (round.startsWith("t")) {
                     columnName = "trueEloT" + round.substring(1);
@@ -888,7 +880,7 @@ public class A1_PlayerStats {
                 // Check which rounds have been processed
                 String lastProcessedRound = null;
                 for (int i = t16Index - 1; i >= 0; i--) {
-                    String round = ROUND_SEQUENCE.get(i);
+                    String round = Constants.ROUND_SEQUENCE.get(i);
                     String columnName = "trueEloR" + round.toUpperCase();
                     if (round.startsWith("t")) {
                         columnName = "trueEloT" + round.substring(1);
@@ -920,14 +912,14 @@ public class A1_PlayerStats {
                     // List missing rounds
                     List<String> missingRounds = new ArrayList<>();
                     if (lastProcessedRound != null) {
-                        int lastIdx = ROUND_SEQUENCE.indexOf(lastProcessedRound);
+                        int lastIdx = Constants.ROUND_SEQUENCE.indexOf(lastProcessedRound);
                         for (int i = lastIdx + 1; i < t16Index; i++) {
-                            missingRounds.add(ROUND_SEQUENCE.get(i));
+                            missingRounds.add(Constants.ROUND_SEQUENCE.get(i));
                         }
                     } else {
                         // No rounds processed - all rounds 1-6 are missing
                         for (int i = 0; i < t16Index; i++) {
-                            missingRounds.add(ROUND_SEQUENCE.get(i));
+                            missingRounds.add(Constants.ROUND_SEQUENCE.get(i));
                         }
                     }
                     message.append("**Missing rounds: ").append(String.join(", ", missingRounds)).append("**\n\n");
@@ -1240,7 +1232,7 @@ public class A1_PlayerStats {
                     player.existsInDb = true;
 
                     // Load ELO ratings for all rounds
-                    for (String round : ROUND_SEQUENCE) {
+                    for (String round : Constants.ROUND_SEQUENCE) {
                         String trueEloCol = getRoundColumnName("trueElo", round);
                         String perfEloCol = getRoundColumnName("perfElo", round);
                         String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
@@ -1846,7 +1838,7 @@ public class A1_PlayerStats {
     private void calculateEloRatings(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, 
                                      Map<String, PlayerStats> dbPlayers, String roundName) {
         
-        int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
+        int currentRoundIndex = Constants.ROUND_SEQUENCE.indexOf(roundName);
         
         // Step 1: Collect all unique players
         Set<String> allPlayers = new HashSet<>();
@@ -1892,7 +1884,7 @@ public class A1_PlayerStats {
         
         // Reconstruct previous rounds' games from database
         for (int i = 0; i < currentRoundIndex; i++) {
-            String pastRound = ROUND_SEQUENCE.get(i);
+            String pastRound = Constants.ROUND_SEQUENCE.get(i);
             Map<String, GameEntry> pastGames = reconstructGamesFromDatabase(dbPlayers, pastRound);
             
             List<EloCalculator.Game> trueGames = new ArrayList<>();
@@ -1990,7 +1982,7 @@ public class A1_PlayerStats {
         }
         
         // Step 4: Process rounds sequentially using Glicko-2 with iterative refinement
-        List<String> roundsToProcess = ROUND_SEQUENCE.subList(0, currentRoundIndex + 1);
+        List<String> roundsToProcess = Constants.ROUND_SEQUENCE.subList(0, currentRoundIndex + 1);
         
         System.out.println("DEBUG: About to calculate Glicko-2");
         System.out.println("  - Total players: " + allPlayers.size());
@@ -2044,7 +2036,7 @@ public class A1_PlayerStats {
         // Step 5: Store calculated ratings in player stats
         int storedCount = 0;
         for (int i = 0; i <= currentRoundIndex; i++) {
-            String round = ROUND_SEQUENCE.get(i);
+            String round = Constants.ROUND_SEQUENCE.get(i);
             Map<String, EloCalculator.Glicko2Rating> roundTrueRatings = trueResult.ratingsByRound.get(round);
             Map<String, EloCalculator.Glicko2Rating> roundPerfRatings = 
                 perfEloEnabled ? perfResult.ratingsByRound.get(round) : null;
@@ -2180,12 +2172,12 @@ public class A1_PlayerStats {
             Integer oppElo = opponent.trueEloByRound.get(roundName);
             
             // Get previous ELOs to determine change
-            int roundIndex = ROUND_SEQUENCE.indexOf(roundName);
+            int roundIndex = Constants.ROUND_SEQUENCE.indexOf(roundName);
             Integer playerPrevElo = null;
             Integer oppPrevElo = null;
             
             if (roundIndex > 0) {
-                String prevRound = ROUND_SEQUENCE.get(roundIndex - 1);
+                String prevRound = Constants.ROUND_SEQUENCE.get(roundIndex - 1);
                 playerPrevElo = player.trueEloByRound.get(prevRound);
                 oppPrevElo = opponent.trueEloByRound.get(prevRound);
             }
@@ -2254,9 +2246,9 @@ public class A1_PlayerStats {
                 Integer prevOutcome = null;
 
                 // Search backwards from previous round
-                int prevRoundIdx = ROUND_SEQUENCE.indexOf(previousRound);
+                int prevRoundIdx = Constants.ROUND_SEQUENCE.indexOf(previousRound);
                 for (int i = prevRoundIdx; i >= 0; i--) {
-                    String checkRound = ROUND_SEQUENCE.get(i);
+                    String checkRound = Constants.ROUND_SEQUENCE.get(i);
                     Integer trueElo = dbPlayer.trueEloByRound.get(checkRound);
                     if (trueElo != null) {
                         prevTrueElo = trueElo;
@@ -2268,8 +2260,8 @@ public class A1_PlayerStats {
                 }
 
                 // Update current round with previous values (or defaults)
-                dbPlayer.trueEloByRound.put(roundName, prevTrueElo != null ? prevTrueElo : BASE_ELO);
-                dbPlayer.perfEloByRound.put(roundName, perfEloEnabled ? (prevPerfElo != null ? prevPerfElo : BASE_ELO) : null);
+                dbPlayer.trueEloByRound.put(roundName, prevTrueElo != null ? prevTrueElo : Constants.BASE_ELO);
+                dbPlayer.perfEloByRound.put(roundName, perfEloEnabled ? (prevPerfElo != null ? prevPerfElo : Constants.BASE_ELO) : null);
                 dbPlayer.seatByRound.put(roundName, null); // No seat if didn't play
                 dbPlayer.outcomeByRound.put(roundName, null); // No outcome if didn't play
                 
@@ -2288,10 +2280,10 @@ public class A1_PlayerStats {
         }
 
         // Set future rounds to null
-        int currentRoundIdx = ROUND_SEQUENCE.indexOf(roundName);
+        int currentRoundIdx = Constants.ROUND_SEQUENCE.indexOf(roundName);
         for (PlayerStats player : csvPlayers.values()) {
-            for (int i = currentRoundIdx + 1; i < ROUND_SEQUENCE.size(); i++) {
-                String futureRound = ROUND_SEQUENCE.get(i);
+            for (int i = currentRoundIdx + 1; i < Constants.ROUND_SEQUENCE.size(); i++) {
+                String futureRound = Constants.ROUND_SEQUENCE.get(i);
                 player.trueEloByRound.put(futureRound, null);
                 player.perfEloByRound.put(futureRound, null);
                 player.seatByRound.put(futureRound, null);
@@ -2397,10 +2389,10 @@ public class A1_PlayerStats {
         params.add(currentTimestamp);
 
         // Update ONLY current and future rounds (previous rounds remain unchanged)
-        int currentRoundIndex = ROUND_SEQUENCE.indexOf(roundName);
+        int currentRoundIndex = Constants.ROUND_SEQUENCE.indexOf(roundName);
         
-        for (int i = currentRoundIndex; i < ROUND_SEQUENCE.size(); i++) {
-            String round = ROUND_SEQUENCE.get(i);
+        for (int i = currentRoundIndex; i < Constants.ROUND_SEQUENCE.size(); i++) {
+            String round = Constants.ROUND_SEQUENCE.get(i);
             
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
@@ -2493,9 +2485,9 @@ public class A1_PlayerStats {
         params.add(player.hall);
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
         params.add(player.active ? 1 : 0); // SQLite boolean as 0/1
-        // Use existing base ELO if set (from import), otherwise default to BASE_ELO
-        params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
-        params.add(player.basePerfElo != null ? player.basePerfElo : (perfEloEnabled ? BASE_ELO : null));
+        // Use existing base ELO if set (from import), otherwise default to Constants.BASE_ELO
+        params.add(player.baseTrueElo != null ? player.baseTrueElo : Constants.BASE_ELO);
+        params.add(player.basePerfElo != null ? player.basePerfElo : (perfEloEnabled ? Constants.BASE_ELO : null));
         params.add(player.baseRdTrueElo != null ? player.baseRdTrueElo : 350.0); // Default RD
         params.add(player.baseVolTrueElo != null ? player.baseVolTrueElo : 0.06); // Default volatility
         params.add(player.baseRdPerfElo != null ? player.baseRdPerfElo : (perfEloEnabled ? 350.0 : null));
@@ -2503,7 +2495,7 @@ public class A1_PlayerStats {
         params.add(currentTimestamp);
 
         // Add all round columns
-        for (String round : ROUND_SEQUENCE) {
+        for (String round : Constants.ROUND_SEQUENCE) {
             String trueEloCol = getRoundColumnName("trueElo", round);
             String perfEloCol = getRoundColumnName("perfElo", round);
             String rdTrueEloCol = getRoundColumnName("rdTrueElo", round);
@@ -2533,13 +2525,13 @@ public class A1_PlayerStats {
             values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
             // Fill previous rounds with base ELO, current round with calculated, future rounds with null
-            int currentIdx = ROUND_SEQUENCE.indexOf(currentRound);
-            int roundIdx = ROUND_SEQUENCE.indexOf(round);
+            int currentIdx = Constants.ROUND_SEQUENCE.indexOf(currentRound);
+            int roundIdx = Constants.ROUND_SEQUENCE.indexOf(round);
 
             if (roundIdx < currentIdx) {
-                // Previous rounds - fill with base ELO if available, otherwise BASE_ELO
-                params.add(player.baseTrueElo != null ? player.baseTrueElo : BASE_ELO);
-                params.add(perfEloEnabled ? (player.basePerfElo != null ? player.basePerfElo : BASE_ELO) : null);
+                // Previous rounds - fill with base ELO if available, otherwise Constants.BASE_ELO
+                params.add(player.baseTrueElo != null ? player.baseTrueElo : Constants.BASE_ELO);
+                params.add(perfEloEnabled ? (player.basePerfElo != null ? player.basePerfElo : Constants.BASE_ELO) : null);
                 params.add(player.baseRdTrueElo != null ? player.baseRdTrueElo : 350.0);
                 params.add(player.baseVolTrueElo != null ? player.baseVolTrueElo : 0.06);
                 params.add(perfEloEnabled ? (player.baseRdPerfElo != null ? player.baseRdPerfElo : 350.0) : null);
@@ -2660,7 +2652,7 @@ public class A1_PlayerStats {
      */
     private void clearFutureRounds(String fromRound) throws Exception {
         String jdbcUrl = "jdbc:sqlite:" + dbPath;
-        int fromIndex = ROUND_SEQUENCE.indexOf(fromRound);
+        int fromIndex = Constants.ROUND_SEQUENCE.indexOf(fromRound);
         
         if (fromIndex == -1) {
             throw new IllegalArgumentException("Invalid round name: " + fromRound);
@@ -2673,8 +2665,8 @@ public class A1_PlayerStats {
                 StringBuilder sql = new StringBuilder("UPDATE A1_PlayerStats SET ");
                 
                 // Set all rounds from fromRound onwards to NULL
-                for (int i = fromIndex; i < ROUND_SEQUENCE.size(); i++) {
-                    String round = ROUND_SEQUENCE.get(i);
+                for (int i = fromIndex; i < Constants.ROUND_SEQUENCE.size(); i++) {
+                    String round = Constants.ROUND_SEQUENCE.get(i);
                     
                     sql.append(getRoundColumnName("trueElo", round)).append(" = NULL, ");
                     sql.append(getRoundColumnName("perfElo", round)).append(" = NULL, ");
@@ -2693,9 +2685,9 @@ public class A1_PlayerStats {
                     conn.commit();
                     
                     discordLog.batchInfo(String.format("Cleared %d rounds for %d players", 
-                        ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
+                        Constants.ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
                     telegramLog.batchInfo(String.format("Cleared %d rounds for %d players", 
-                        ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
+                        Constants.ROUND_SEQUENCE.size() - fromIndex, rowsAffected));
                 }
             } catch (SQLException e) {
                 conn.rollback();

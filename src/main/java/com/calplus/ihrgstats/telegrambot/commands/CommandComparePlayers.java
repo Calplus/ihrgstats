@@ -1,8 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
+import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -15,62 +14,34 @@ import java.util.stream.Collectors;
  * Allows comparison of two players with detailed statistics.
  */
 public class CommandComparePlayers {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
     private final String dbPath;
     
-    private static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
-    
     // State management for multi-step selection (static so it persists across instances)
-    private static final Map<String, SelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, PlayerCompareSelectionState> userSelectionStates = new HashMap<>();
     
-    private static class SelectionState {
+    private static class PlayerCompareSelectionState extends SelectionState {
         String firstPlayerHall;
         String firstPlayerName;
         String secondPlayerHall;
         String secondPlayerName;
         String selectedRound;  // "all" or specific round
-        long timestamp;
-        
-        SelectionState() {
-            this.timestamp = System.currentTimeMillis();
-        }
     }
     
     public CommandComparePlayers() {
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
         
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
-        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
+        this.logHelper = new LogHelper();
+        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
     }
     
     /**
-     * Response class containing message, image, and button config
+     * Response class (alias for CommandResponse for backward compatibility)
      */
-    public static class CompareResponse {
-        public final String message;
-        public final Path imagePath;
-        public final ButtonConfig buttonConfig;
-        
+    public static class CompareResponse extends CommandResponse {
         public CompareResponse(String message, Path imagePath, ButtonConfig buttonConfig) {
-            this.message = message;
-            this.imagePath = imagePath;
-            this.buttonConfig = buttonConfig;
-        }
-    }
-    
-    /**
-     * Button configuration for inline keyboards
-     */
-    public static class ButtonConfig {
-        public final String[] labels;
-        public final String[] callbacks;
-        
-        public ButtonConfig(String[] labels, String[] callbacks) {
-            this.labels = labels;
-            this.callbacks = callbacks;
+            super(message, imagePath, buttonConfig);
         }
     }
     
@@ -78,24 +49,19 @@ public class CommandComparePlayers {
      * Handles the /compareplayers command (initial call)
      */
     public CompareResponse handleCommand(String userId) {
-        discordLog.logInfo(String.format("User %s requested /compareplayers command", userId));
-        telegramLog.logInfo(String.format("User %s requested /compareplayers command", userId));
+        logHelper.logInfo(String.format("User %s requested /compareplayers command", userId));
         
         // Clear any existing state
-        userSelectionStates.put(userId, new SelectionState());
+        userSelectionStates.put(userId, new PlayerCompareSelectionState());
         
         // Fetch available halls
-        List<String> halls = fetchAvailableHalls();
+        List<String> halls = HallUtils.fetchAndSortAvailableHalls(dbPath);
         
         if (halls.isEmpty()) {
             String errorMsg = "ℹ️ No halls found in database. Please upload round data first.";
-            discordLog.logWarning("No halls available for player comparison");
-            telegramLog.logWarning("No halls available for player comparison");
+            logHelper.logWarning("No halls available for player comparison");
             return new CompareResponse(errorMsg, null, null);
         }
-        
-        // Sort halls (numbers first, then alphabetical)
-        sortHalls(halls);
         
         // Create button layout (4 columns)
         List<String> labels = new ArrayList<>();
@@ -121,12 +87,11 @@ public class CommandComparePlayers {
      * Handles first player's hall selection
      */
     public CompareResponse handleFirstHallSelection(String userId, String firstHall) {
-        discordLog.logInfo(String.format("User %s selected first player's hall: %s", userId, firstHall));
-        telegramLog.logInfo(String.format("User %s selected first player's hall: %s", userId, firstHall));
+        logHelper.logInfo(String.format("User %s selected first player's hall: %s", userId, firstHall));
         
         // Store state
-        SelectionState state = userSelectionStates.get(userId);
-        if (state == null) state = new SelectionState();
+        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
+        if (state == null) state = new PlayerCompareSelectionState();
         state.firstPlayerHall = firstHall;
         userSelectionStates.put(userId, state);
         
@@ -164,7 +129,7 @@ public class CommandComparePlayers {
      * Handles first player selection
      */
     public CompareResponse handleFirstPlayerSelection(String userId, String firstPlayer) {
-        SelectionState state = userSelectionStates.get(userId);
+        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
         if (state == null || state.firstPlayerHall == null) {
             String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
             return new CompareResponse(errorMsg, null, null);
@@ -172,22 +137,17 @@ public class CommandComparePlayers {
         
         state.firstPlayerName = firstPlayer;
         
-        discordLog.logInfo(String.format("User %s selected first player: %s from %s", 
-            userId, firstPlayer, state.firstPlayerHall));
-        telegramLog.logInfo(String.format("User %s selected first player: %s from %s", 
+        logHelper.logInfo(String.format("User %s selected first player: %s from %s", 
             userId, firstPlayer, state.firstPlayerHall));
         
         // Fetch available halls for second player
-        List<String> halls = fetchAvailableHalls();
+        List<String> halls = HallUtils.fetchAndSortAvailableHalls(dbPath);
         
         if (halls.isEmpty()) {
             String errorMsg = "ℹ️ No halls available for second player selection.";
             userSelectionStates.remove(userId);
             return new CompareResponse(errorMsg, null, null);
         }
-        
-        // Sort halls
-        sortHalls(halls);
         
         // Create button layout (4 columns)
         List<String> labels = new ArrayList<>();
@@ -215,7 +175,7 @@ public class CommandComparePlayers {
      * Handles second player's hall selection
      */
     public CompareResponse handleSecondHallSelection(String userId, String secondHall) {
-        SelectionState state = userSelectionStates.get(userId);
+        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
         if (state == null || state.firstPlayerName == null) {
             String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
             return new CompareResponse(errorMsg, null, null);
@@ -223,8 +183,7 @@ public class CommandComparePlayers {
         
         state.secondPlayerHall = secondHall;
         
-        discordLog.logInfo(String.format("User %s selected second player's hall: %s", userId, secondHall));
-        telegramLog.logInfo(String.format("User %s selected second player's hall: %s", userId, secondHall));
+        logHelper.logInfo(String.format("User %s selected second player's hall: %s", userId, secondHall));
         
         // Fetch players from the hall
         List<String> players = fetchPlayersFromHall(secondHall);
@@ -267,7 +226,7 @@ public class CommandComparePlayers {
      * Handles second player selection
      */
     public CompareResponse handleSecondPlayerSelection(String userId, String secondPlayer) {
-        SelectionState state = userSelectionStates.get(userId);
+        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
         if (state == null || state.firstPlayerName == null || state.secondPlayerHall == null) {
             String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
             return new CompareResponse(errorMsg, null, null);
@@ -275,8 +234,7 @@ public class CommandComparePlayers {
         
         state.secondPlayerName = secondPlayer;
         
-        discordLog.logInfo(String.format("User %s selected second player: %s", userId, secondPlayer));
-        telegramLog.logInfo(String.format("User %s selected second player: %s", userId, secondPlayer));
+        logHelper.logInfo(String.format("User %s selected second player: %s", userId, secondPlayer));
         
         // Get available rounds
         List<String> availableRounds = getAvailableRounds();
@@ -319,7 +277,7 @@ public class CommandComparePlayers {
      * Handles round selection and generates comparison
      */
     public CompareResponse handleRoundSelection(String userId, String selectedRound) {
-        SelectionState state = userSelectionStates.get(userId);
+        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
         if (state == null || state.firstPlayerName == null || state.secondPlayerName == null) {
             String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
             return new CompareResponse(errorMsg, null, null);
@@ -332,9 +290,7 @@ public class CommandComparePlayers {
         String secondHall = state.secondPlayerHall;
         userSelectionStates.remove(userId);
         
-        discordLog.logInfo(String.format("User %s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
-            userId, firstPlayer, firstHall, secondPlayer, secondHall, selectedRound));
-        telegramLog.logInfo(String.format("User %s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
+        logHelper.logInfo(String.format("User %s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
             userId, firstPlayer, firstHall, secondPlayer, secondHall, selectedRound));
         
         try {
@@ -342,8 +298,7 @@ public class CommandComparePlayers {
             return generateComparison(firstPlayer, firstHall, secondPlayer, secondHall, selectedRound);
         } catch (Exception e) {
             String errorMsg = "❌ Error generating comparison: " + e.getMessage();
-            discordLog.logError("Player comparison error: " + e.getMessage());
-            telegramLog.logError("Player comparison error: " + e.getMessage());
+            logHelper.logError("Player comparison error: " + e.getMessage());
             e.printStackTrace();
             return new CompareResponse(errorMsg, null, null);
         }
@@ -360,34 +315,13 @@ public class CommandComparePlayers {
     /**
      * Fetches available halls from database
      */
-    private List<String> fetchAvailableHalls() {
-        List<String> halls = new ArrayList<>();
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
-        
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
-            String sql = "SELECT DISTINCT hall FROM A1_PlayerStats WHERE active = 1 ORDER BY hall";
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery(sql)) {
-                while (rs.next()) {
-                    halls.add(rs.getString("hall"));
-                }
-            }
-        } catch (SQLException e) {
-            discordLog.logError("Database error fetching halls: " + e.getMessage());
-            telegramLog.logError("Database error fetching halls: " + e.getMessage());
-        }
-        
-        return halls;
-    }
-    
     /**
      * Fetches players from a specific hall
      */
     private List<String> fetchPlayersFromHall(String hall) {
         List<String> players = new ArrayList<>();
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
         
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
             String sql = "SELECT name FROM A1_PlayerStats WHERE hall = ? AND active = 1 ORDER BY name";
             try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                 pstmt.setString(1, hall);
@@ -397,8 +331,7 @@ public class CommandComparePlayers {
                 }
             }
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching players: " + e.getMessage());
-            telegramLog.logError("Database error fetching players: " + e.getMessage());
+            logHelper.logError("Database error fetching players: " + e.getMessage());
         }
         
         return players;
@@ -411,59 +344,6 @@ public class CommandComparePlayers {
         // Use RoundDetector to get only rounds that have actually been played
         // This filters out skipped rounds (e.g., round 6 when transitioning to T16)
         return RoundDetector.getAvailableRounds(dbPath);
-    }
-    
-    /**
-     * Sorts halls by numbers first (1, 2, 3...9, 10, 11), then alphabetically (HallA, HallB)
-     */
-    private void sortHalls(List<String> halls) {
-        halls.sort((h1, h2) -> {
-            Integer num1 = extractNumber(h1);
-            Integer num2 = extractNumber(h2);
-            
-            // Both have numbers - compare numerically
-            if (num1 != null && num2 != null) {
-                return Integer.compare(num1, num2);
-            }
-            
-            // Only h1 has number - h1 comes first
-            if (num1 != null) {
-                return -1;
-            }
-            
-            // Only h2 has number - h2 comes first
-            if (num2 != null) {
-                return 1;
-            }
-            
-            // Neither has number - compare alphabetically
-            return h1.compareToIgnoreCase(h2);
-        });
-    }
-    
-    /**
-     * Extracts number from hall name
-     */
-    private Integer extractNumber(String hall) {
-        try {
-            return Integer.parseInt(hall);
-        } catch (NumberFormatException e) {
-            StringBuilder digits = new StringBuilder();
-            for (char c : hall.toCharArray()) {
-                if (Character.isDigit(c)) {
-                    digits.append(c);
-                }
-            }
-            
-            if (digits.length() > 0) {
-                try {
-                    return Integer.parseInt(digits.toString());
-                } catch (NumberFormatException ex) {
-                    return null;
-                }
-            }
-            return null;
-        }
     }
     
     /**
@@ -510,9 +390,9 @@ public class CommandComparePlayers {
             roundsToInclude = availableRounds;
         } else {
             // Include only available rounds up to the selected round
-            int selectedIndex = ROUND_SEQUENCE.indexOf(selectedRound);
+            int selectedIndex = Constants.ROUND_SEQUENCE.indexOf(selectedRound);
             roundsToInclude = availableRounds.stream()
-                .filter(r -> ROUND_SEQUENCE.indexOf(r) <= selectedIndex)
+                .filter(r -> Constants.ROUND_SEQUENCE.indexOf(r) <= selectedIndex)
                 .collect(Collectors.toList());
         }
         
@@ -533,9 +413,7 @@ public class CommandComparePlayers {
         // Generate image
         Path imagePath = generateImage(data1, data2, roundsToInclude);
         
-        discordLog.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
-            player1Name, player1Hall, player2Name, player2Hall, selectedRound));
-        telegramLog.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
+        logHelper.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
             player1Name, player1Hall, player2Name, player2Hall, selectedRound));
         
         return new CompareResponse(textOutput, imagePath, null);
@@ -545,16 +423,15 @@ public class CommandComparePlayers {
      * Fetches complete player data from database
      */
     private PlayerData fetchPlayerData(String playerName, String hall, List<String> roundsToInclude) throws SQLException {
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
         
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
             // Build column list
             List<String> columns = new ArrayList<>();
             columns.add("name");
             columns.add("hall");
             columns.add("capped");
             for (String round : roundsToInclude) {
-                String suffix = getRoundSuffix(round);
+                String suffix = RoundUtils.getRoundColumnSuffix(round);
                 columns.add("trueElo" + suffix);
                 columns.add("seat" + suffix);
                 columns.add("outcome" + suffix);
@@ -577,7 +454,7 @@ public class CommandComparePlayers {
                     // Find last round played
                     for (int i = roundsToInclude.size() - 1; i >= 0; i--) {
                         String round = roundsToInclude.get(i);
-                        String colName = "trueElo" + getRoundSuffix(round);
+                        String colName = "trueElo" + RoundUtils.getRoundColumnSuffix(round);
                         Integer elo = (Integer) rs.getObject(colName);
                         if (elo != null) {
                             player.lastRound = round;
@@ -587,7 +464,7 @@ public class CommandComparePlayers {
                     
                     // Load data for included rounds only
                     for (String round : roundsToInclude) {
-                        String suffix = getRoundSuffix(round);
+                        String suffix = RoundUtils.getRoundColumnSuffix(round);
                         Integer elo = (Integer) rs.getObject("trueElo" + suffix);
                         Integer seat = (Integer) rs.getObject("seat" + suffix);
                         Integer outcome = (Integer) rs.getObject("outcome" + suffix);
@@ -645,7 +522,7 @@ public class CommandComparePlayers {
      */
     private int calculateRankForRound(Connection conn, String round, int playerElo) throws SQLException {
         // Get the index of current round
-        int currentRoundIndex = ROUND_SEQUENCE.indexOf(round);
+        int currentRoundIndex = Constants.ROUND_SEQUENCE.indexOf(round);
         if (currentRoundIndex == -1) {
             return 0;
         }
@@ -653,7 +530,7 @@ public class CommandComparePlayers {
         // Build list of round suffixes up to current round
         List<String> roundSuffixes = new ArrayList<>();
         for (int i = 0; i <= currentRoundIndex; i++) {
-            String suffix = getRoundSuffix(ROUND_SEQUENCE.get(i));
+            String suffix = RoundUtils.getRoundColumnSuffix(Constants.ROUND_SEQUENCE.get(i));
             if (suffix != null && !suffix.isEmpty()) {
                 roundSuffixes.add(suffix);
             }
@@ -699,16 +576,6 @@ public class CommandComparePlayers {
             }
         }
         return 0;
-    }
-    
-    /**
-     * Gets round suffix for column names
-     */
-    private String getRoundSuffix(String round) {
-        if (round.startsWith("t")) {
-            return "T" + round.substring(1).toUpperCase();
-        }
-        return "R" + round;
     }
     
     /**

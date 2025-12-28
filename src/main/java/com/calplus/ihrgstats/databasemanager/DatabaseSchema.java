@@ -2,6 +2,7 @@ package com.calplus.ihrgstats.databasemanager;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 
 import java.io.IOException;
@@ -369,8 +370,7 @@ public class DatabaseSchema {
         }
 
         // Connect to database and create tables
-        String jdbcUrl = "jdbc:sqlite:" + dbPath.toString();
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+        try (Connection conn = DatabaseHelper.getConnection(dbPath.toString())) {
             String infoMsgOpen = String.format("Database '%s' opened", dbName);
             System.out.println(infoMsgOpen);
             discordLog.batchInfo(infoMsgOpen); // Batch this info message

@@ -2636,7 +2636,7 @@ public class TelegramListener {
      * Sends a message with compare halls buttons (4-column layout)
      */
     private void sendMessageWithCompareHallsButtons(String message, 
-            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.ButtonConfig buttonConfig, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
             JsonObject originalMessage) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
@@ -2710,7 +2710,7 @@ public class TelegramListener {
      * Sends a message with compare players buttons (4-column or 1-column layout)
      */
     private void sendMessageWithComparePlayersButtons(String message, 
-            com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.ButtonConfig buttonConfig, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
             JsonObject originalMessage) {
         sendMessageWithComparePlayersButtons(message, buttonConfig, originalMessage, 4);
     }
@@ -2719,7 +2719,7 @@ public class TelegramListener {
      * Sends a message with compare players buttons (customizable layout)
      */
     private void sendMessageWithComparePlayersButtons(String message, 
-            com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.ButtonConfig buttonConfig, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
             JsonObject originalMessage, int columnsPerRow) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
@@ -2792,7 +2792,7 @@ public class TelegramListener {
      * Sends a message with rank players buttons
      */
     private void sendMessageWithRankPlayersButtons(String message, 
-            com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers.ButtonConfig buttonConfig, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
             JsonObject originalMessage) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
@@ -2866,7 +2866,7 @@ public class TelegramListener {
      * Sends a message with rank halls buttons
      */
     private void sendMessageWithRankHallsButtons(String message, 
-            com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls.ButtonConfig buttonConfig, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
             JsonObject originalMessage) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";

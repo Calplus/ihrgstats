@@ -2,11 +2,8 @@ package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
-import com.calplus.ihrgstats.utils.EnvironmentManager;
-import com.calplus.ihrgstats.utils.PropertyManager;
-import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.*;
 
-import java.nio.file.Paths;
 import java.sql.*;
 import java.util.*;
 
@@ -28,7 +25,7 @@ public class CommandSettings {
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
         this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
-        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db").toString();
+        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
     }
 
     /**
@@ -213,8 +210,7 @@ public class CommandSettings {
         try {
             // Query database for all distinct halls
             List<String> halls = new ArrayList<>();
-            String jdbcUrl = "jdbc:sqlite:" + dbPath;
-            try (Connection conn = DriverManager.getConnection(jdbcUrl);
+            try (Connection conn = DatabaseHelper.getConnection(dbPath);
                  Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT DISTINCT hall FROM A1_PlayerStats WHERE hall IS NOT NULL AND hall != '' ORDER BY hall")) {
                 

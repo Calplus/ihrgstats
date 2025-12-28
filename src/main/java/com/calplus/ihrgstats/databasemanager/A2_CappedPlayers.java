@@ -2,6 +2,7 @@ package com.calplus.ihrgstats.databasemanager;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 
 import java.io.*;
@@ -214,9 +215,7 @@ public class A2_CappedPlayers {
      * @throws Exception if database operation fails
      */
     private void updateDatabase(List<CappedPlayerEntry> entries) throws Exception {
-        String jdbcUrl = "jdbc:sqlite:" + dbPath;
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
             conn.setAutoCommit(false);
 
             try {
