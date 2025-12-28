@@ -1114,14 +1114,21 @@ public class A1_PlayerStats {
                         throw new Exception(String.format("Invalid CSV format at line %d: At least one winby field must be filled", lineNumber));
                     }
                     
-                    // Validate winby logic: if both filled, must be "0" or "1"
+                    // Validate winby logic: if both filled, check for valid combinations
                     if (!winby1.isEmpty() && !winby2.isEmpty()) {
-                        if (!(winby1.equals("0") || winby1.equals("1")) || !(winby2.equals("0") || winby2.equals("1"))) {
-                            throw new Exception(String.format("Invalid CSV format at line %d: When both winby columns are filled, values must be '0' (loss) or '1' (win)", lineNumber));
+                        // Check for draw: both must be "draw" (case-insensitive)
+                        boolean bothDraw = winby1.equalsIgnoreCase("draw") && winby2.equalsIgnoreCase("draw");
+                        
+                        // Check for win/loss: both must be "0" or "1"
+                        boolean bothBinary = (winby1.equals("0") || winby1.equals("1")) && (winby2.equals("0") || winby2.equals("1"));
+                        
+                        if (!bothDraw && !bothBinary) {
+                            throw new Exception(String.format("Invalid CSV format at line %d: When both winby columns are filled, values must be either both 'draw' or '0'/'1'", lineNumber));
                         }
-                        // Exactly one must be "1" and one must be "0"
-                        if (winby1.equals(winby2)) {
-                            throw new Exception(String.format("Invalid CSV format at line %d: When both winby columns are filled, one must be '0' and the other '1'", lineNumber));
+                        
+                        // If binary, exactly one must be "1" and one must be "0"
+                        if (bothBinary && winby1.equals(winby2)) {
+                            throw new Exception(String.format("Invalid CSV format at line %d: When using '0'/'1' for both winby columns, one must be '0' and the other '1'", lineNumber));
                         }
                     }
                 }
