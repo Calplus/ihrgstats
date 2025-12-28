@@ -856,6 +856,12 @@ public class CommandComparePlayers {
             String oppName = player.oppNameByRound.get(round);
             String oppHall = player.oppHallByRound.get(round);
             
+            // Get ELO values
+            Integer playerElo = player.eloByRound.get(round);
+            Integer oppElo = player.oppEloByRound.get(round);
+            String playerEloStr = playerElo != null ? String.format("(%d)", playerElo) : "";
+            String oppEloStr = (oppElo != null && !"WALKOVER".equalsIgnoreCase(oppName)) ? String.format("(%d)", oppElo) : "";
+            
             // Format: emoji playerHall playerName score oppName oppHall oppEmoji
             String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
             Integer oppOutcome = outcome == 0 ? 0 : -outcome;
@@ -869,6 +875,7 @@ public class CommandComparePlayers {
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
                 score = "1-0";
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
+                oppEloStr = "";  // No ELO for WALKOVER
             } else if (outcome == 1) {
                 score = "1-0";
             } else if (outcome == 0) {
@@ -877,14 +884,16 @@ public class CommandComparePlayers {
                 score = "0-1";
             }
             
-            sb.append(String.format("%-3s %s %s %s %s %s %s %s\n",
+            sb.append(String.format("%-3s %s %s %s %s %s %s %s %s\n",
                 VictoryRecordCalculator.getRoundDisplayName(round),
                 hallEmoji,
                 playerHallFormatted,
+                playerEloStr,
                 player.name,
                 score,
                 oppName != null ? oppName : "?",
                 oppHallFormatted,
+                oppEloStr,
                 oppEmoji));
         }
         sb.append("```\n\n");
@@ -1008,13 +1017,16 @@ public class CommandComparePlayers {
         seatLines1.add(seatData1.toString());
         sections1.add(new ComparisonImageGenerator.Section("Seating", seatLines1));
         
-        // Victory record
-        List<String> victoryLines1 = new ArrayList<>();
+        // Victory record - use structured data
+        List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries1 = new ArrayList<>();
         for (String round : ROUND_SEQUENCE) {
             Integer outcome = player1.outcomeByRound.get(round);
             if (outcome == null) {
                 if (player1.eloByRound.containsKey(round)) {
-                    victoryLines1.add(String.format("%s -NA-", VictoryRecordCalculator.getRoundDisplayName(round)));
+                    victoryEntries1.add(new ComparisonImageGenerator.PlayerVictoryEntry(
+                        VictoryRecordCalculator.getRoundDisplayName(round),
+                        true  // isNA
+                    ));
                 }
                 continue;
             }
@@ -1051,8 +1063,8 @@ public class CommandComparePlayers {
                 score = "0-1";
             }
             
-            // Format: "round hallEmoji playerHall playerElo playerName score oppName oppElo oppHall oppEmoji"
-            victoryLines1.add(String.format("%s %s %s %s %s %s %s %s %s %s",
+            // Create structured entry
+            victoryEntries1.add(new ComparisonImageGenerator.PlayerVictoryEntry(
                 VictoryRecordCalculator.getRoundDisplayName(round),
                 hallEmoji,
                 playerHallFormatted,
@@ -1062,9 +1074,10 @@ public class CommandComparePlayers {
                 oppName != null ? oppName : "?",
                 oppEloStr,
                 oppHallFormatted,
-                oppEmoji));
+                oppEmoji
+            ));
         }
-        sections1.add(new ComparisonImageGenerator.Section("Victory Record", victoryLines1, false, true));
+        sections1.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries1));
         
         // Prepare right side data (player 2)
         List<ComparisonImageGenerator.Section> sections2 = new ArrayList<>();
@@ -1152,13 +1165,16 @@ public class CommandComparePlayers {
         seatLines2.add(seatData2.toString());
         sections2.add(new ComparisonImageGenerator.Section("Seating", seatLines2));
         
-        // Victory record
-        List<String> victoryLines2 = new ArrayList<>();
+        // Victory record - use structured data
+        List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries2 = new ArrayList<>();
         for (String round : ROUND_SEQUENCE) {
             Integer outcome = player2.outcomeByRound.get(round);
             if (outcome == null) {
                 if (player2.eloByRound.containsKey(round)) {
-                    victoryLines2.add(String.format("%s -NA-", VictoryRecordCalculator.getRoundDisplayName(round)));
+                    victoryEntries2.add(new ComparisonImageGenerator.PlayerVictoryEntry(
+                        VictoryRecordCalculator.getRoundDisplayName(round),
+                        true  // isNA
+                    ));
                 }
                 continue;
             }
@@ -1170,9 +1186,9 @@ public class CommandComparePlayers {
             Integer oppOutcome = outcome == 0 ? 0 : -outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
             
-            // Use image formatting (no "Hall" prefix for numbers)
-            String playerHallFormatted = formatHallNameForImage(player2.hall);
-            String oppHallFormatted = oppHall != null ? formatHallNameForImage(oppHall) : "?";
+            // Use 2-letter hall abbreviations
+            String playerHallFormatted = TableFormatter.shortenHallName(player2.hall);
+            String oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
             
             // Get player ELO for this round
             Integer playerElo = player2.eloByRound.get(round);
@@ -1187,7 +1203,6 @@ public class CommandComparePlayers {
                 score = "1-0";
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
                 oppEloStr = "-";  // Show dash for WALKOVER ELO
-                // Don't override oppHallFormatted - keep the actual hall name
             } else if (outcome == 1) {
                 score = "1-0";
             } else if (outcome == 0) {
@@ -1196,7 +1211,8 @@ public class CommandComparePlayers {
                 score = "0-1";
             }
             
-            victoryLines2.add(String.format("%s %s %s %s %s %s %s %s %s %s",
+            // Create structured entry
+            victoryEntries2.add(new ComparisonImageGenerator.PlayerVictoryEntry(
                 VictoryRecordCalculator.getRoundDisplayName(round),
                 hallEmoji,
                 playerHallFormatted,
@@ -1206,9 +1222,10 @@ public class CommandComparePlayers {
                 oppName != null ? oppName : "?",
                 oppEloStr,
                 oppHallFormatted,
-                oppEmoji));
+                oppEmoji
+            ));
         }
-        sections2.add(new ComparisonImageGenerator.Section("Victory Record", victoryLines2, false, true));
+        sections2.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries2));
         
         // Equalize section sizes
         equalizeSectionSizes(sections1, sections2);
@@ -1236,17 +1253,41 @@ public class CommandComparePlayers {
             ComparisonImageGenerator.Section s1 = sections1.get(i);
             ComparisonImageGenerator.Section s2 = sections2.get(i);
             
-            int size1 = s1.lines.size();
-            int size2 = s2.lines.size();
+            // Get size based on what type of data the section contains
+            int size1 = getSectionSize(s1);
+            int size2 = getSectionSize(s2);
             
             if (size1 < size2) {
-                for (int j = 0; j < size2 - size1; j++) {
-                    s1.lines.add("");
-                }
+                addEmptyRows(s1, size2 - size1);
             } else if (size2 < size1) {
-                for (int j = 0; j < size1 - size2; j++) {
-                    s2.lines.add("");
-                }
+                addEmptyRows(s2, size1 - size2);
+            }
+        }
+    }
+    
+    private int getSectionSize(ComparisonImageGenerator.Section section) {
+        if (section.hallVictoryEntries != null) {
+            return section.hallVictoryEntries.size();
+        } else if (section.playerVictoryEntries != null) {
+            return section.playerVictoryEntries.size();
+        } else if (section.lines != null) {
+            return section.lines.size();
+        }
+        return 0;
+    }
+    
+    private void addEmptyRows(ComparisonImageGenerator.Section section, int count) {
+        if (section.hallVictoryEntries != null) {
+            for (int j = 0; j < count; j++) {
+                section.hallVictoryEntries.add(new ComparisonImageGenerator.HallVictoryEntry("", true));
+            }
+        } else if (section.playerVictoryEntries != null) {
+            for (int j = 0; j < count; j++) {
+                section.playerVictoryEntries.add(new ComparisonImageGenerator.PlayerVictoryEntry("", true));
+            }
+        } else if (section.lines != null) {
+            for (int j = 0; j < count; j++) {
+                section.lines.add("");
             }
         }
     }
