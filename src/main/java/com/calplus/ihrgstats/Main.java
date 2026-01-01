@@ -9,8 +9,12 @@ import com.calplus.ihrgstats.utils.EnvironmentManager;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
 public class Main {
+    // Store the launch time for the application
+    public static final ZonedDateTime LAUNCH_TIME = ZonedDateTime.now(ZoneId.of("Asia/Singapore"));
     public static void main(String[] args) {
         // Initialize logging
         DiscordLog discordLog = new DiscordLog();

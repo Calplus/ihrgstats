@@ -668,6 +668,61 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle timezone selection request callback
+            if (data.equals("setting_timezone_select")) {
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
+                
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse timezoneSelectionResponse = 
+                    settingsCommand.handleTimezoneSelection(userId);
+                
+                // Get original message info to send response to same chat
+                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+                
+                if (message != null) {
+                    JsonObject chat = message.getAsJsonObject("chat");
+                    String chatId = chat.get("id").getAsString();
+                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+                    
+                    // Remove buttons from original message
+                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
+                    
+                    // Send response with buttons using the same method as settings command
+                    if (timezoneSelectionResponse.buttons != null) {
+                        sendMessageWithSettingsButtons(timezoneSelectionResponse.message, 
+                            timezoneSelectionResponse.buttons, 
+                            message);
+                    } else {
+                        sendMessageToChat(chatId, timezoneSelectionResponse.message, threadId);
+                    }
+                }
+                return;
+            }
+            
+            // Handle timezone selection callbacks
+            if (data.startsWith("setting_timezone_")) {
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
+                
+                String timezoneResponse = settingsCommand.handleTimezoneCallback(data, userId);
+                
+                // Get original message info to send response to same chat
+                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+                
+                if (message != null) {
+                    JsonObject chat = message.getAsJsonObject("chat");
+                    String chatId = chat.get("id").getAsString();
+                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+                    
+                    // Remove buttons from original message
+                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
+                    
+                    // Send response to same chat/thread
+                    sendMessageToChat(chatId, timezoneResponse, threadId);
+                }
+                return;
+            }
+            
             // Handle settings cancel callback
             if (data.equals("settings_cancel")) {
                 com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 

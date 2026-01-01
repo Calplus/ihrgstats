@@ -1,5 +1,7 @@
 package com.calplus.ihrgstats.discordbot.logs;
 
+import com.calplus.ihrgstats.utils.TimezoneHelper;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -134,9 +136,7 @@ public class DiscordLog {
      * @return Formatted timestamp
      */
     private String getTimestamp() {
-        LocalDateTime now = LocalDateTime.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-        return now.format(formatter);
+        return TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss.SSS");
     }
 
     /**

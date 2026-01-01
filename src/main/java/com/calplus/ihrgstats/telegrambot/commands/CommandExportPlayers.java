@@ -154,7 +154,7 @@ public class CommandExportPlayers {
             String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
 
             // Create CSV file
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+            String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
             String filename = String.format("playerExport_%s.csv", timestamp);
             Path tempDir = Paths.get(System.getProperty("user.dir"), "temp");
             Files.createDirectories(tempDir);

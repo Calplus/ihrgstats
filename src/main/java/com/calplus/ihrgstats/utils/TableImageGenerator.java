@@ -196,14 +196,14 @@ public class TableImageGenerator {
     public static Path generatePlayerTable(String[] headers, List<String[]> rows,
                                           TableFormatter.Alignment[] alignments,
                                           int[] columnWidths) throws IOException {
-        return generatePlayerTable(headers, rows, alignments, columnWidths, null, null);
+        return generatePlayerTable(headers, rows, alignments, columnWidths, null, null, "RankPlayers", "");
     }
     
     public static Path generatePlayerTable(String[] headers, List<String[]> rows,
                                           TableFormatter.Alignment[] alignments,
                                           int[] columnWidths,
                                           ImageMetadata metadata) throws IOException {
-        return generatePlayerTable(headers, rows, alignments, columnWidths, metadata, null);
+        return generatePlayerTable(headers, rows, alignments, columnWidths, metadata, null, "RankPlayers", "");
     }
 
     public static Path generatePlayerTable(String[] headers, List<String[]> rows,
@@ -211,6 +211,16 @@ public class TableImageGenerator {
                                           int[] columnWidths,
                                           ImageMetadata metadata,
                                           Set<Integer> highlightRows) throws IOException {
+        return generatePlayerTable(headers, rows, alignments, columnWidths, metadata, highlightRows, "RankPlayers", "");
+    }
+
+    public static Path generatePlayerTable(String[] headers, List<String[]> rows,
+                                          TableFormatter.Alignment[] alignments,
+                                          int[] columnWidths,
+                                          ImageMetadata metadata,
+                                          Set<Integer> highlightRows,
+                                          String commandName,
+                                          String entityName) throws IOException {
         // Calculate optimal table width based on actual content
         FontMetrics fm = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
             .createGraphics().getFontMetrics(TABLE_FONT);
@@ -283,8 +293,13 @@ public class TableImageGenerator {
         int contentHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
         BufferedImage croppedImage = cropImage(image, contentX, contentY, contentWidth, contentHeight);
         
+        // Generate filename with convention: {command}_{name}_{date}_{time}.png
+        String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
+        String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
+        String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
+        
         // Save to temp file
-        Path tempFile = Files.createTempFile("rank_table_", ".png");
+        Path tempFile = Files.createTempFile(filename.replace(".png", "_"), ".png");
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
         
         return tempFile;
@@ -303,7 +318,7 @@ public class TableImageGenerator {
                                         List<String> hallNames,
                                         TableFormatter.Alignment[] alignments,
                                         int[] columnWidths) throws IOException {
-        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, null, null);
+        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, null, null, "RankHalls", "");
     }
     
     public static Path generateHallTable(String[] headers, List<String[]> rows,
@@ -311,7 +326,7 @@ public class TableImageGenerator {
                                         TableFormatter.Alignment[] alignments,
                                         int[] columnWidths,
                                         ImageMetadata metadata) throws IOException {
-        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, null);
+        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, null, "RankHalls", "");
     }
 
     public static Path generateHallTable(String[] headers, List<String[]> rows,
@@ -320,6 +335,17 @@ public class TableImageGenerator {
                                         int[] columnWidths,
                                         ImageMetadata metadata,
                                         Set<Integer> highlightRows) throws IOException {
+        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, highlightRows, "RankHalls", "");
+    }
+
+    public static Path generateHallTable(String[] headers, List<String[]> rows,
+                                        List<String> hallNames,
+                                        TableFormatter.Alignment[] alignments,
+                                        int[] columnWidths,
+                                        ImageMetadata metadata,
+                                        Set<Integer> highlightRows,
+                                        String commandName,
+                                        String entityName) throws IOException {
         // Calculate optimal table width based on actual content
         FontMetrics fm = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
             .createGraphics().getFontMetrics(TABLE_FONT);
@@ -399,8 +425,13 @@ public class TableImageGenerator {
         int contentHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
         BufferedImage croppedImage = cropImage(image, contentX, contentY, contentWidth, contentHeight);
         
+        // Generate filename with convention: {command}_{name}_{date}_{time}.png
+        String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
+        String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
+        String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
+        
         // Save to temp file
-        Path tempFile = Files.createTempFile("hall_rank_table_", ".png");
+        Path tempFile = Files.createTempFile(filename.replace(".png", "_"), ".png");
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
         
         return tempFile;
@@ -453,8 +484,7 @@ public class TableImageGenerator {
         }
         
         // Draw export date/time
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        String dateTime = "Generated: " + sdf.format(new Date());
+        String dateTime = "Generated: " + TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss");
         int dateWidth = metadataFm.stringWidth(dateTime);
         g2d.drawString(dateTime, centerX - dateWidth / 2, y);
     }
@@ -551,5 +581,13 @@ public class TableImageGenerator {
             System.err.println("Failed to load hall icon for " + hallName + ": " + e.getMessage());
             return null;
         }
+    }
+    
+    /**
+     * Sanitizes a name for use in a filename by removing invalid characters
+     */
+    private static String sanitizeName(String name) {
+        if (name == null || name.isEmpty()) return "";
+        return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
     }
 }

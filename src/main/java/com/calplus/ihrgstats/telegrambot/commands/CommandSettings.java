@@ -100,6 +100,18 @@ public class CommandSettings {
                 continue;
             }
             
+            // Special handling for timezone
+            if (key.equals("settings.timezone")) {
+                String currentTimezone = value.isEmpty() ? "Not set" : formatTimezoneDisplay(value);
+                message.append(String.format("🌍 **Timezone: %s**\n", currentTimezone));
+                message.append(String.format("   %s\n\n", description));
+                
+                // Create button for timezone selection
+                buttonLabels.add("🌍 Change Timezone");
+                buttonCallbacks.add("setting_timezone_select");
+                continue;
+            }
+            
             // Special handling for maxSeeds (integer)
             if (key.equals("settings.maxSeeds")) {
                 String currentSeeds = value.isEmpty() ? "Not set" : value;
@@ -401,6 +413,47 @@ public class CommandSettings {
         String settingKey = state.settingKey;
         userSelectionStates.remove(userId);
         
+        // Handle timezone setting
+        if ("settings.timezone".equals(settingKey)) {
+            String inputValue = text.trim();
+            
+            // Remove UTC prefix if present
+            inputValue = inputValue.replaceAll("(?i)^UTC\\s*", "");
+            
+            // Validate timezone offset format
+            try {
+                double offset = Double.parseDouble(inputValue);
+                if (offset < -12 || offset > 14) {
+                    return "❌ Invalid input: Timezone offset must be between -12 and +14.";
+                }
+                
+                String timezoneValue = String.valueOf(offset);
+                
+                discordLog.logInfo(String.format("Admin %s setting timezone to: %s (manual input)", userId, timezoneValue));
+                telegramLog.logInfo(String.format("Admin %s setting timezone to: %s (manual input)", userId, timezoneValue));
+                
+                // Update property
+                boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
+                
+                if (success) {
+                    String successMsg = String.format("🌍 Successfully set timezone to **%s**\n\nUse /settings to see updated configuration.", 
+                                                    formatTimezoneDisplay(timezoneValue));
+                    
+                    discordLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
+                    telegramLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
+                    
+                    return successMsg;
+                } else {
+                    String errorMsg = "❌ Error: Failed to update timezone setting";
+                    discordLog.logError(errorMsg);
+                    telegramLog.logError(errorMsg);
+                    return errorMsg;
+                }
+            } catch (NumberFormatException e) {
+                return "❌ Invalid input: Timezone offset must be a valid number (e.g., +8, -5, +9.5).";
+            }
+        }
+        
         // Handle maxSeeds setting
         if ("settings.maxSeeds".equals(settingKey)) {
             String inputValue = text.trim();
@@ -512,6 +565,181 @@ public class CommandSettings {
         }
 
         return "❌ Unknown callback for maxSeeds";
+    }
+
+    /**
+     * Handles the timezone selection request
+     * @param userId The user ID who requested timezone change
+     * @return Response containing timezone selection buttons
+     */
+    public SettingsResponse handleTimezoneSelection(String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to change timezone", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to change timezone", userId));
+            return new SettingsResponse(errorMsg, null);
+        }
+
+        discordLog.logInfo(String.format("Admin %s requested timezone selection", userId));
+        telegramLog.logInfo(String.format("Admin %s requested timezone selection", userId));
+
+        // Get current timezone
+        String currentTimezone = PropertyResolver.getProperty("settings.timezone", "");
+
+        // Build message
+        StringBuilder message = new StringBuilder();
+        message.append("🌍 **Select Timezone**\n\n");
+        message.append("Choose your timezone offset from UTC.\n");
+        if (!currentTimezone.isEmpty()) {
+            message.append(String.format("Current timezone: **%s**\n", formatTimezoneDisplay(currentTimezone)));
+        }
+        message.append("\nSelect a timezone or choose manual input:");
+
+        // Create buttons for common UTC offsets from -12 to +14
+        List<String> buttonLabels = new ArrayList<>();
+        List<String> buttonCallbacks = new ArrayList<>();
+
+        // Negative offsets (UTC-12 to UTC-1)
+        for (int offset = -12; offset <= -1; offset++) {
+            buttonLabels.add(String.format("UTC%d", offset));
+            buttonCallbacks.add("setting_timezone_" + offset);
+        }
+
+        // UTC+0
+        buttonLabels.add("UTC");
+        buttonCallbacks.add("setting_timezone_0");
+
+        // Positive offsets (UTC+1 to UTC+14)
+        for (int offset = 1; offset <= 14; offset++) {
+            buttonLabels.add(String.format("UTC+%d", offset));
+            buttonCallbacks.add("setting_timezone_+" + offset);
+        }
+
+        // Add common half-hour offsets
+        buttonLabels.add("UTC+3.5");
+        buttonCallbacks.add("setting_timezone_+3.5");
+        buttonLabels.add("UTC+4.5");
+        buttonCallbacks.add("setting_timezone_+4.5");
+        buttonLabels.add("UTC+5.5");
+        buttonCallbacks.add("setting_timezone_+5.5");
+        buttonLabels.add("UTC+6.5");
+        buttonCallbacks.add("setting_timezone_+6.5");
+        buttonLabels.add("UTC+9.5");
+        buttonCallbacks.add("setting_timezone_+9.5");
+        buttonLabels.add("UTC+10.5");
+        buttonCallbacks.add("setting_timezone_+10.5");
+
+        // Add manual input and cancel buttons
+        buttonLabels.add("✏️ Manual Input");
+        buttonCallbacks.add("setting_timezone_manual");
+        buttonLabels.add("❌ Cancel");
+        buttonCallbacks.add("settings_cancel");
+
+        discordLog.logSuccess(String.format("Sent timezone selection menu to admin %s", userId));
+        telegramLog.logSuccess(String.format("Sent timezone selection menu to admin %s", userId));
+
+        return new SettingsResponse(message.toString(), 
+            new ButtonConfig(buttonLabels.toArray(new String[0]), 
+                           buttonCallbacks.toArray(new String[0]), 
+                           4)); // 4 columns per row
+    }
+
+    /**
+     * Handles a timezone selection callback
+     * @param callbackData The callback data from the button (e.g., "setting_timezone_+8")
+     * @param userId The user ID who clicked the button
+     * @return Response message after setting the timezone
+     */
+    public String handleTimezoneCallback(String callbackData, String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to set timezone", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to set timezone", userId));
+            return errorMsg;
+        }
+
+        // Handle manual input request
+        if (callbackData.equals("setting_timezone_manual")) {
+            discordLog.logInfo(String.format("Admin %s requested manual timezone input", userId));
+            telegramLog.logInfo(String.format("Admin %s requested manual timezone input", userId));
+            
+            // Set user state to await manual input
+            SettingsSelectionState state = userSelectionStates.computeIfAbsent(userId, k -> new SettingsSelectionState());
+            state.awaitingManualInput = true;
+            state.settingKey = "settings.timezone";
+            
+            String currentTimezone = PropertyResolver.getProperty("settings.timezone", "");
+            String currentValueDisplay = currentTimezone.isEmpty() ? "Not set" : formatTimezoneDisplay(currentTimezone);
+            
+            return String.format("✏️ **Manual Timezone Input**\n\n" +
+                                "Please reply with the timezone offset you want to set.\n\n" +
+                                "**Current timezone:** %s\n\n" +
+                                "_Example: Type '+8' for UTC+8, '-5' for UTC-5, or '+9.5' for UTC+9.5_", 
+                                currentValueDisplay);
+        }
+
+        // Extract timezone offset from callback data
+        if (!callbackData.startsWith("setting_timezone_")) {
+            return "❌ Error: Invalid callback data";
+        }
+
+        String timezoneValue = callbackData.substring("setting_timezone_".length());
+        
+        // Validate and format timezone value
+        try {
+            double offset = Double.parseDouble(timezoneValue);
+            if (offset < -12 || offset > 14) {
+                return "❌ Error: Timezone offset must be between -12 and +14";
+            }
+            timezoneValue = String.valueOf(offset);
+        } catch (NumberFormatException e) {
+            return "❌ Error: Invalid timezone format";
+        }
+        
+        discordLog.logInfo(String.format("Admin %s setting timezone to: %s", userId, timezoneValue));
+        telegramLog.logInfo(String.format("Admin %s setting timezone to: %s", userId, timezoneValue));
+
+        // Update property
+        boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
+        
+        if (success) {
+            String successMsg = String.format("🌍 Successfully set timezone to **%s**\n\nUse /settings to see updated configuration.", 
+                                            formatTimezoneDisplay(timezoneValue));
+            
+            discordLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
+            telegramLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
+            
+            return successMsg;
+        } else {
+            String errorMsg = "❌ Error: Failed to update timezone setting";
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+    }
+
+    /**
+     * Formats a timezone value for display
+     */
+    private String formatTimezoneDisplay(String timezoneValue) {
+        if (timezoneValue == null || timezoneValue.isEmpty()) {
+            return "Not set";
+        }
+        
+        try {
+            double offset = Double.parseDouble(timezoneValue);
+            if (offset == 0) {
+                return "UTC";
+            } else if (offset > 0) {
+                return String.format("UTC+%.1f", offset).replace(".0", "");
+            } else {
+                return String.format("UTC%.1f", offset).replace(".0", "");
+            }
+        } catch (NumberFormatException e) {
+            return timezoneValue;
+        }
     }
 
     /**

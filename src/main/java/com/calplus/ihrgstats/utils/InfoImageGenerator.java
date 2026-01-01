@@ -51,8 +51,7 @@ public class InfoImageGenerator {
         public String generatedDate;
         
         public ImageMetadata() {
-            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-            this.generatedDate = dateFormat.format(new Date());
+            this.generatedDate = TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss");
         }
     }
     
@@ -139,6 +138,13 @@ public class InfoImageGenerator {
      * Generates an information image for a single entity
      */
     public static Path generateInfoImage(ImageMetadata metadata, List<Section> sections, String hallIdentifier) throws IOException {
+        return generateInfoImage(metadata, sections, hallIdentifier, "Info", "");
+    }
+    
+    /**
+     * Generates an information image for a single entity with custom command and entity names
+     */
+    public static Path generateInfoImage(ImageMetadata metadata, List<Section> sections, String hallIdentifier, String commandName, String entityName) throws IOException {
         // Create temporary graphics to calculate dimensions
         BufferedImage tempImg = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D tempG2d = tempImg.createGraphics();
@@ -190,8 +196,11 @@ public class InfoImageGenerator {
         
         g2d.dispose();
         
-        // Save image
-        Path outputPath = Paths.get(System.getProperty("java.io.tmpdir"), "player_info_" + System.currentTimeMillis() + ".png");
+        // Save image with new naming convention
+        String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
+        String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
+        String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
+        Path outputPath = Paths.get(System.getProperty("java.io.tmpdir"), filename);
         ImageIO.write(image, "PNG", outputPath.toFile());
         
         return outputPath;
@@ -779,5 +788,13 @@ public class InfoImageGenerator {
         
         tempG2d.dispose();
         return height;
+    }
+    
+    /**
+     * Sanitizes a name for use in a filename by removing invalid characters
+     */
+    private static String sanitizeName(String name) {
+        if (name == null || name.isEmpty()) return "";
+        return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
     }
 }

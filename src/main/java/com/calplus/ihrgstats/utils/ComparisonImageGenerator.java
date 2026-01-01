@@ -205,6 +205,15 @@ public class ComparisonImageGenerator {
      */
     public static Path generateComparisonImage(String title, ComparisonData leftData, 
                                               ComparisonData rightData, ImageMetadata metadata) throws IOException {
+        return generateComparisonImage(title, leftData, rightData, metadata, "Compare", "", "");
+    }
+    
+    /**
+     * Generates a comparison image with left and right sides with custom command and entity names
+     */
+    public static Path generateComparisonImage(String title, ComparisonData leftData, 
+                                              ComparisonData rightData, ImageMetadata metadata,
+                                              String commandName, String leftEntityName, String rightEntityName) throws IOException {
         // Calculate dimensions
         Graphics2D tempG2d = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
         tempG2d.setFont(TABLE_FONT);
@@ -268,8 +277,24 @@ public class ComparisonImageGenerator {
         
         g2d.dispose();
         
-        // Save to temp file
-        Path tempFile = Files.createTempFile("comparison_", ".png");
+        // Save to temp file with new naming convention
+        String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
+        String leftName = sanitizeName(leftEntityName);
+        String rightName = sanitizeName(rightEntityName);
+        
+        // Build filename based on what entity names are provided
+        String filename;
+        if (!leftName.isEmpty() && !rightName.isEmpty()) {
+            filename = String.format("%s_%s_%s_%s.png", commandName, leftName, rightName, timestamp);
+        } else if (!leftName.isEmpty()) {
+            filename = String.format("%s_%s_%s.png", commandName, leftName, timestamp);
+        } else if (!rightName.isEmpty()) {
+            filename = String.format("%s_%s_%s.png", commandName, rightName, timestamp);
+        } else {
+            filename = String.format("%s_%s.png", commandName, timestamp);
+        }
+        
+        Path tempFile = Files.createTempFile(filename.replace(".png", "_"), ".png");
         ImageIO.write(image, "PNG", tempFile.toFile());
         
         return tempFile;
@@ -360,7 +385,7 @@ public class ComparisonImageGenerator {
         // Draw generation timestamp
         g2d.setFont(METADATA_FONT);
         FontMetrics metaFm = g2d.getFontMetrics();
-        String timestamp = "Generated: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+        String timestamp = "Generated: " + TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss");
         int timestampWidth = metaFm.stringWidth(timestamp);
         g2d.drawString(timestamp, (imageWidth - timestampWidth) / 2, currentY + metaFm.getAscent());
         currentY += metaFm.getHeight() + 15;
@@ -918,5 +943,13 @@ public class ComparisonImageGenerator {
         } catch (IOException e) {
             return null;
         }
+    }
+    
+    /**
+     * Sanitizes a name for use in a filename by removing invalid characters
+     */
+    private static String sanitizeName(String name) {
+        if (name == null || name.isEmpty()) return "";
+        return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
     }
 }

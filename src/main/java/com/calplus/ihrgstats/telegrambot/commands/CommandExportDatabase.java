@@ -4,6 +4,7 @@ import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.TimezoneHelper;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -111,7 +112,7 @@ public class CommandExportDatabase {
 
         try {
             // Create a timestamped copy in temp directory
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+            String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
             String exportFileName = "database_export_" + timestamp + ".db";
             Path tempDir = Files.createTempDirectory("db_export_");
             Path exportPath = tempDir.resolve(exportFileName);

@@ -1,9 +1,11 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.Main;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
+import com.calplus.ihrgstats.utils.TimezoneHelper;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
@@ -22,8 +24,7 @@ import java.time.format.DateTimeFormatter;
  */
 public class CommandAbout {
     private final LogHelper logHelper;
-    private static final ZonedDateTime launchTime = ZonedDateTime.now(ZoneId.of("Asia/Singapore"));
-    private final String version = "1.0-SNAPSHOT";
+    private final String version = "1.0.0";
     private final String author = "Calplus";
     private final String botToken;
     private final HttpClient httpClient;
@@ -109,8 +110,8 @@ public class CommandAbout {
         
         try {
             String adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
-            ZoneId timezone = ZoneId.of("Asia/Singapore");
-            ZonedDateTime now = ZonedDateTime.now(timezone);
+            ZoneId timezone = TimezoneHelper.getConfiguredZoneId();
+            ZonedDateTime now = TimezoneHelper.now();
             
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
             
@@ -119,14 +120,14 @@ public class CommandAbout {
             
             message.append("**Author:** ").append(author).append("\n");
             message.append("**Version:** ").append(version).append("\n");
-            message.append("**Timezone:** ").append(formatTimezone(timezone, now)).append("\n");
+            message.append("**Timezone:** ").append(TimezoneHelper.getFormattedTimezone()).append("\n");
             message.append("**GitHub:** https://github.com/Calplus/ihrgstats\n\n");
             
             message.append("**Bot Launched:**\n");
-            message.append("`").append(launchTime.format(formatter)).append("`\n\n");
+            message.append("`").append(TimezoneHelper.toConfiguredZone(Main.LAUNCH_TIME).format(formatter)).append("`\n\n");
             
             message.append("**Last Updated:**\n");
-            message.append("`2025-12-31`\n\n");
+            message.append("`02 Jan 2026`\n\n");
             
             message.append("**Current Time:**\n");
             message.append("`").append(now.format(formatter)).append("`\n\n");

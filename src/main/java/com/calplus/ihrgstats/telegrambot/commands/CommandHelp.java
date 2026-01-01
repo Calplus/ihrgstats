@@ -86,6 +86,14 @@ public class CommandHelp {
     }
     
     /**
+     * Handles back button - returns to main help menu
+     */
+    public CommandResponse handleBack(String userId) {
+        logHelper.logInfo(String.format("User %s requested back to help menu", userId));
+        return handleCommand(userId);
+    }
+    
+    /**
      * Handles cancellation
      */
     public CommandResponse handleCancel(String userId) {
@@ -99,21 +107,51 @@ public class CommandHelp {
     private CommandResponse generateCommandsHelp() {
         StringBuilder message = new StringBuilder();
         message.append("📋 **Available Commands**\n\n");
-        message.append("Click on any command below to see detailed information:\n");
+        
+        // High-level overview of commands
+        message.append("**Player Commands:**\n");
+        message.append("• `/rankplayers` - View ranked list of all players\n");
+        message.append("• `/compareplayers` - Compare two players side-by-side\n");
+        message.append("• `/infoplayer` - View detailed info for a single player\n\n");
+        
+        message.append("**Hall Commands:**\n");
+        message.append("• `/rankhalls` - View ranked list of all halls\n");
+        message.append("• `/comparehalls` - Compare two halls side-by-side\n");
+        message.append("• `/infohall` - View detailed info for a single hall\n\n");
+        
+        message.append("**Match & Data Commands:**\n");
+        message.append("• `/infomatch` - View match details for a specific round\n");
+        message.append("• `/exportplayers` - Export player data to CSV/Excel\n");
+        message.append("• `/exportdatabase` - Export complete database\n\n");
+        
+        message.append("**Utility Commands:**\n");
+        message.append("• `/about` - Information about this bot\n");
+        message.append("• `/help` - This interactive help menu\n");
+        message.append("• `/settings` - View/modify database settings\n\n");
+        
+        message.append("Click on any command below for detailed information:\n");
         
         String[] labels = {
-            "/about", "/help", "/rankplayers", "/compareplayers",
-            "/infoplayer", "/rankhalls", "/comparehalls", "/infohall",
-            "/infomatch", "/settings", "/exportplayers", "/exportdatabase"
+            "/about", "/help",
+            "/rankplayers", "/compareplayers",
+            "/infoplayer", "/rankhalls",
+            "/comparehalls", "/infohall",
+            "/infomatch", "/settings",
+            "/exportplayers", "/exportdatabase",
+            "🔙 Back", "❌ Cancel"
         };
         String[] callbacks = {
-            "help_cmd_about", "help_cmd_help", "help_cmd_rankplayers", "help_cmd_compareplayers",
-            "help_cmd_infoplayer", "help_cmd_rankhalls", "help_cmd_comparehalls", "help_cmd_infohall",
-            "help_cmd_infomatch", "help_cmd_settings", "help_cmd_exportplayers", "help_cmd_exportdatabase"
+            "help_cmd_about", "help_cmd_help",
+            "help_cmd_rankplayers", "help_cmd_compareplayers",
+            "help_cmd_infoplayer", "help_cmd_rankhalls",
+            "help_cmd_comparehalls", "help_cmd_infohall",
+            "help_cmd_infomatch", "help_cmd_settings",
+            "help_cmd_exportplayers", "help_cmd_exportdatabase",
+            "help_back", "help_cancel"
         };
         
         logHelper.logSuccess("Generated commands help menu with buttons");
-        return new CommandResponse(message.toString(), new ButtonConfig(labels, callbacks));
+        return new CommandResponse(message.toString(), new ButtonConfig(labels, callbacks, 2));
     }
     
     /**
@@ -124,15 +162,21 @@ public class CommandHelp {
                         "Select a file type to learn more about upload requirements:";
         
         String[] labels = {
-            "Round CSV", "Player Export", 
-            "Capped Players", "Cancel"
+            "Round CSV",
+            "Player Export", 
+            "Capped Players",
+            "🔙 Back",
+            "❌ Cancel"
         };
         String[] callbacks = {
-            "help_filetype_roundcsv", "help_filetype_playerexport",
-            "help_filetype_cappedplayers", "help_cancel"
+            "help_filetype_roundcsv",
+            "help_filetype_playerexport",
+            "help_filetype_cappedplayers",
+            "help_back",
+            "help_cancel"
         };
         
-        return new CommandResponse(message, new ButtonConfig(labels, callbacks));
+        return new CommandResponse(message, new ButtonConfig(labels, callbacks, 1));
     }
     
     /**
