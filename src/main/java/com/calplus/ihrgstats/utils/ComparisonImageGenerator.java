@@ -658,10 +658,24 @@ public class ComparisonImageGenerator {
         // Fixed width for round column to ensure vertical alignment
         int roundColWidth = fm.stringWidth("T16 ");
         
-        // Calculate score position (dead center)
-        int scoreWidth = fm.stringWidth(entry.score);
+        // Use fixed-width score column for alignment (max width for scores like "267.7-180.8")
+        // Split score at dash and center the dash character
+        int fixedScoreColWidth = fm.stringWidth("200.5-100.5");
         int centerX = x + width / 2;
-        int scoreX = centerX - scoreWidth / 2;
+        int scoreColStartX = centerX - fixedScoreColWidth / 2;
+        int scoreColEndX = scoreColStartX + fixedScoreColWidth;
+        
+        // Split score into left and right parts at the dash
+        String[] scoreParts = entry.score.split("-", 2);
+        String leftScore = scoreParts.length > 0 ? scoreParts[0] : "";
+        String rightScore = scoreParts.length > 1 ? scoreParts[1] : "";
+        int dashWidth = fm.stringWidth("-");
+        
+        // Calculate positions to center the dash
+        int dashX = centerX - dashWidth / 2;
+        int leftScoreWidth = fm.stringWidth(leftScore);
+        int leftScoreX = dashX - leftScoreWidth;
+        int rightScoreX = dashX + dashWidth;
         
         // Draw left flush: round, emoji, playerHall, playerElo
         int leftX = x + 5;
@@ -693,24 +707,26 @@ public class ComparisonImageGenerator {
         g2d.drawString(entry.oppElo, rightX, y);
         rightX -= 20;  // Increased from 8 to 20 for "a lot more spacing"
         
-        // Draw score at dead center
-        g2d.drawString(entry.score, scoreX, y);
+        // Draw score with centered dash
+        g2d.drawString(leftScore, leftScoreX, y);
+        g2d.drawString("-", dashX, y);
+        g2d.drawString(rightScore, rightScoreX, y);
         
-        // Calculate available space for names
-        int playerNameSpace = scoreX - 20 - leftX;  // Updated from 8 to 20
-        int oppNameSpace = rightX - (scoreX + scoreWidth + 20);  // Updated from 8 to 20
+        // Calculate available space for names relative to fixed score column
+        int playerNameSpace = scoreColStartX - 20 - leftX;  // Updated from 8 to 20
+        int oppNameSpace = rightX - (scoreColEndX + 20);  // Updated from 8 to 20
         
-        // Draw player name (right-justified before score)
+        // Draw player name (right-justified before score column)
         if (playerNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
             int nameWidth = fm.stringWidth(displayName);
-            g2d.drawString(displayName, scoreX - 20 - nameWidth, y);  // Updated from 8 to 20
+            g2d.drawString(displayName, scoreColStartX - 20 - nameWidth, y);  // Updated from 8 to 20
         }
         
-        // Draw opponent name (left-justified after score)
+        // Draw opponent name (left-justified after score column)
         if (oppNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.oppName, oppNameSpace, fm);
-            g2d.drawString(displayName, scoreX + scoreWidth + 20, y);  // Updated from 8 to 20
+            g2d.drawString(displayName, scoreColEndX + 20, y);  // Updated from 8 to 20
         }
     }
     

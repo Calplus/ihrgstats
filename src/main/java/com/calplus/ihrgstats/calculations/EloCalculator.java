@@ -12,16 +12,13 @@ public class EloCalculator {
     private static final double DEFAULT_RATING = 1000.0;
     private static final double DEFAULT_RD = 350.0; // High initial uncertainty for fast convergence
     private static final double DEFAULT_VOLATILITY = 0.06;
-    private static final double TAU = 0.8; // System constant - higher allows faster volatility changes
+    private static final double TAU = 1.2; // System constant - higher for faster convergence in short tournaments
     private static final double CONVERGENCE_TOLERANCE = 0.000001;
     
-    // PerfElo margin transform constants
-    // Calibrated for tournaments where players are not highly skilled
-    // 100+ point margins are considered dominant wins
-    private static final double MARGIN_SCALE = 100.0; // Scale factor: 100 points = 1.0 scale unit
-    private static final double MARGIN_STEEPNESS = 2.0; // Steepness of margin impact curve
-    private static final double MIN_OUTCOME = 0.02; // Minimum outcome (prevents 0 which causes Glicko-2 issues)
-    private static final double MAX_OUTCOME = 0.98; // Maximum outcome (prevents 1 which causes Glicko-2 issues)
+    // PerfElo margin transform constant (sigmoid parameter)
+    // K value controls sensitivity to point margins in Weiqi/Go
+    // Recommended range: 0.1 to 0.15
+    private static final double MARGIN_K = 0.12; // Middle value for balanced sensitivity
     
     // Glicko-2 scale conversion constant
     // Original Glicko-2 works on scale where 1 rating point ≈ 173.7178 in traditional scale
@@ -78,50 +75,28 @@ public class EloCalculator {
     }
     
     /**
-     * Converts point margin to continuous outcome score using modified sigmoid transform.
+     * Converts point margin to continuous outcome score using sigmoid transform.
      * 
-     * Formula: s = 0.5 + 0.48 * tanh((margin / MARGIN_SCALE) ^ MARGIN_STEEPNESS)
+     * Formula: s = 1 / (1 + exp(-K * m))
      * 
-     * This formula is calibrated for tournaments where:
-     * - Players are not highly skilled (high variance in performance)
-     * - 100+ point margins represent dominant wins
-     * - Smaller margins (0-50 points) should have meaningful but moderate impact
+     * Where:
+     * - m = point margin (your points - opponent points)
+     * - K = sensitivity parameter (0.12 for balanced response)
      * 
-     * Score mapping (approximate):
-     * - margin = 0:     s ≈ 0.50 (even game)
-     * - margin = 25:    s ≈ 0.65 (modest advantage)
-     * - margin = 50:    s ≈ 0.76 (clear advantage)
-     * - margin = 75:    s ≈ 0.85 (strong win)
-     * - margin = 100:   s ≈ 0.91 (dominant win)
-     * - margin = 150:   s ≈ 0.96 (crushing victory)
-     * - margin = 200+:  s ≈ 0.98 (maximum)
-     * 
-     * The formula uses:
-     * 1. Scaling by MARGIN_SCALE (100) to normalize point differences
-     * 2. Power transformation (^2) to emphasize larger margins
-     * 3. tanh to create smooth S-curve with natural bounds
-     * 4. Clamping to [MIN_OUTCOME, MAX_OUTCOME] to prevent numerical issues in Glicko-2
+     * Score mapping (approximate with K=0.12):
+     * - margin = 0:     s = 0.50 (even game)
+     * - margin = +10:   s ≈ 0.77 (modest advantage)
+     * - margin = +20:   s ≈ 0.92 (strong advantage)
+     * - margin = +30:   s ≈ 0.98 (dominant win)
+     * - margin = -10:   s ≈ 0.23 (modest loss)
+     * - margin = -20:   s ≈ 0.08 (strong loss)
+     * - margin = -30:   s ≈ 0.02 (dominant loss)
      * 
      * @param pointMargin Margin of victory (positive for win, negative for loss)
-     * @return Continuous outcome value between MIN_OUTCOME and MAX_OUTCOME
+     * @return Continuous outcome value between 0 and 1
      */
     public static double pointMarginToOutcome(double pointMargin) {
-        // Normalize by scale and apply power transform
-        double normalized = pointMargin / MARGIN_SCALE;
-        
-        // Apply sign-preserving power transform
-        // This makes larger margins have exponentially more impact
-        double powered = Math.signum(normalized) * Math.pow(Math.abs(normalized), MARGIN_STEEPNESS);
-        
-        // Apply tanh for smooth S-curve: tanh(x) ∈ (-1, 1)
-        double tanh = Math.tanh(powered);
-        
-        // Map from (-1, 1) to (0, 1) with base at 0.5
-        // Use 0.48 instead of 0.5 to stay within MIN/MAX bounds
-        double outcome = 0.5 + 0.48 * tanh;
-        
-        // Clamp to safe bounds to prevent Glicko-2 numerical issues
-        return Math.max(MIN_OUTCOME, Math.min(MAX_OUTCOME, outcome));
+        return 1.0 / (1.0 + Math.exp(-MARGIN_K * pointMargin));
     }
     
     /**
@@ -335,8 +310,8 @@ public class EloCalculator {
     private static boolean DEBUG_FIRST_UPDATE = true;
     
     /**
-     * Calculates TrueElo using Glicko-2 with binary win/loss outcomes
-     * Processes games sequentially by round
+     * Calculates TrueElo using Batch Glicko-2 with binary win/loss/draw outcomes
+     * Implements proper Batch Glicko-2 algorithm with 3 iterations per round
      * 
      * @param allGames List of all games across all rounds
      * @param playerNames Set of all player names
@@ -369,14 +344,13 @@ public class EloCalculator {
         for (String round : roundSequence) {
             List<Game> roundGames = gamesByRound.getOrDefault(round, new ArrayList<>());
             
-            System.out.println("DEBUG EloCalculator: Processing round " + round);
+            System.out.println("DEBUG EloCalculator: Processing round " + round + " with Batch Glicko-2");
             System.out.println("  - Games in this round: " + roundGames.size());
             
             // Build opponent data for each player in this round
             Map<String, List<OpponentData>> playerOpponents = new HashMap<>();
             
             for (Game game : roundGames) {
-                // Player 1's perspective
                 String player1Key = game.player1.toLowerCase();
                 String player2Key = game.player2.toLowerCase();
                 
@@ -384,89 +358,89 @@ public class EloCalculator {
                 if (opp2Rating != null) {
                     playerOpponents.computeIfAbsent(player1Key, k -> new ArrayList<>())
                         .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
-                } else {
-                    System.err.println("WARNING: Could not find rating for player2: " + game.player2 + " (key: " + player2Key + ")");
                 }
                 
-                // Player 2's perspective
                 Glicko2Rating opp1Rating = currentRatings.get(player1Key);
                 if (opp1Rating != null) {
                     playerOpponents.computeIfAbsent(player2Key, k -> new ArrayList<>())
                         .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
-                } else {
-                    System.err.println("WARNING: Could not find rating for player1: " + game.player1 + " (key: " + player1Key + ")");
                 }
             }
             
             System.out.println("  - Players with opponents: " + playerOpponents.size());
-            if (!playerOpponents.isEmpty()) {
-                String firstPlayer = playerOpponents.keySet().iterator().next();
-                System.out.println("  - Sample: " + firstPlayer + " has " + playerOpponents.get(firstPlayer).size() + " opponents");
-            }
             
-            // Update all player ratings for this round
-            Map<String, Glicko2Rating> newRatings = new HashMap<>();
-            int changedCount = 0;
-            int walkoverCount = 0;
-            for (String player : playerNames) {
-                String playerKey = player.toLowerCase();
-                Glicko2Rating currentRating = currentRatings.get(playerKey);
-                List<OpponentData> opponents = playerOpponents.getOrDefault(playerKey, new ArrayList<>());
+            // Perform 3 iterations of Batch Glicko-2 for this round
+            Map<String, Glicko2Rating> iterationRatings = new HashMap<>(currentRatings);
+            
+            for (int iteration = 1; iteration <= 3; iteration++) {
+                System.out.println("  - Iteration " + iteration + "/3");
                 
-                Glicko2Rating newRating;
-                if (opponents.isEmpty()) {
-                    // No opponents this round (walkover or bye) - preserve rating exactly
-                    newRating = new Glicko2Rating(currentRating.rating, currentRating.rd, currentRating.volatility);
-                    walkoverCount++;
-                    // DEBUG: Log walkover cases
-                    if (walkoverCount <= 3) {
-                        System.out.println("DEBUG WALKOVER: Round " + round + ", Player: " + playerKey);
-                        System.out.println("  Current rating: " + String.format("%.1f (RD: %.1f, Vol: %.6f)", 
-                            currentRating.rating, currentRating.rd, currentRating.volatility));
-                        System.out.println("  New rating (preserved): " + String.format("%.1f (RD: %.1f, Vol: %.6f)", 
-                            newRating.rating, newRating.rd, newRating.volatility));
+                // Reset RD to 350 before first iteration
+                if (iteration == 1) {
+                    Map<String, Glicko2Rating> resetRatings = new HashMap<>();
+                    for (Map.Entry<String, Glicko2Rating> entry : iterationRatings.entrySet()) {
+                        resetRatings.put(entry.getKey(), 
+                            new Glicko2Rating(entry.getValue().rating, DEFAULT_RD, entry.getValue().volatility));
                     }
-                } else {
-                    // Normal rating update with Glicko-2 algorithm
-                    newRating = updateGlicko2Rating(currentRating, opponents);
+                    iterationRatings = resetRatings;
                 }
-                newRatings.put(playerKey, newRating);
                 
-                if (Math.abs(newRating.rating - currentRating.rating) > 0.1) {
-                    changedCount++;
+                // Update opponent data with current iteration ratings
+                Map<String, List<OpponentData>> iterationOpponents = new HashMap<>();
+                for (Game game : roundGames) {
+                    String player1Key = game.player1.toLowerCase();
+                    String player2Key = game.player2.toLowerCase();
+                    
+                    Glicko2Rating opp2Rating = iterationRatings.get(player2Key);
+                    if (opp2Rating != null) {
+                        iterationOpponents.computeIfAbsent(player1Key, k -> new ArrayList<>())
+                            .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
+                    }
+                    
+                    Glicko2Rating opp1Rating = iterationRatings.get(player1Key);
+                    if (opp1Rating != null) {
+                        iterationOpponents.computeIfAbsent(player2Key, k -> new ArrayList<>())
+                            .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
+                    }
                 }
-            }
-            System.out.println("  - Players with no opponents (walkover/bye): " + walkoverCount);
-            
-            System.out.println("  - Players with rating changes: " + changedCount + " / " + playerNames.size());
-            if (changedCount > 0) {
-                // Show a sample
+                
+                // Update all player ratings for this iteration
+                Map<String, Glicko2Rating> newRatings = new HashMap<>();
                 for (String player : playerNames) {
                     String playerKey = player.toLowerCase();
-                    Glicko2Rating oldR = currentRatings.get(playerKey);
-                    Glicko2Rating newR = newRatings.get(playerKey);
-                    if (Math.abs(newR.rating - oldR.rating) > 0.1) {
-                        System.out.println("    Sample: " + playerKey + " : " + 
-                            String.format("%.1f -> %.1f (RD: %.1f -> %.1f)", 
-                                oldR.rating, newR.rating, oldR.rd, newR.rd));
-                        break;
+                    Glicko2Rating currentRating = iterationRatings.get(playerKey);
+                    List<OpponentData> opponents = iterationOpponents.getOrDefault(playerKey, new ArrayList<>());
+                    
+                    Glicko2Rating newRating;
+                    if (opponents.isEmpty()) {
+                        // No opponents - preserve rating exactly
+                        newRating = new Glicko2Rating(currentRating.rating, currentRating.rd, currentRating.volatility);
+                    } else {
+                        // Normal rating update with Batch Glicko-2
+                        newRating = updateGlicko2Rating(currentRating, opponents);
                     }
+                    newRatings.put(playerKey, newRating);
                 }
+                
+                iterationRatings = newRatings;
             }
             
-            // Store ratings for this round
-            result.ratingsByRound.put(round, new HashMap<>(newRatings));
+            System.out.println("  - Batch Glicko-2 complete for round " + round);
+            
+            // Store final ratings for this round
+            result.ratingsByRound.put(round, new HashMap<>(iterationRatings));
             
             // Update current ratings for next round
-            currentRatings = newRatings;
+            currentRatings = iterationRatings;
         }
         
         return result;
     }
     
     /**
-     * Calculates PerfElo using Glicko-2 with sigmoid-transformed point margins
+     * Calculates PerfElo using Batch Glicko-2 with sigmoid-transformed point margins
      * Uses continuous outcome values based on quality of win
+     * Implements same Batch Glicko-2 algorithm as TrueElo but with sigmoid outcomes
      * 
      * @param allGames List of all games with point margins
      * @param playerNames Set of all player names
@@ -487,7 +461,7 @@ public class EloCalculator {
             transformedGames.add(new Game(game.player1, game.player2, sigmoidOutcome, game.pointMargin, game.roundName));
         }
         
-        // Use same calculation as TrueElo but with transformed outcomes
+        // Use same Batch Glicko-2 calculation as TrueElo but with transformed outcomes
         return calculateGlicko2TrueElo(transformedGames, playerNames, initialRatings, roundSequence);
     }
     

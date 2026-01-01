@@ -1623,7 +1623,9 @@ public class TelegramListener {
             
             // Add parse_mode for markdown if message contains code blocks or formatting
             // Note: Markdown in button text itself is not supported, but message text can use it
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Don't use Markdown parse mode with underscores or other special chars that can break parsing
+            if ((message.contains("```") || message.contains("**") || message.contains("__")) 
+                && !message.contains("_") && !message.contains("[") && !message.contains("]")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             

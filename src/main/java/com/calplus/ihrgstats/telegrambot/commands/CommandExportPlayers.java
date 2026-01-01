@@ -166,11 +166,7 @@ public class CommandExportPlayers {
 
                 // Write data
                 for (PlayerExportData data : exportData) {
-                    // Add asterisk if this player's hall matches home hall
                     String lastHallValue = data.lastHall;
-                    if (!homeHall.isEmpty() && homeHall.equals(data.lastHall)) {
-                        lastHallValue = data.lastHall + "*";
-                    }
                     
                     writer.write(String.format("%s,%d,%s,%s,%s,%s,%s,%s,%s,%s\n",
                         escapeCsvField(data.name),

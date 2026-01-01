@@ -197,6 +197,21 @@ public class A1_PlayerStats {
     }
 
     /**
+     * Represents a hall mismatch for inactive (active == 0) players with resolution options
+     */
+    private static class InactiveHallMismatch {
+        PlayerStats csvPlayer;
+        PlayerStats dbPlayer;
+        String userChoice; // "keep_old", "update_same", "create_new"
+        
+        InactiveHallMismatch(PlayerStats csvPlayer, PlayerStats dbPlayer) {
+            this.csvPlayer = csvPlayer;
+            this.dbPlayer = dbPlayer;
+            this.userChoice = null; // Will be set after user confirms
+        }
+    }
+
+    /**
      * Main processing method for round_n.csv files
      * @param csvFilePath Path to the round CSV file
      * @param roundName Round identifier (e.g., "1", "t8")
@@ -709,17 +724,17 @@ public class A1_PlayerStats {
                         telegramLog.batchInfo(String.format("Updated player: %s (Hall: %s)", data.name, data.lastHall));
                         
                     } else {
-                        // Insert new player
+                        // Insert new player - hall MUST be recorded from playerExport
                         String insertSQL = "INSERT INTO A1_PlayerStats " +
-                            "(name, hall, capped, active, baseTrueElo, basePerfElo, " +
+                            "(name, capped, active, hall, baseTrueElo, basePerfElo, " +
                             "baseRdTrueElo, baseVolTrueElo, baseRdPerfElo, baseVolPerfElo, dateLogged) " +
                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                         
                         try (PreparedStatement insertStmt = conn.prepareStatement(insertSQL)) {
                             insertStmt.setString(1, data.name);
-                            insertStmt.setString(2, data.lastHall);
-                            insertStmt.setInt(3, data.capped ? 1 : 0);
-                            insertStmt.setInt(4, 0); // active = false (imported, not from round CSV)
+                            insertStmt.setInt(2, data.capped ? 1 : 0);
+                            insertStmt.setInt(3, 0); // active = false (imported, not from round CSV)
+                            insertStmt.setString(4, data.lastHall);
                             insertStmt.setInt(5, data.trueElo);
                             if (data.perfElo != null) {
                                 insertStmt.setInt(6, data.perfElo);
@@ -1396,33 +1411,57 @@ public class A1_PlayerStats {
 
     /**
      * Validates player name/hall matches between CSV and database
+     * NEW LOGIC:
+     * - active == 1: Match by name (including misspellings) AND hall
+     * - active == 0, hall matches: Continue as usual
+     * - active == 0, hall doesn't match: Ask user for confirmation with 3 options
      */
     private boolean validatePlayerMatches(Map<String, PlayerStats> csvPlayers, Map<String, PlayerStats> dbPlayers) {
-        // Store hall mismatches with their player references for interactive resolution
-        List<HallMismatch> hallMismatches = new ArrayList<>();
+        // Store different types of mismatches
+        List<HallMismatch> activeHallMismatches = new ArrayList<>(); // active == 1 with hall mismatch
+        List<InactiveHallMismatch> inactiveHallMismatches = new ArrayList<>(); // active == 0 with hall mismatch
         List<String> crossHallIssues = new ArrayList<>();
         List<NameMismatch> nameMismatches = new ArrayList<>();
 
-        // First pass: Check for exact key matches and hall mismatches
+        // First pass: Check for exact key matches, categorize by active status
         for (Map.Entry<String, PlayerStats> entry : csvPlayers.entrySet()) {
             String key = entry.getKey();
             PlayerStats csvPlayer = entry.getValue();
             PlayerStats dbPlayer = dbPlayers.get(key);
 
             if (dbPlayer != null) {
-                // Player exists in database - check hall match
-                if (!csvPlayer.hall.equalsIgnoreCase(dbPlayer.hall)) {
-                    hallMismatches.add(new HallMismatch(csvPlayer, dbPlayer));
+                // Player exists in database with exact name match - check hall match
+                if (dbPlayer.hall == null) {
+                    // PlayerExport import without hall set - set it from CSV
+                    dbPlayer.hall = csvPlayer.hall;
+                } else if (!csvPlayer.hall.equalsIgnoreCase(dbPlayer.hall)) {
+                    // Hall mismatch detected - categorize by active status
+                    if (dbPlayer.active) {
+                        // active == 1: This is an error (active players shouldn't change halls without confirmation)
+                        activeHallMismatches.add(new HallMismatch(csvPlayer, dbPlayer));
+                    } else {
+                        // active == 0: Requires user confirmation for hall update
+                        inactiveHallMismatches.add(new InactiveHallMismatch(csvPlayer, dbPlayer));
+                    }
                 }
             } else {
                 // Player not found with exact key - check if they exist in other halls
                 for (Map.Entry<String, PlayerStats> dbEntry : dbPlayers.entrySet()) {
                     PlayerStats otherDbPlayer = dbEntry.getValue();
-                    if (csvPlayer.name.equalsIgnoreCase(otherDbPlayer.name) && 
+                    if (otherDbPlayer.hall != null && 
+                        csvPlayer.name.equalsIgnoreCase(otherDbPlayer.name) && 
                         !csvPlayer.hall.equalsIgnoreCase(otherDbPlayer.hall)) {
-                        crossHallIssues.add(String.format(
-                            "⚠️ Player '%s' found in CSV hall '%s' but exists in database in hall '%s'. Is this an error or a different person?",
-                            csvPlayer.name, csvPlayer.hall, otherDbPlayer.hall));
+                        
+                        // Check active status
+                        if (otherDbPlayer.active) {
+                            // active == 1: Different hall means error or different person
+                            crossHallIssues.add(String.format(
+                                "⚠️ Player '%s' found in CSV hall '%s' but exists as ACTIVE in database in hall '%s'. Is this an error or a different person?",
+                                csvPlayer.name, csvPlayer.hall, otherDbPlayer.hall));
+                        } else {
+                            // active == 0: Potential hall change - add to inactive mismatches
+                            inactiveHallMismatches.add(new InactiveHallMismatch(csvPlayer, otherDbPlayer));
+                        }
                         break;
                     }
                 }
@@ -1436,7 +1475,7 @@ public class A1_PlayerStats {
             
             // Get all DB players from the same hall
             List<Map.Entry<String, PlayerStats>> sameHallDbPlayers = dbPlayers.entrySet().stream()
-                .filter(dbEntry -> dbEntry.getValue().hall.equalsIgnoreCase(csvPlayer.hall))
+                .filter(dbEntry -> dbEntry.getValue().hall != null && dbEntry.getValue().hall.equalsIgnoreCase(csvPlayer.hall))
                 .collect(Collectors.toList());
             
             for (Map.Entry<String, PlayerStats> dbEntry : sameHallDbPlayers) {
@@ -1458,14 +1497,39 @@ public class A1_PlayerStats {
             }
         }
 
-        // Handle cross-hall issues first (requires immediate confirmation)
+        // Handle active player hall mismatches (active == 1) - treat as errors
+        if (!activeHallMismatches.isEmpty()) {
+            StringBuilder message = new StringBuilder("🔴 Active Player Hall Mismatch Error\n\n");
+            message.append("The following ACTIVE players have hall mismatches:\n\n");
+            for (HallMismatch mismatch : activeHallMismatches) {
+                message.append(String.format("- %s: CSV hall '%s' != DB hall '%s'\n", 
+                    mismatch.csvPlayer.name, mismatch.csvPlayer.hall, mismatch.dbPlayer.hall));
+            }
+            message.append("\nActive players should not have hall changes. This is likely an error.");
+
+            discordLog.flushBatch();
+            telegramLog.flushBatch();
+
+            String errorMsg = "Processing stopped: Active players with hall mismatches detected.";
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", message.toString());
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
+            return false;
+        }
+
+        // Handle cross-hall issues for active players (requires immediate confirmation)
         if (!crossHallIssues.isEmpty()) {
-            StringBuilder message = new StringBuilder("⚠️ **Cross-Hall Player Detection**\n\n");
+            StringBuilder message = new StringBuilder("⚠️ Cross-Hall Active Player Detection\n\n");
             message.append("The following players exist in different halls:\n\n");
             for (String issue : crossHallIssues) {
                 message.append("- ").append(issue).append("\n");
             }
-            message.append("\n**Is this an error or are these different people?**");
+            message.append("\nIs this an error or are these different people?");
 
             String[] options = {
                 "It's an error - Stop processing",
@@ -1494,143 +1558,297 @@ public class A1_PlayerStats {
             telegramLog.logInfo("User confirmed cross-hall players are different people. Continuing...");
         }
 
-        // Handle hall mismatches with interactive resolution
-        if (!hallMismatches.isEmpty()) {
-            discordLog.flushBatch();
-            telegramLog.flushBatch();
-            
-            for (HallMismatch mismatch : hallMismatches) {
-                String message = String.format(
-                    "⚠️ **Hall Mismatch**\n\n" +
-                    "Player: **%s**\n" +
-                    "CSV Hall: **%s**\n" +
-                    "Database Hall: **%s**\n\n" +
-                    "**Which hall should be used in the database?**",
-                    mismatch.csvPlayer.name,
-                    mismatch.csvPlayer.hall,
-                    mismatch.dbPlayer.hall
-                );
-                
-                String[] options = {
-                    "Use CSV hall (" + mismatch.csvPlayer.hall + ")",
-                    "Use DB hall (" + mismatch.dbPlayer.hall + ")",
-                    "Cancel processing"
-                };
-                
-                int choice = requestMultiChoice(message, options);
-                
-                if (choice == 0) {
-                    // Use CSV hall - csvPlayer already has correct hall, just log
-                    discordLog.logInfo(String.format("Hall resolved: '%s' will use CSV hall '%s'", 
-                        mismatch.csvPlayer.name, mismatch.csvPlayer.hall));
-                    telegramLog.logInfo(String.format("Hall resolved: '%s' will use CSV hall '%s'", 
-                        mismatch.csvPlayer.name, mismatch.csvPlayer.hall));
-                } else if (choice == 1) {
-                    // Use DB hall - update csvPlayer to use DB hall
-                    String oldHall = mismatch.csvPlayer.hall;
-                    mismatch.csvPlayer.hall = mismatch.dbPlayer.hall;
-                    discordLog.logInfo(String.format("Hall resolved: '%s' changed from '%s' to '%s' (using DB hall)", 
-                        mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
-                    telegramLog.logInfo(String.format("Hall resolved: '%s' changed from '%s' to '%s' (using DB hall)", 
-                        mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
-                } else {
-                    // User cancelled
-                    String errorMsg = "Processing cancelled by user during hall mismatch resolution.";
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
-                    
-                    if (uploadChatCallback != null) {
-                        String formattedMsg = formatUploadMessage("🔴", "ERROR", errorMsg);
-                        uploadChatCallback.sendMessage(formattedMsg);
-                    }
-                    
-                    return false;
-                }
+        // Handle inactive player hall mismatches (active == 0) - interactive resolution with 3 options
+        if (!inactiveHallMismatches.isEmpty()) {
+            if (!handleInactiveHallMismatches(inactiveHallMismatches, csvPlayers, dbPlayers)) {
+                return false;
             }
         }
 
         // Handle name mismatches (both partial and spelling) with single dialog
         if (!nameMismatches.isEmpty()) {
-            StringBuilder message = new StringBuilder("⚠️ **Name Mismatch Detected**\n\n");
-            message.append("The following potential name mismatches were found:\n\n");
+            if (!handleNameMismatches(nameMismatches)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Handles inactive player hall mismatches with interactive resolution
+     * Offers 3 choices:
+     * 1. Keep old hall (DB) - same player
+     * 2. Use new hall (CSV) - same player who changed halls
+     * 3. Use new hall (CSV) - treat as different player
+     */
+    private boolean handleInactiveHallMismatches(List<InactiveHallMismatch> mismatches, 
+                                                 Map<String, PlayerStats> csvPlayers, 
+                                                 Map<String, PlayerStats> dbPlayers) {
+        // First: Ask if user wants to update individually or all at once
+        StringBuilder message = new StringBuilder("⚠️ Inactive Player Hall Mismatches Detected\n\n");
+        message.append("The following INACTIVE players (active == 0) have hall mismatches:\n\n");
+        for (InactiveHallMismatch mismatch : mismatches) {
+            message.append(String.format("- %s: CSV hall '%s' -> DB hall '%s'\n", 
+                mismatch.csvPlayer.name, mismatch.csvPlayer.hall, mismatch.dbPlayer.hall));
+        }
+        message.append(String.format("\nTotal: %d player(s)\n", mismatches.size()));
+        message.append("\nHow would you like to handle these mismatches?");
+
+        String[] bulkOptions = {
+            "Update individually (choose for each player)",
+            "Update all at once (same choice for all)",
+            "Cancel processing"
+        };
+
+        discordLog.flushBatch();
+        telegramLog.flushBatch();
+
+        int bulkChoice = requestMultiChoice(message.toString(), bulkOptions);
+        
+        if (bulkChoice == 2) {
+            // Cancel
+            String cancelMsg = "Processing cancelled by user during inactive hall mismatch resolution.";
+            discordLog.logError(cancelMsg);
+            telegramLog.logError(cancelMsg);
             
-            for (NameMismatch mismatch : nameMismatches) {
-                message.append("- ").append(mismatch.description).append("\n");
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🔴", "ERROR", cancelMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
             }
             
-            message.append("\n**Please choose how to handle these mismatches:**");
-            
-            String[] options = {
-                "Treat as same person (use DB name)",
-                "Treat as different people",
+            return false;
+        }
+
+        if (bulkChoice == 1) {
+            // Update all at once - ask for single resolution strategy
+            String bulkMessage = String.format(
+                "⚠️ Bulk Hall Mismatch Resolution\n\n" +
+                "Applying resolution to %d player(s)\n\n" +
+                "Choose resolution strategy:",
+                mismatches.size()
+            );
+
+            String[] resolutionOptions = {
+                "Keep old hall (DB) - same player, don't update hall",
+                "Use new hall (CSV) - same player who changed halls",
+                "Use new hall (CSV) - treat as different player",
                 "Cancel processing"
             };
 
-            discordLog.flushBatch();
-            telegramLog.flushBatch();
-
-            int choice = requestMultiChoice(message.toString(), options);
+            int resolutionChoice = requestMultiChoice(bulkMessage, resolutionOptions);
             
-            if (choice == 0) {
-                // Treat as same person - map CSV players to DB players
-                discordLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
-                telegramLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
-                
-                for (NameMismatch mismatch : nameMismatches) {
-                    // Mark CSV player as existing in DB and link to DB player
-                    mismatch.csvPlayer.existsInDb = true;
-                    mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
-                    
-                    // CRITICAL FIX: Update CSV player name to match DB name
-                    // This ensures data is saved under the correct database name
-                    String oldCsvName = mismatch.csvPlayer.name;
-                    mismatch.csvPlayer.name = mismatch.dbPlayer.name;
-                    
-                    // Copy base ELO values from DB player
-                    mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
-                    mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
-                    mismatch.csvPlayer.baseRdTrueElo = mismatch.dbPlayer.baseRdTrueElo;
-                    mismatch.csvPlayer.baseVolTrueElo = mismatch.dbPlayer.baseVolTrueElo;
-                    mismatch.csvPlayer.baseRdPerfElo = mismatch.dbPlayer.baseRdPerfElo;
-                    mismatch.csvPlayer.baseVolPerfElo = mismatch.dbPlayer.baseVolPerfElo;
-                    
-                    // Copy all historical round data from DB player
-                    mismatch.csvPlayer.trueEloByRound.putAll(mismatch.dbPlayer.trueEloByRound);
-                    mismatch.csvPlayer.perfEloByRound.putAll(mismatch.dbPlayer.perfEloByRound);
-                    mismatch.csvPlayer.rdTrueEloByRound.putAll(mismatch.dbPlayer.rdTrueEloByRound);
-                    mismatch.csvPlayer.volTrueEloByRound.putAll(mismatch.dbPlayer.volTrueEloByRound);
-                    mismatch.csvPlayer.rdPerfEloByRound.putAll(mismatch.dbPlayer.rdPerfEloByRound);
-                    mismatch.csvPlayer.volPerfEloByRound.putAll(mismatch.dbPlayer.volPerfEloByRound);
-                    mismatch.csvPlayer.seatByRound.putAll(mismatch.dbPlayer.seatByRound);
-                    mismatch.csvPlayer.oppHallByRound.putAll(mismatch.dbPlayer.oppHallByRound);
-                    mismatch.csvPlayer.oppNameByRound.putAll(mismatch.dbPlayer.oppNameByRound);
-                    mismatch.csvPlayer.oppTrueEloByRound.putAll(mismatch.dbPlayer.oppTrueEloByRound);
-                    mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
-                    
-                    discordLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
-                        oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
-                    telegramLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
-                        oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
-                }
-                
-            } else if (choice == 1) {
-                // Treat as different people - continue as-is
-                discordLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
-                telegramLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
-                
-            } else {
-                // Cancel processing
-                String cancelMsg = "Processing cancelled by user due to name mismatches.";
-                discordLog.logWarning(cancelMsg);
-                telegramLog.logWarning(cancelMsg);
+            if (resolutionChoice == 3) {
+                // Cancel
+                String cancelMsg = "Processing cancelled by user during bulk resolution.";
+                discordLog.logError(cancelMsg);
+                telegramLog.logError(cancelMsg);
                 
                 if (uploadChatCallback != null) {
-                    String formattedMsg = formatUploadMessage("🟡", "WARNING", cancelMsg);
+                    String formattedMsg = formatUploadMessage("🔴", "ERROR", cancelMsg);
                     uploadChatCallback.sendMessage(formattedMsg);
                 }
                 
                 return false;
             }
+
+            // Apply same choice to all mismatches
+            for (InactiveHallMismatch mismatch : mismatches) {
+                if (resolutionChoice == 0) {
+                    mismatch.userChoice = "keep_old";
+                } else if (resolutionChoice == 1) {
+                    mismatch.userChoice = "update_same";
+                } else if (resolutionChoice == 2) {
+                    mismatch.userChoice = "create_new";
+                }
+            }
+
+        } else {
+            // Update individually - ask for each player
+            for (InactiveHallMismatch mismatch : mismatches) {
+                String individualMessage = String.format(
+                    "⚠️ Hall Mismatch Resolution\n\n" +
+                    "Player: %s\n" +
+                    "CSV Hall: %s\n" +
+                    "Database Hall: %s\n" +
+                    "Active Status: INACTIVE (0)\n\n" +
+                    "Choose resolution:",
+                    mismatch.csvPlayer.name,
+                    mismatch.csvPlayer.hall,
+                    mismatch.dbPlayer.hall
+                );
+
+                String[] individualOptions = {
+                    "Keep old hall (" + mismatch.dbPlayer.hall + ") - same player",
+                    "Use new hall (" + mismatch.csvPlayer.hall + ") - same player who changed",
+                    "Use new hall (" + mismatch.csvPlayer.hall + ") - different player",
+                    "Cancel processing"
+                };
+
+                int individualChoice = requestMultiChoice(individualMessage, individualOptions);
+                
+                if (individualChoice == 3) {
+                    // Cancel
+                    String cancelMsg = "Processing cancelled by user during individual resolution.";
+                    discordLog.logError(cancelMsg);
+                    telegramLog.logError(cancelMsg);
+                    
+                    if (uploadChatCallback != null) {
+                        String formattedMsg = formatUploadMessage("🔴", "ERROR", cancelMsg);
+                        uploadChatCallback.sendMessage(formattedMsg);
+                    }
+                    
+                    return false;
+                }
+
+                if (individualChoice == 0) {
+                    mismatch.userChoice = "keep_old";
+                } else if (individualChoice == 1) {
+                    mismatch.userChoice = "update_same";
+                } else if (individualChoice == 2) {
+                    mismatch.userChoice = "create_new";
+                }
+            }
+        }
+
+        // Apply the user's choices
+        for (InactiveHallMismatch mismatch : mismatches) {
+            applyInactiveHallMismatchResolution(mismatch, csvPlayers, dbPlayers);
+        }
+
+        return true;
+    }
+
+    /**
+     * Applies the user's resolution choice for an inactive hall mismatch
+     */
+    private void applyInactiveHallMismatchResolution(InactiveHallMismatch mismatch, 
+                                                     Map<String, PlayerStats> csvPlayers, 
+                                                     Map<String, PlayerStats> dbPlayers) {
+        if ("keep_old".equals(mismatch.userChoice)) {
+            // Keep old hall (DB) - update CSV player to use DB hall
+            String oldHall = mismatch.csvPlayer.hall;
+            mismatch.csvPlayer.hall = mismatch.dbPlayer.hall;
+            
+            // Link CSV player to DB player
+            mismatch.csvPlayer.existsInDb = true;
+            mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
+            
+            discordLog.logInfo(String.format("Hall resolved (keep old): '%s' changed from '%s' to '%s' (using DB hall)", 
+                mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+            telegramLog.logInfo(String.format("Hall resolved (keep old): '%s' changed from '%s' to '%s' (using DB hall)", 
+                mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+                
+        } else if ("update_same".equals(mismatch.userChoice)) {
+            // Use new hall (CSV) - same player who changed halls
+            // Update DB player's hall to match CSV
+            String oldHall = mismatch.dbPlayer.hall;
+            mismatch.dbPlayer.hall = mismatch.csvPlayer.hall;
+            
+            // Link CSV player to DB player
+            mismatch.csvPlayer.existsInDb = true;
+            mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
+            
+            discordLog.logInfo(String.format("Hall resolved (update same): '%s' hall updated from '%s' to '%s' in database", 
+                mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+            telegramLog.logInfo(String.format("Hall resolved (update same): '%s' hall updated from '%s' to '%s' in database", 
+                mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
+                
+        } else if ("create_new".equals(mismatch.userChoice)) {
+            // Use new hall (CSV) - treat as different player
+            // CSV player will be inserted as new entry (don't link to DB player)
+            mismatch.csvPlayer.existsInDb = false;
+            mismatch.csvPlayer.dbId = -1;
+            
+            discordLog.logInfo(String.format("Hall resolved (create new): '%s' in hall '%s' will be treated as new player (separate from DB hall '%s')", 
+                mismatch.csvPlayer.name, mismatch.csvPlayer.hall, mismatch.dbPlayer.hall));
+            telegramLog.logInfo(String.format("Hall resolved (create new): '%s' in hall '%s' will be treated as new player (separate from DB hall '%s')", 
+                mismatch.csvPlayer.name, mismatch.csvPlayer.hall, mismatch.dbPlayer.hall));
+        }
+    }
+
+    /**
+     * Handles name mismatches with interactive resolution
+     */
+    private boolean handleNameMismatches(List<NameMismatch> nameMismatches) {
+        StringBuilder message = new StringBuilder("⚠️ Name Mismatch Detected\n\n");
+        message.append("The following potential name mismatches were found:\n\n");
+        
+        for (NameMismatch mismatch : nameMismatches) {
+            message.append("- ").append(mismatch.description).append("\n");
+        }
+        
+        message.append("\nPlease choose how to handle these mismatches:");
+        
+        String[] options = {
+            "Treat as same person (use DB name)",
+            "Treat as different people",
+            "Cancel processing"
+        };
+
+        discordLog.flushBatch();
+        telegramLog.flushBatch();
+
+        int choice = requestMultiChoice(message.toString(), options);
+        
+        if (choice == 0) {
+            // Treat as same person - map CSV players to DB players
+            discordLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
+            telegramLog.logInfo("User chose to treat mismatched names as same person. Mapping to database names...");
+            
+            for (NameMismatch mismatch : nameMismatches) {
+                // Mark CSV player as existing in DB and link to DB player
+                mismatch.csvPlayer.existsInDb = true;
+                mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
+                
+                // Update CSV player name to match DB name
+                String oldCsvName = mismatch.csvPlayer.name;
+                mismatch.csvPlayer.name = mismatch.dbPlayer.name;
+                
+                // Copy base ELO values from DB player
+                mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
+                mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
+                mismatch.csvPlayer.baseRdTrueElo = mismatch.dbPlayer.baseRdTrueElo;
+                mismatch.csvPlayer.baseVolTrueElo = mismatch.dbPlayer.baseVolTrueElo;
+                mismatch.csvPlayer.baseRdPerfElo = mismatch.dbPlayer.baseRdPerfElo;
+                mismatch.csvPlayer.baseVolPerfElo = mismatch.dbPlayer.baseVolPerfElo;
+                
+                // Copy all historical round data from DB player
+                mismatch.csvPlayer.trueEloByRound.putAll(mismatch.dbPlayer.trueEloByRound);
+                mismatch.csvPlayer.perfEloByRound.putAll(mismatch.dbPlayer.perfEloByRound);
+                mismatch.csvPlayer.rdTrueEloByRound.putAll(mismatch.dbPlayer.rdTrueEloByRound);
+                mismatch.csvPlayer.volTrueEloByRound.putAll(mismatch.dbPlayer.volTrueEloByRound);
+                mismatch.csvPlayer.rdPerfEloByRound.putAll(mismatch.dbPlayer.rdPerfEloByRound);
+                mismatch.csvPlayer.volPerfEloByRound.putAll(mismatch.dbPlayer.volPerfEloByRound);
+                mismatch.csvPlayer.seatByRound.putAll(mismatch.dbPlayer.seatByRound);
+                mismatch.csvPlayer.oppHallByRound.putAll(mismatch.dbPlayer.oppHallByRound);
+                mismatch.csvPlayer.oppNameByRound.putAll(mismatch.dbPlayer.oppNameByRound);
+                mismatch.csvPlayer.oppTrueEloByRound.putAll(mismatch.dbPlayer.oppTrueEloByRound);
+                mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
+                
+                discordLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
+                    oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+                telegramLog.logInfo(String.format("Mapped '%s' (CSV) to '%s' (DB) in hall '%s'", 
+                    oldCsvName, mismatch.dbPlayer.name, mismatch.csvPlayer.hall));
+            }
+            
+        } else if (choice == 1) {
+            // Treat as different people - continue as-is
+            discordLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
+            telegramLog.logInfo("User chose to treat mismatched names as different people. Continuing...");
+            
+        } else {
+            // Cancel processing
+            String cancelMsg = "Processing cancelled by user due to name mismatches.";
+            discordLog.logWarning(cancelMsg);
+            telegramLog.logWarning(cancelMsg);
+            
+            if (uploadChatCallback != null) {
+                String formattedMsg = formatUploadMessage("🟡", "WARNING", cancelMsg);
+                uploadChatCallback.sendMessage(formattedMsg);
+            }
+            
+            return false;
         }
 
         return true;
@@ -2281,10 +2499,10 @@ public class A1_PlayerStats {
             
             GameEntry game = new GameEntry(
                 player.name,
-                player.hall,
+                player.hall != null ? player.hall : "unknown",
                 winby1,
                 opponent.name,
-                opponent.oppHallByRound.get(roundName) != null ? opponent.oppHallByRound.get(roundName) : opponent.hall,
+                opponent.oppHallByRound.get(roundName) != null ? opponent.oppHallByRound.get(roundName) : (opponent.hall != null ? opponent.hall : "unknown"),
                 winby2
             );
             
@@ -2300,6 +2518,7 @@ public class A1_PlayerStats {
     private void handleMissingPlayers(Map<String, PlayerStats> csvPlayers, Map<String, PlayerStats> dbPlayers, String roundName) {
         // Get halls that played this round
         Set<String> playingHalls = csvPlayers.values().stream()
+            .filter(p -> p.hall != null)
             .map(p -> p.hall.toLowerCase())
             .collect(Collectors.toSet());
 
@@ -2311,6 +2530,11 @@ public class A1_PlayerStats {
 
             // Skip if player is in CSV
             if (csvPlayers.containsKey(playerKey)) {
+                continue;
+            }
+
+            // Skip if player has no hall (from playerExport import)
+            if (dbPlayer.hall == null) {
                 continue;
             }
 
