@@ -407,6 +407,9 @@ public class CommandInfoMatch {
      * Generates text output for match info
      */
     private String generateTextOutput(List<MatchupData> matchups, List<HallScoreData> scores, String round) {
+        // Get home hall for asterisk marking
+        String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
+        
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("**⚔️ Match Information - %s**\n\n", VictoryRecordCalculator.getRoundDisplayName(round)));
         
@@ -415,30 +418,37 @@ public class CommandInfoMatch {
         if (matchups.isEmpty()) {
             sb.append("No matches found for this round\n");
         } else {
-            // Format: emoji Hall1 (ELO) score Hall2 (ELO) emoji
+            // Format: emoji ELO Hall1 score Hall2 ELO emoji (monospaced)
             for (MatchupData m : matchups) {
                 String emoji1 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome);
                 Integer oppOutcome = m.outcome == 0 ? 0 : -m.outcome;
                 String emoji2 = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
                 
-                String elo1 = m.hall1Elo != null ? String.format("(%.0f)", m.hall1Elo) : "";
-                String elo2 = m.hall2Elo != null ? String.format("(%.0f)", m.hall2Elo) : "";
+                // For WALKOVER opponents, show "-" instead of "?"
+                String elo1 = m.hall1Elo != null ? String.format("%.0f", m.hall1Elo) : ("WALKOVER".equalsIgnoreCase(m.hall1) ? "-" : "?");
+                String elo2 = m.hall2Elo != null ? String.format("%.0f", m.hall2Elo) : ("WALKOVER".equalsIgnoreCase(m.hall2) ? "-" : "?");
                 
-                String hall1 = "Hall " + m.hall1;
-                String hall2 = "Hall " + m.hall2;
+                // Remove "Hall" prefix - just show number/name
+                String hall1Display = "WALKOVER".equalsIgnoreCase(m.hall1) ? "WALKOVER" : m.hall1;
+                String hall2Display = "WALKOVER".equalsIgnoreCase(m.hall2) ? "WALKOVER" : m.hall2;
                 
-                // Format score
-                String score = String.format("%.0f-%.0f", m.hall1Score, m.hall2Score);
+                // Format score - show as int if not 0.5 increments
+                String scoreStr;
+                if (m.hall1Score == Math.floor(m.hall1Score) && m.hall2Score == Math.floor(m.hall2Score)) {
+                    scoreStr = String.format("%.0f-%.0f", m.hall1Score, m.hall2Score);
+                } else {
+                    scoreStr = String.format("%.1f-%.1f", m.hall1Score, m.hall2Score);
+                }
                 
-                // Build line with ELO in brackets (following victory record format)
-                String line = String.format("%s %s %s %s %s %s %s",
-                    emoji1,
-                    hall1,
-                    elo1,
-                    score,
-                    hall2,
-                    elo2,
-                    emoji2);
+                // Build line with monospaced format matching image generation
+                String line = String.format("%s %-4s %-15s %s %-15s %-4s %s",
+                    emoji1, elo1, hall1Display, scoreStr, hall2Display, elo2, emoji2);
+                
+                // Add asterisk if line contains home hall
+                if (!homeHall.isEmpty() && (m.hall1.equals(homeHall) || m.hall2.equals(homeHall))) {
+                    line += "*";
+                }
+                
                 sb.append(line).append("\n");
             }
         }
@@ -462,28 +472,35 @@ public class CommandInfoMatch {
      * Generates match information image using InfoImageGenerator
      */
     private Path generateImage(List<MatchupData> matchups, List<HallScoreData> scores, String round) throws Exception {
+        // Get home hall for highlighting
+        String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
+        
         // Prepare metadata
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Match Information";
-        metadata.subtitle = "Round " + VictoryRecordCalculator.getRoundDisplayName(round);
+        metadata.description = "Match results for the round";
+        metadata.lastRound = VictoryRecordCalculator.getRoundDisplayName(round);
         
         // Prepare sections
         List<InfoImageGenerator.Section> sections = new ArrayList<>();
         
-        // Section 1: Match Info (following victory record format without round column)
+        // Section 1: Match Info (use VictoryEntry for sophisticated layout)
         InfoImageGenerator.Section matchInfoSection = new InfoImageGenerator.Section("Match Info");
         
         for (MatchupData m : matchups) {
             String emoji1 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome);
             String emoji2 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome == 0 ? 0 : -m.outcome);
             
-            String elo1 = m.hall1Elo != null ? String.format("(%.0f)", m.hall1Elo) : "";
-            String elo2 = m.hall2Elo != null ? String.format("(%.0f)", m.hall2Elo) : "";
+            // For WALKOVER opponents, show "-" instead of "?"
+            String elo1 = m.hall1Elo != null ? String.format("%.0f", m.hall1Elo) : ("WALKOVER".equalsIgnoreCase(m.hall1) ? "-" : "?");
+            String elo2 = m.hall2Elo != null ? String.format("%.0f", m.hall2Elo) : ("WALKOVER".equalsIgnoreCase(m.hall2) ? "-" : "?");
             
-            // Remove "Hall" prefix - just show number/name
-            // Handle WALKOVER case
-            String hall1Display = "WALKOVER".equalsIgnoreCase(m.hall1) ? "WALKOVER" : m.hall1;
-            String hall2Display = "WALKOVER".equalsIgnoreCase(m.hall2) ? "WALKOVER" : m.hall2;
+            // Format hall names according to requirements:
+            // - "n hall" for non-numbered halls (e.g., "RC hall")
+            // - "Hall n" for numbered halls (e.g., "Hall 4")
+            // - Just "WALKOVER" for walkovers
+            String hall1Display = formatHallNameForMatch(m.hall1);
+            String hall2Display = formatHallNameForMatch(m.hall2);
             
             // Format score - show as int if not 0.5 increments
             String scoreStr;
@@ -493,12 +510,26 @@ public class CommandInfoMatch {
                 scoreStr = String.format("%.1f-%.1f", m.hall1Score, m.hall2Score);
             }
             
-            // Build line: emoji ELO Hall1 score Hall2 (ELO) emoji
-            // Note: For left hall (hall1), ELO comes before hall name
-            String matchLine = String.format("%s %s %s %s %s %s %s",
-                emoji1, elo1, hall1Display, scoreStr, hall2Display, elo2, emoji2);
+            // Create VictoryEntry for sophisticated layout:
+            // Left: hall1 emote+elo, Right: hall2 elo+emote (flush right)
+            // Center: score, hall names adjacent to score
+            InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
+            entry.round = "";  // No round column for match info
+            entry.hallEmoji = emoji1;
+            entry.playerElo = elo1;
+            entry.playerName = hall1Display;  // Hall name left of score
+            entry.playerHall = "";  // No hall abbreviation needed
+            entry.score = scoreStr;
+            entry.opponentName = hall2Display;  // Hall name right of score
+            entry.opponentElo = elo2;
+            entry.opponentHall = "";  // No hall abbreviation needed
+            entry.oppEmoji = emoji2;
             
-            matchInfoSection.addRow("", matchLine);
+            // Set highlighting for home hall
+            entry.highlightPlayer = !homeHall.isEmpty() && m.hall1.equals(homeHall);
+            entry.highlightOpponent = !homeHall.isEmpty() && m.hall2.equals(homeHall);
+            
+            matchInfoSection.addVictoryEntry(entry);
         }
         sections.add(matchInfoSection);
         
@@ -507,18 +538,39 @@ public class CommandInfoMatch {
             String.format("Cumulative Scores (up to %s)", VictoryRecordCalculator.getRoundDisplayName(round))
         );
         
-        // Header row
-        scoresSection.addRow("Rank | Hall", "Match Wins | Board Wins");
+        // Header row with monospaced format
+        scoresSection.addMonospacedRow(String.format("%-4s %-20s %-10s %-10s", "Rank", "Hall", "MatchWins", "BoardWins"));
         
-        // Score rows
+        // Score rows with monospaced format and highlighting for home hall
         for (HallScoreData s : scores) {
-            String leftCol = String.format("%d | %s", s.rank, s.hall);
-            String rightCol = String.format("%.1f | %.1f", s.matchWins, s.boardWins);
-            scoresSection.addRow(leftCol, rightCol);
+            boolean isHomeHall = !homeHall.isEmpty() && s.hall.equals(homeHall);
+            scoresSection.addMonospacedRow(String.format("%-4d %-20s %-10.1f %-10.1f", 
+                s.rank, s.hall, s.matchWins, s.boardWins), isHomeHall);
         }
         sections.add(scoresSection);
         
         // Generate image (no hall identifier needed for match info)
         return InfoImageGenerator.generateInfoImage(metadata, sections, null);
+    }
+    
+    /**
+     * Formats hall name for Match Info display according to requirements:
+     * - "n hall" for non-numbered halls (e.g., "RC hall")
+     * - "Hall n" for numbered halls (e.g., "hall 4")
+     * - Just "WALKOVER" for walkovers (not "WALKOVER Hall")
+     */
+    private String formatHallNameForMatch(String hallName) {
+        if ("WALKOVER".equalsIgnoreCase(hallName)) {
+            return "WALKOVER";
+        }
+        
+        try {
+            // If it's a number, format as "Hall n"
+            int num = Integer.parseInt(hallName);
+            return "Hall " + num;
+        } catch (NumberFormatException e) {
+            // If it's not a number, format as "n hall"
+            return hallName + " Hall";
+        }
     }
 }

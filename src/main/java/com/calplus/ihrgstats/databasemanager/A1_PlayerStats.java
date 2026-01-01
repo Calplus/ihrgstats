@@ -157,6 +157,7 @@ public class A1_PlayerStats {
         Map<String, Integer> oppTrueEloByRound = new HashMap<>();
         Map<String, Integer> oppPerfEloByRound = new HashMap<>();
         Map<String, Integer> outcomeByRound = new HashMap<>(); // 1=win, 0=draw, -1=loss
+        Map<String, Double> scoreByRound = new HashMap<>(); // Player's board win score for the match
         boolean existsInDb = false;
         int dbId = -1;
     }
@@ -1768,6 +1769,76 @@ public class A1_PlayerStats {
     }
 
     /**
+     * Calculates the board win score for a player based on winby values and maxSeeds
+     * Formula:
+     * - If player wins by X: player gets (maxSeeds/2) + X, opponent gets (maxSeeds/2) - X
+     * - If draw: both get maxSeeds/2
+     * - If WALKOVER: player gets ceil(maxSeeds/2) or (maxSeeds/2)+1 if already int, opponent gets 0
+     * - If no play: returns null
+     * 
+     * @param playerWinby Player's winby value (can be empty, "draw", or a number)
+     * @param opponentWinby Opponent's winby value
+     * @param opponentIsWalkover True if opponent is a WALKOVER
+     * @return Player's board win score, or null if no play occurred
+     */
+    private Double calculateScore(String playerWinby, String opponentWinby, boolean opponentIsWalkover) {
+        double maxSeeds;
+        try {
+            String maxSeedsStr = PropertyResolver.getProperty("settings.maxSeeds", "368.5");
+            maxSeeds = Double.parseDouble(maxSeedsStr);
+        } catch (NumberFormatException e) {
+            maxSeeds = 368.5; // Default fallback
+        }
+        
+        double halfSeeds = maxSeeds / 2.0;
+        
+        // WALKOVER opponent: player gets ceil(halfSeeds) or halfSeeds+1 if already int
+        if (opponentIsWalkover) {
+            if (halfSeeds == Math.floor(halfSeeds)) {
+                // halfSeeds is already an integer, add 1
+                return halfSeeds + 1;
+            } else {
+                // halfSeeds has decimal, use ceiling
+                return Math.ceil(halfSeeds);
+            }
+        }
+        
+        // Draw: both players get halfSeeds
+        if (playerWinby.equalsIgnoreCase("draw") && opponentWinby.equalsIgnoreCase("draw")) {
+            return halfSeeds;
+        }
+        
+        // No play: both winby are empty or don't meet win/loss criteria
+        if (playerWinby.isEmpty() && opponentWinby.isEmpty()) {
+            return null;
+        }
+        
+        // Player won by X: score = (maxSeeds + X) / 2
+        if (!playerWinby.isEmpty() && !playerWinby.equalsIgnoreCase("draw")) {
+            try {
+                double winby = Double.parseDouble(playerWinby);
+                return (maxSeeds + winby) / 2.0;
+            } catch (NumberFormatException e) {
+                // Invalid winby format, treat as null
+                return null;
+            }
+        }
+        
+        // Player lost (opponent won by Y): score = (maxSeeds - Y) / 2
+        if (!opponentWinby.isEmpty() && !opponentWinby.equalsIgnoreCase("draw")) {
+            try {
+                double oppWinby = Double.parseDouble(opponentWinby);
+                return (maxSeeds - oppWinby) / 2.0;
+            } catch (NumberFormatException e) {
+                // Invalid winby format, treat as null
+                return null;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
      * Calculates seating arrangements for players and records opponent information
      */
     private void calculateSeating(List<GameEntry> games, Map<String, PlayerStats> csvPlayers, String roundName) {
@@ -1797,6 +1868,12 @@ public class A1_PlayerStats {
                     boolean player2IsWalkover = game.name2.equalsIgnoreCase("WALKOVER");
                     int outcome1 = calculateMatchOutcome(game.winby1, game.winby2, player2IsWalkover);
                     player1.outcomeByRound.put(roundName, outcome1);
+                    
+                    // Calculate and store score for player 1
+                    Double score1 = calculateScore(game.winby1, game.winby2, player2IsWalkover);
+                    if (score1 != null) {
+                        player1.scoreByRound.put(roundName, score1);
+                    }
                 }
             }
 
@@ -1823,6 +1900,12 @@ public class A1_PlayerStats {
                     boolean player1IsWalkover = game.name1.equalsIgnoreCase("WALKOVER");
                     int outcome2 = calculateMatchOutcome(game.winby2, game.winby1, player1IsWalkover);
                     player2.outcomeByRound.put(roundName, outcome2);
+                    
+                    // Calculate and store score for player 2
+                    Double score2 = calculateScore(game.winby2, game.winby1, player1IsWalkover);
+                    if (score2 != null) {
+                        player2.scoreByRound.put(roundName, score2);
+                    }
                 }
             }
         }
@@ -2406,6 +2489,7 @@ public class A1_PlayerStats {
             String oppNameCol = getRoundColumnName("oppName", round);
             String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
             String oppPerfEloCol = getRoundColumnName("oppPerfElo", round);
+            String scoreCol = getRoundColumnName("score", round);
 
             Integer trueElo = player.trueEloByRound.get(round);
             Integer perfElo = player.perfEloByRound.get(round);
@@ -2419,6 +2503,7 @@ public class A1_PlayerStats {
             String oppName = player.oppNameByRound.get(round);
             Integer oppTrueElo = player.oppTrueEloByRound.get(round);
             Integer oppPerfElo = player.oppPerfEloByRound.get(round);
+            Double score = player.scoreByRound.get(round);
 
             sql.append(trueEloCol).append(" = ?, ");
             params.add(trueElo);
@@ -2455,6 +2540,9 @@ public class A1_PlayerStats {
 
             sql.append(oppPerfEloCol).append(" = ?, ");
             params.add(oppPerfElo);
+
+            sql.append(scoreCol).append(" = ?, ");
+            params.add(score);
         }
 
         // Remove trailing comma
@@ -2508,6 +2596,7 @@ public class A1_PlayerStats {
             String oppNameCol = getRoundColumnName("oppName", round);
             String oppTrueEloCol = getRoundColumnName("oppTrueElo", round);
             String oppPerfEloCol = getRoundColumnName("oppPerfElo", round);
+            String scoreCol = getRoundColumnName("score", round);
 
             sql.append(", ").append(trueEloCol);
             sql.append(", ").append(perfEloCol);
@@ -2521,8 +2610,9 @@ public class A1_PlayerStats {
             sql.append(", ").append(oppNameCol);
             sql.append(", ").append(oppTrueEloCol);
             sql.append(", ").append(oppPerfEloCol);
+            sql.append(", ").append(scoreCol);
             
-            values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
+            values.append(", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
             // Fill previous rounds with base ELO, current round with calculated, future rounds with null
             int currentIdx = Constants.ROUND_SEQUENCE.indexOf(currentRound);
@@ -2542,6 +2632,7 @@ public class A1_PlayerStats {
                 params.add(null); // oppName
                 params.add(null); // oppTrueElo
                 params.add(null); // oppPerfElo
+                params.add(null); // score
             } else if (roundIdx == currentIdx) {
                 // Current round - use calculated values
                 params.add(player.trueEloByRound.get(round));
@@ -2556,6 +2647,7 @@ public class A1_PlayerStats {
                 params.add(player.oppNameByRound.get(round));
                 params.add(player.oppTrueEloByRound.get(round));
                 params.add(player.oppPerfEloByRound.get(round));
+                params.add(player.scoreByRound.get(round));
             } else {
                 // Future rounds - null
                 params.add(null); // trueElo
@@ -2570,6 +2662,7 @@ public class A1_PlayerStats {
                 params.add(null); // oppName
                 params.add(null); // oppTrueElo
                 params.add(null); // oppPerfElo
+                params.add(null); // score
             }
         }
 

@@ -694,11 +694,11 @@ public class CommandComparePlayers {
             String oppName = player.oppNameByRound.get(round);
             String oppHall = player.oppHallByRound.get(round);
             
-            // Get ELO values
+            // Get ELO values (no parentheses to match image)
             Integer playerElo = player.eloByRound.get(round);
             Integer oppElo = player.oppEloByRound.get(round);
-            String playerEloStr = playerElo != null ? String.format("(%d)", playerElo) : "";
-            String oppEloStr = (oppElo != null && !"WALKOVER".equalsIgnoreCase(oppName)) ? String.format("(%d)", oppElo) : "";
+            String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
+            String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
             
             // Format: emoji playerHall playerName score oppName oppHall oppEmoji
             String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
@@ -706,23 +706,28 @@ public class CommandComparePlayers {
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
             
             String playerHallFormatted = TableFormatter.shortenHallName(player.hall);
-            String oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
+            String oppHallFormatted;
             
             // Calculate scores based on outcome
             String score;
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
                 score = "1-0";
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
-                oppEloStr = "";  // No ELO for WALKOVER
-            } else if (outcome == 1) {
-                score = "1-0";
-            } else if (outcome == 0) {
-                score = "0.5-0.5";
+                oppEloStr = "-";  // Dash for WALKOVER
+                oppHallFormatted = "";  // No hall for WALKOVER
             } else {
-                score = "0-1";
+                oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
+                if (outcome == 1) {
+                    score = "1-0";
+                } else if (outcome == 0) {
+                    score = "0.5-0.5";
+                } else {
+                    score = "0-1";
+                }
             }
             
-            sb.append(String.format("%-3s %s %s %s %s %s %s %s %s\n",
+            // Build line matching image format: Rnd emoji hallAbbr elo playerName score oppName elo hallAbbr emoji
+            String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                 VictoryRecordCalculator.getRoundDisplayName(round),
                 hallEmoji,
                 playerHallFormatted,
@@ -730,9 +735,10 @@ public class CommandComparePlayers {
                 player.name,
                 score,
                 oppName != null ? oppName : "?",
-                oppHallFormatted,
                 oppEloStr,
-                oppEmoji));
+                oppHallFormatted,
+                oppEmoji);
+            sb.append(line).append("\n");
         }
         sb.append("```\n\n");
         

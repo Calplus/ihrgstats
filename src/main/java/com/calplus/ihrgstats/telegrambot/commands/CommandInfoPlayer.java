@@ -254,6 +254,7 @@ public class CommandInfoPlayer {
         Map<String, String> oppNameByRound;
         Map<String, String> oppHallByRound;
         Map<String, Integer> oppEloByRound;  // Opponent ELO for each round
+        Map<String, Double> scoreByRound;    // Player's board win score for each round
         
         PlayerData(String name, String hall, boolean capped) {
             this.name = name;
@@ -266,6 +267,7 @@ public class CommandInfoPlayer {
             this.oppNameByRound = new HashMap<>();
             this.oppHallByRound = new HashMap<>();
             this.oppEloByRound = new HashMap<>();
+            this.scoreByRound = new HashMap<>();
         }
     }
     
@@ -326,6 +328,7 @@ public class CommandInfoPlayer {
                 columns.add("outcome" + suffix);
                 columns.add("oppName" + suffix);
                 columns.add("oppHall" + suffix);
+                columns.add("score" + suffix);
             }
             
             String sql = "SELECT " + String.join(", ", columns) + 
@@ -359,6 +362,7 @@ public class CommandInfoPlayer {
                         Integer outcome = (Integer) rs.getObject("outcome" + suffix);
                         String oppName = rs.getString("oppName" + suffix);
                         String oppHall = rs.getString("oppHall" + suffix);
+                        Double score = (Double) rs.getObject("score" + suffix);
                         
                         if (elo != null) {
                             player.eloByRound.put(round, elo);
@@ -370,6 +374,7 @@ public class CommandInfoPlayer {
                         if (outcome != null) player.outcomeByRound.put(round, outcome);
                         if (oppName != null) player.oppNameByRound.put(round, oppName);
                         if (oppHall != null) player.oppHallByRound.put(round, oppHall);
+                        if (score != null) player.scoreByRound.put(round, score);
                         
                         // Fetch opponent ELO for this round
                         if (oppName != null && oppHall != null && !oppName.equalsIgnoreCase("WALKOVER")) {
@@ -565,55 +570,75 @@ public class CommandInfoPlayer {
             String oppName = player.oppNameByRound.get(round);
             String oppHall = player.oppHallByRound.get(round);
             
-            // Get ELO values
+            // Get ELO values (no parentheses to match image)
             Integer playerElo = player.eloByRound.get(round);
             Integer oppElo = player.oppEloByRound.get(round);
-            String playerEloStr = playerElo != null ? String.format("(%d)", playerElo) : "";
-            String oppEloStr = oppElo != null ? String.format("(%d)", oppElo) : "";
+            String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
+            String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
             
             // Get emoji
             String emoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
             Integer oppOutcome = outcome == 0 ? 0 : -outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
             
-            // Format hall names
-            String playerHallFormatted;
-            try {
-                int num = Integer.parseInt(player.hall);
-                playerHallFormatted = "Hall " + num;
-            } catch (NumberFormatException e) {
-                playerHallFormatted = player.hall + " Hall";
-            }
-            
+            // Format hall names (use 2-letter abbreviation to match image)
+            String playerHallFormatted = TableFormatter.shortenHallName(player.hall);
             String oppHallFormatted;
+            
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
                 oppHallFormatted = "";
-                oppEloStr = "";
+                oppEloStr = "-";  // Show dash for WALKOVER ELO
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);  // Loss for opponent
             } else if (oppHall != null) {
-                try {
-                    int num = Integer.parseInt(oppHall);
-                    oppHallFormatted = "Hall " + num;
-                } catch (NumberFormatException e) {
-                    oppHallFormatted = oppHall + " Hall";
-                }
+                oppHallFormatted = TableFormatter.shortenHallName(oppHall);
             } else {
                 oppHallFormatted = "??";
             }
             
-            // Format score
+            // Format score - use actual score from database if available
             String score;
+            Double playerScore = player.scoreByRound.get(round);
+            
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                score = "1-0";
-            } else if (outcome == 1) {
-                score = "1-0";
-            } else if (outcome == 0) {
-                score = "0.5-0.5";
+                // For walkover, player gets their score and opponent gets 0
+                if (playerScore != null) {
+                    String scoreStr = (playerScore == Math.floor(playerScore)) ? 
+                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
+                    score = scoreStr + "-0";
+                } else {
+                    score = "1-0";  // Fallback if score not available
+                }
+            } else if (playerScore != null) {
+                // Use actual scores from database
+                // Calculate opponent score (they should sum to maxSeeds)
+                double maxSeeds;
+                try {
+                    maxSeeds = Double.parseDouble(PropertyResolver.getProperty("settings.maxSeeds", "368.5"));
+                } catch (NumberFormatException e) {
+                    maxSeeds = 368.5;
+                }
+                double oppScore = maxSeeds - playerScore;
+                
+                // Format scores (no decimal if whole number)
+                String playerScoreStr = (playerScore == Math.floor(playerScore)) ? 
+                    String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
+                String oppScoreStr = (oppScore == Math.floor(oppScore)) ? 
+                    String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
+                    
+                score = playerScoreStr + "-" + oppScoreStr;
             } else {
-                score = "0-1";
+                // Fallback to outcome-based if score not available
+                if (outcome == 1) {
+                    score = "1-0";
+                } else if (outcome == 0) {
+                    score = "0.5-0.5";
+                } else {
+                    score = "0-1";
+                }
             }
             
-            sb.append(String.format("%-3s %s %s %s %-16s %s %s %-16s %s %s\n",
+            // Build line matching image format: Rnd emoji hallAbbr elo playerName score oppName elo hallAbbr emoji
+            String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                 VictoryRecordCalculator.getRoundDisplayName(round),
                 emoji,
                 playerHallFormatted,
@@ -623,7 +648,8 @@ public class CommandInfoPlayer {
                 oppName != null ? oppName : "?",
                 oppEloStr,
                 oppHallFormatted,
-                oppEmoji));
+                oppEmoji);
+            sb.append(line).append("\n");
         }
         sb.append("```\n");
         
@@ -640,6 +666,7 @@ public class CommandInfoPlayer {
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Player Information";
         metadata.subtitle = String.format("%s (Hall %s)", player.name, player.hall);
+        metadata.description = "Player statistics and performance";
         metadata.lastRound = lastRound;
         
         // Prepare sections
@@ -735,17 +762,39 @@ public class CommandInfoPlayer {
             Integer oppElo = player.oppEloByRound.get(round);
             String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
             
+            // Format score - use actual score from database if available
             String score;
+            Double playerScore = player.scoreByRound.get(round);
+            
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                score = "1-0";
+                if (playerScore != null) {
+                    String scoreStr = (playerScore == Math.floor(playerScore)) ? 
+                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
+                    score = scoreStr + "-0";
+                } else {
+                    score = "1-0";  // Fallback
+                }
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
                 oppEloStr = "-";  // Show dash for WALKOVER ELO
-            } else if (outcome == 1) {
-                score = "1-0";
-            } else if (outcome == 0) {
-                score = "0.5-0.5";
+            } else if (playerScore != null) {
+                double maxSeeds = Double.parseDouble(PropertyResolver.getProperty("settings.maxSeeds", "368.5"));
+                double oppScore = maxSeeds - playerScore;
+                
+                String playerScoreStr = (playerScore == Math.floor(playerScore)) ? 
+                    String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
+                String oppScoreStr = (oppScore == Math.floor(oppScore)) ? 
+                    String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
+                    
+                score = playerScoreStr + "-" + oppScoreStr;
             } else {
-                score = "0-1";
+                // Fallback to outcome-based if score not available
+                if (outcome == 1) {
+                    score = "1-0";
+                } else if (outcome == 0) {
+                    score = "0.5-0.5";
+                } else {
+                    score = "0-1";
+                }
             }
             
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();

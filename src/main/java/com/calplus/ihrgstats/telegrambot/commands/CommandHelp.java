@@ -94,38 +94,26 @@ public class CommandHelp {
     }
     
     /**
-     * Generates commands help text
+     * Generates commands help text with buttons for detailed help
      */
     private CommandResponse generateCommandsHelp() {
         StringBuilder message = new StringBuilder();
         message.append("📋 **Available Commands**\n\n");
+        message.append("Click on any command below to see detailed information:\n");
         
-        message.append("**Information Commands:**\n");
-        message.append("• /about \\- Bot information and admin contact\n");
-        message.append("• /help \\- This help menu\n\n");
+        String[] labels = {
+            "/about", "/help", "/rankplayers", "/compareplayers",
+            "/infoplayer", "/rankhalls", "/comparehalls", "/infohall",
+            "/infomatch", "/settings", "/exportplayers", "/exportdatabase"
+        };
+        String[] callbacks = {
+            "help_cmd_about", "help_cmd_help", "help_cmd_rankplayers", "help_cmd_compareplayers",
+            "help_cmd_infoplayer", "help_cmd_rankhalls", "help_cmd_comparehalls", "help_cmd_infohall",
+            "help_cmd_infomatch", "help_cmd_settings", "help_cmd_exportplayers", "help_cmd_exportdatabase"
+        };
         
-        message.append("**Player Commands:**\n");
-        message.append("• /rankplayers \\- View ranked player lists by TrueElo\n");
-        message.append("• /compareplayers \\- Compare two players side\\-by\\-side\n");
-        message.append("• /infoplayer \\- View detailed information for a single player\n\n");
-        
-        message.append("**Hall Commands:**\n");
-        message.append("• /rankhalls \\- View ranked hall lists by average ELO\n");
-        message.append("• /comparehalls \\- Compare two halls side\\-by\\-side\n");
-        message.append("• /infohall \\- View detailed information for a single hall\n\n");
-        
-        message.append("**Match Commands:**\n");
-        message.append("• /infomatch \\- View match information and scores for a specific round\n\n");
-        
-        message.append("**Database Commands:**\n");
-        message.append("• /settings \\- View/modify database settings\n");
-        message.append("• /exportplayers \\- Export player data\n");
-        message.append("• /exportdatabase \\- Export full database\n\n");
-        
-        message.append("_For file upload help, use /help and select 'File Uploads'_");
-        
-        logHelper.logSuccess("Generated commands help");
-        return new CommandResponse(message.toString(), (java.nio.file.Path) null);
+        logHelper.logSuccess("Generated commands help menu with buttons");
+        return new CommandResponse(message.toString(), new ButtonConfig(labels, callbacks));
     }
     
     /**
@@ -226,6 +214,211 @@ public class CommandHelp {
         }
         
         logHelper.logSuccess(String.format("Generated file upload help for: %s", fileType));
+        return new CommandResponse(message.toString(), (java.nio.file.Path) null);
+    }
+    
+    /**
+     * Handles command detail selection
+     */
+    public CommandResponse handleCommandDetail(String userId, String command) {
+        logHelper.logInfo(String.format("User %s requested detailed help for: %s", userId, command));
+        
+        userSelectionStates.remove(userId);
+        
+        return generateCommandDetail(command);
+    }
+    
+    /**
+     * Generates detailed help for a specific command
+     */
+    private CommandResponse generateCommandDetail(String command) {
+        StringBuilder message = new StringBuilder();
+        
+        switch (command) {
+            case "about":
+                message.append("ℹ️ **/about Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Displays information about the bot, including version, features, and admin contact\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/about`\n\n");
+                message.append("**Output:**\n");
+                message.append("• Bot version and description\n");
+                message.append("• List of available features\n");
+                message.append("• Admin contact information\n");
+                break;
+                
+            case "help":
+                message.append("❓ **/help Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Interactive help menu with options for command help or file upload instructions\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/help`\n\n");
+                message.append("**Options:**\n");
+                message.append("• Commands \\- List of all available commands with detailed descriptions\n");
+                message.append("• File Uploads \\- Instructions for uploading round CSVs, player exports, and capped players\n");
+                break;
+                
+            case "rankplayers":
+                message.append("🏆 **/rankplayers Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Displays ranked list of players sorted by TrueElo rating\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/rankplayers`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select a round from the list\n");
+                message.append("2\\. View ranked player table with ELO ratings\n\n");
+                message.append("**Output:**\n");
+                message.append("• Player rankings with TrueElo scores\n");
+                message.append("• Hall affiliations\n");
+                message.append("• Win/Loss/Draw statistics\n");
+                break;
+                
+            case "compareplayers":
+                message.append("⚖️ **/compareplayers Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Compare two players side\\-by\\-side with stats, ELO progression, and head\\-to\\-head record\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/compareplayers`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select first player from the list\n");
+                message.append("2\\. Select second player from the list\n");
+                message.append("3\\. View side\\-by\\-side comparison image\n\n");
+                message.append("**Output:**\n");
+                message.append("• ELO per round comparison\n");
+                message.append("• Victory records for both players\n");
+                message.append("• Head\\-to\\-head matchup statistics\n");
+                message.append("• Win probability calculation\n");
+                break;
+                
+            case "infoplayer":
+                message.append("👤 **/infoplayer Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("View detailed information for a single player including stats and match history\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/infoplayer`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select a player from the list\n");
+                message.append("2\\. View detailed player information image\n\n");
+                message.append("**Output:**\n");
+                message.append("• Player statistics \\(ELO, rank, W/L/D\\)\n");
+                message.append("• Stats per round with deltas\n");
+                message.append("• Complete victory record with opponents\n");
+                message.append("• Hall affiliation and capped status\n");
+                break;
+                
+            case "rankhalls":
+                message.append("🏛️ **/rankhalls Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Displays ranked list of halls sorted by average ELO rating\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/rankhalls`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select a round from the list\n");
+                message.append("2\\. View ranked hall table with average ELO\n\n");
+                message.append("**Output:**\n");
+                message.append("• Hall rankings with average ELO\n");
+                message.append("• Number of players per hall\n");
+                message.append("• Win/Loss/Draw statistics\n");
+                break;
+                
+            case "comparehalls":
+                message.append("⚖️ **/comparehalls Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Compare two halls side\\-by\\-side with stats, ELO progression, and head\\-to\\-head record\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/comparehalls`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select first hall from the list\n");
+                message.append("2\\. Select second hall from the list\n");
+                message.append("3\\. View side\\-by\\-side comparison image\n\n");
+                message.append("**Output:**\n");
+                message.append("• Hall ELO per round comparison\n");
+                message.append("• Victory records for both halls\n");
+                message.append("• Head\\-to\\-head matchup statistics\n");
+                message.append("• Win probability calculation\n");
+                break;
+                
+            case "infohall":
+                message.append("🏛️ **/infohall Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("View detailed information for a single hall including stats and match history\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/infohall`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select a hall from the list\n");
+                message.append("2\\. View detailed hall information image\n\n");
+                message.append("**Output:**\n");
+                message.append("• Hall statistics \\(Average ELO, rank, W/L/D\\)\n");
+                message.append("• Player roster with individual stats\n");
+                message.append("• Hall ELO per round with deltas\n");
+                message.append("• Complete victory record against other halls\n");
+                break;
+                
+            case "infomatch":
+                message.append("🎮 **/infomatch Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("View match information and detailed scores for a specific round\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/infomatch`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select a round from the list\n");
+                message.append("2\\. View match details image\n\n");
+                message.append("**Output:**\n");
+                message.append("• Match info \\(halls, ELO, score\\)\n");
+                message.append("• Individual game results table\n");
+                message.append("• Player names and outcomes for each board\n");
+                message.append("• Game\\-by\\-game breakdown\n");
+                break;
+                
+            case "settings":
+                message.append("⚙️ **/settings Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("View and modify database configuration settings\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/settings`\n\n");
+                message.append("**Options:**\n");
+                message.append("• View current settings\n");
+                message.append("• Modify last round\n");
+                message.append("• Update configuration parameters\n\n");
+                message.append("**Note:** Admin privileges may be required for some operations\\.\n");
+                break;
+                
+            case "exportplayers":
+                message.append("📤 **/exportplayers Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Export player data to CSV or Excel format\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/exportplayers`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Select export format \\(CSV or Excel\\)\n");
+                message.append("2\\. Download exported file\n\n");
+                message.append("**Output:**\n");
+                message.append("• Complete player roster with all statistics\n");
+                message.append("• ELO ratings, rounds played, capped status\n");
+                message.append("• Suitable for backup or external analysis\n");
+                break;
+                
+            case "exportdatabase":
+                message.append("💾 **/exportdatabase Command**\n\n");
+                message.append("**Description:**\n");
+                message.append("Export complete database including all rounds, players, and halls\\.\n\n");
+                message.append("**Usage:**\n");
+                message.append("`/exportdatabase`\n\n");
+                message.append("**Steps:**\n");
+                message.append("1\\. Confirm export operation\n");
+                message.append("2\\. Download exported database file\n\n");
+                message.append("**Output:**\n");
+                message.append("• Full database backup\n");
+                message.append("• All historical data included\n");
+                message.append("• Can be used for migration or backup purposes\n\n");
+                message.append("**Note:** Admin privileges may be required\\.\n");
+                break;
+                
+            default:
+                return new CommandResponse("❌ Unknown command.", (java.nio.file.Path) null);
+        }
+        
+        logHelper.logSuccess(String.format("Generated detailed help for command: %s", command));
         return new CommandResponse(message.toString(), (java.nio.file.Path) null);
     }
 }

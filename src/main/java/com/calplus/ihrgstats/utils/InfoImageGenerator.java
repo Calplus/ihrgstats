@@ -32,6 +32,7 @@ public class InfoImageGenerator {
     // Table colors
     private static final Color TABLE_LIGHT = new Color(173, 216, 230);
     private static final Color TABLE_LIGHTER = new Color(224, 255, 255);
+    private static final Color TABLE_HIGHLIGHT = new Color(144, 238, 144);  // Light green for highlighting
     
     private static final Color TEXT_COLOR = Color.BLACK;
     private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
@@ -45,6 +46,7 @@ public class InfoImageGenerator {
     public static class ImageMetadata {
         public String title;
         public String subtitle;
+        public String description;
         public String lastRound;
         public String generatedDate;
         
@@ -73,7 +75,11 @@ public class InfoImageGenerator {
         }
         
         public void addMonospacedRow(String value) {
-            rows.add(new Row("", value, true));
+            rows.add(new Row("", value, true, false));
+        }
+        
+        public void addMonospacedRow(String value, boolean highlight) {
+            rows.add(new Row("", value, true, highlight));
         }
         
         public void addVictoryEntry(VictoryEntry entry) {
@@ -88,15 +94,21 @@ public class InfoImageGenerator {
         public String label;
         public String value;
         public boolean leftAlign;  // If true, left-align the value (for monospaced format)
+        public boolean highlight;  // If true, highlight row in green
         
         public Row(String label, String value) {
-            this(label, value, false);
+            this(label, value, false, false);
         }
         
         public Row(String label, String value, boolean leftAlign) {
+            this(label, value, leftAlign, false);
+        }
+        
+        public Row(String label, String value, boolean leftAlign, boolean highlight) {
             this.label = label;
             this.value = value;
             this.leftAlign = leftAlign;
+            this.highlight = highlight;
         }
     }
     
@@ -115,6 +127,8 @@ public class InfoImageGenerator {
         public String opponentHall;     // Opponent's hall (shortened, e.g. "H2")
         public String oppEmoji;         // Outcome emoji for opponent
         public boolean isNA;            // True if this round is N/A
+        public boolean highlightPlayer; // True if player/left side should be highlighted green
+        public boolean highlightOpponent; // True if opponent/right side should be highlighted green
         
         // Legacy fields for backward compatibility
         public String result;           // Deprecated: use hallEmoji instead
@@ -131,16 +145,17 @@ public class InfoImageGenerator {
         tempG2d.setFont(TABLE_FONT);
         FontMetrics fm = tempG2d.getFontMetrics();
         
-        // Calculate header height
-        int headerHeight = calculateHeaderHeight(tempG2d, metadata);
+        // Calculate header height (pass hallIdentifier to determine if icon is needed)
+        int headerHeight = calculateHeaderHeight(tempG2d, metadata, hallIdentifier);
         
         // Calculate content width and height
         int contentWidth = calculateMaxWidth(sections, fm);
         int contentHeight = calculateContentHeight(sections, fm);
         
         // Determine spacing based on image type
-        // Match info (hallIdentifier == null) needs less spacing, player/hall info needs standard spacing
-        int headerToTableSpacing = (hallIdentifier == null) ? 25 : HEADER_TO_TABLE_SPACING;
+        // Match info (hallIdentifier == null) needs minimal spacing
+        // Player/hall info needs more spacing to avoid overlap with hall icon
+        int headerToTableSpacing = (hallIdentifier == null) ? 5 : 70;
         
         // Total dimensions
         int imageWidth = contentWidth + (PADDING * 2);
@@ -158,6 +173,10 @@ public class InfoImageGenerator {
         
         // Draw tiled background
         drawTiledBackground(g2d, hallIdentifier, 0, 0, imageWidth, imageHeight);
+        
+        // Draw white background for header
+        g2d.setColor(Color.WHITE);
+        g2d.fillRect(0, 0, imageWidth, headerHeight);
         
         // Draw header
         drawHeaderSection(g2d, metadata, hallIdentifier, imageWidth);
@@ -181,7 +200,7 @@ public class InfoImageGenerator {
     /**
      * Calculates dynamic header height
      */
-    private static int calculateHeaderHeight(Graphics2D tempG2d, ImageMetadata metadata) {
+    private static int calculateHeaderHeight(Graphics2D tempG2d, ImageMetadata metadata, String hallIdentifier) {
         int height = PADDING * 2;
         
         // Title
@@ -189,24 +208,35 @@ public class InfoImageGenerator {
         FontMetrics titleFm = tempG2d.getFontMetrics();
         height += titleFm.getHeight();
         
-        // Subtitle
-        if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
-            tempG2d.setFont(HEADER_FONT);
-            FontMetrics subtitleFm = tempG2d.getFontMetrics();
-            height += subtitleFm.getHeight() + 10;
-        }
-        
-        // Icon
-        height = Math.max(height, LARGE_ICON_SIZE + PADDING * 2);
-        
-        // Generated date
+        // Metadata font metrics
         tempG2d.setFont(METADATA_FONT);
         FontMetrics metaFm = tempG2d.getFontMetrics();
+        
+        // Generated date (always present)
         height += metaFm.getHeight() + 10;
         
-        // Last round
-        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+        // Description (if present)
+        if (metadata.description != null && !metadata.description.isEmpty()) {
             height += metaFm.getHeight() + 5;
+        }
+        
+        // Last round (if present)
+        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+            height += metaFm.getHeight() + 10;
+        }
+        
+        // For hall/player images: add subtitle and icon
+        // For match info: no subtitle or icon
+        if (hallIdentifier != null) {
+            // Subtitle
+            if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
+                tempG2d.setFont(HEADER_FONT);
+                FontMetrics subtitleFm = tempG2d.getFontMetrics();
+                height += subtitleFm.getHeight() + 10;
+            }
+            
+            // Icon size
+            height += LARGE_ICON_SIZE + 10;
         }
         
         return height;
@@ -226,44 +256,89 @@ public class InfoImageGenerator {
         g2d.drawString(metadata.title, (imageWidth - titleWidth) / 2, yOffset + titleFm.getAscent());
         yOffset += titleFm.getHeight();
         
-        // Draw subtitle
+        // For hall/player images: draw metadata info before subtitle and icon
+        if (hallIdentifier != null) {
+            // Draw generated date
+            g2d.setFont(METADATA_FONT);
+            g2d.setColor(Color.GRAY);
+            FontMetrics metaFm = g2d.getFontMetrics();
+            String dateText = "Generated: " + metadata.generatedDate;
+            int dateWidth = metaFm.stringWidth(dateText);
+            g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
+            yOffset += metaFm.getHeight() + 5;
+            
+            // Draw description if available
+            if (metadata.description != null && !metadata.description.isEmpty()) {
+                String descText = metadata.description;
+                int descWidth = metaFm.stringWidth(descText);
+                g2d.drawString(descText, (imageWidth - descWidth) / 2, yOffset + metaFm.getAscent() + 5);
+                yOffset += metaFm.getHeight() + 5;
+            }
+            
+            // Draw last round if available
+            if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+                String roundText = "Last Round: " + metadata.lastRound;
+                int roundWidth = metaFm.stringWidth(roundText);
+                g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
+                yOffset += metaFm.getHeight() + 10;
+            }
+        }
+        
+        // Draw hall icon (if available)
+        if (hallIdentifier != null) {
+            try {
+                String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
+                InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+                
+                // Try unknown.png fallback if icon not found
+                if (iconStream == null) {
+                    iconPath = "/halls/unknown.png";
+                    iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+                }
+                
+                if (iconStream != null) {
+                    BufferedImage icon = ImageIO.read(iconStream);
+                    int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
+                    g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                    yOffset += LARGE_ICON_SIZE + 10;
+                }
+            } catch (Exception e) {
+                // Icon not found, skip
+            }
+        } else {
+            // For match info: draw metadata after subtitle
+            g2d.setFont(METADATA_FONT);
+            g2d.setColor(Color.GRAY);
+            FontMetrics metaFm = g2d.getFontMetrics();
+            String dateText = "Generated: " + metadata.generatedDate;
+            int dateWidth = metaFm.stringWidth(dateText);
+            g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
+            yOffset += metaFm.getHeight() + 5;
+            
+            // Draw description if available
+            if (metadata.description != null && !metadata.description.isEmpty()) {
+                String descText = metadata.description;
+                int descWidth = metaFm.stringWidth(descText);
+                g2d.drawString(descText, (imageWidth - descWidth) / 2, yOffset + metaFm.getAscent() + 5);
+                yOffset += metaFm.getHeight() + 5;
+            }
+            
+            // Draw last round if available
+            if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+                String roundText = "Last Round: " + metadata.lastRound;
+                int roundWidth = metaFm.stringWidth(roundText);
+                g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
+            }
+        }
+
+        // Draw subtitle (hall/player name)
         if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
             g2d.setFont(HEADER_FONT);
+            g2d.setColor(TEXT_COLOR);
             FontMetrics subtitleFm = g2d.getFontMetrics();
             int subtitleWidth = subtitleFm.stringWidth(metadata.subtitle);
             g2d.drawString(metadata.subtitle, (imageWidth - subtitleWidth) / 2, yOffset + subtitleFm.getAscent() + 10);
             yOffset += subtitleFm.getHeight() + 10;
-        }
-        
-        // Draw hall icon
-        try {
-            String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
-            InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
-            
-            if (iconStream != null) {
-                BufferedImage icon = ImageIO.read(iconStream);
-                int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
-                g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
-                yOffset += LARGE_ICON_SIZE + 10;
-            }
-        } catch (Exception e) {
-            // Icon not found, skip
-        }
-        
-        // Draw generated date
-        g2d.setFont(METADATA_FONT);
-        g2d.setColor(Color.GRAY);
-        FontMetrics metaFm = g2d.getFontMetrics();
-        String dateText = "Generated: " + metadata.generatedDate;
-        int dateWidth = metaFm.stringWidth(dateText);
-        g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
-        yOffset += metaFm.getHeight() + 5;
-        
-        // Draw last round if available
-        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
-            String roundText = "Last Round: " + metadata.lastRound;
-            int roundWidth = metaFm.stringWidth(roundText);
-            g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
         }
     }
     
@@ -279,6 +354,12 @@ public class InfoImageGenerator {
         try {
             String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
             InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+            
+            // Try unknown.png fallback if icon not found
+            if (iconStream == null) {
+                iconPath = "/halls/unknown.png";
+                iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+            }
             
             if (iconStream != null) {
                 BufferedImage icon = ImageIO.read(iconStream);
@@ -345,7 +426,11 @@ public class InfoImageGenerator {
         boolean alternate = false;
         for (Row row : section.rows) {
             // Draw row background
-            g2d.setColor(alternate ? TABLE_LIGHT : TABLE_LIGHTER);
+            if (row.highlight) {
+                g2d.setColor(TABLE_HIGHLIGHT);  // Green highlight for home hall
+            } else {
+                g2d.setColor(alternate ? TABLE_LIGHT : TABLE_LIGHTER);
+            }
             g2d.fillRect(x, yOffset, width, ROW_HEIGHT);
             
             // Draw text
@@ -383,9 +468,68 @@ public class InfoImageGenerator {
      * Draws a victory record entry
      */
     private static int drawVictoryEntry(Graphics2D g2d, VictoryEntry entry, int x, int y, int width, FontMetrics fm, boolean alternate) {
+        // Null-safe field initialization
+        if (entry.score == null) entry.score = "";
+        if (entry.hallEmoji == null) entry.hallEmoji = "";
+        if (entry.playerElo == null) entry.playerElo = "";
+        if (entry.opponentElo == null) entry.opponentElo = "";
+        if (entry.playerHall == null) entry.playerHall = "";
+        if (entry.opponentHall == null) entry.opponentHall = "";
+        if (entry.playerName == null) entry.playerName = "";
+        if (entry.opponentName == null) entry.opponentName = "";
+        if (entry.oppEmoji == null) entry.oppEmoji = "";
+        if (entry.round == null) entry.round = "";
+        
         // Draw row background
         g2d.setColor(alternate ? TABLE_LIGHT : TABLE_LIGHTER);
         g2d.fillRect(x, y, width, ROW_HEIGHT);
+        
+        // Calculate score position (dead center) - needed for highlighting calculations
+        int scoreWidth = fm.stringWidth(entry.score);
+        int centerX = x + width / 2;
+        int scoreX = centerX - scoreWidth / 2;
+        
+        // Fixed width for round column to ensure vertical alignment
+        // If round is empty, don't reserve any space for it
+        int roundColWidth = entry.round.isEmpty() ? 0 : fm.stringWidth("T16 ");
+        
+        // Check if this is a hall victory entry (playerName is empty) or player victory entry
+        boolean isHallEntry = (entry.playerName == null || entry.playerName.trim().isEmpty());
+        
+        // Pre-calculate boundaries for highlighting
+        if (isHallEntry) {
+            // Hall entry: calculate left and right boundaries
+            int leftX = x + roundColWidth;
+            int leftEndX = scoreX - 8;
+            int rightStartX = scoreX + scoreWidth + 8;
+            int rightEndX = x + width;
+            
+            // Draw highlights
+            if (entry.highlightPlayer) {
+                g2d.setColor(TABLE_HIGHLIGHT);
+                g2d.fillRect(leftX, y, leftEndX - leftX, ROW_HEIGHT);
+            }
+            if (entry.highlightOpponent) {
+                g2d.setColor(TABLE_HIGHLIGHT);
+                g2d.fillRect(rightStartX, y, rightEndX - rightStartX, ROW_HEIGHT);
+            }
+        } else {
+            // Player entry: calculate left and right boundaries
+            int leftX = x + roundColWidth;
+            int leftEndX = scoreX - 20;
+            int rightStartX = scoreX + scoreWidth + 20;
+            int rightEndX = x + width;
+            
+            // Draw highlights
+            if (entry.highlightPlayer) {
+                g2d.setColor(TABLE_HIGHLIGHT);
+                g2d.fillRect(leftX, y, leftEndX - leftX, ROW_HEIGHT);
+            }
+            if (entry.highlightOpponent) {
+                g2d.setColor(TABLE_HIGHLIGHT);
+                g2d.fillRect(rightStartX, y, rightEndX - rightStartX, ROW_HEIGHT);
+            }
+        }
         
         // Draw text
         g2d.setColor(TEXT_COLOR);
@@ -393,27 +537,16 @@ public class InfoImageGenerator {
         
         // Handle N/A entries
         if (entry.isNA) {
-            g2d.drawString(entry.round, x + 5, textY);
+            g2d.drawString(entry.round, x, textY);
             int naWidth = fm.stringWidth("-NA-");
             g2d.drawString("-NA-", x + (width - naWidth) / 2, textY);
             return y + ROW_HEIGHT;
         }
         
-        // Fixed width for round column to ensure vertical alignment
-        int roundColWidth = fm.stringWidth("T16 ");
-        
-        // Calculate score position (dead center)
-        int scoreWidth = fm.stringWidth(entry.score);
-        int centerX = x + width / 2;
-        int scoreX = centerX - scoreWidth / 2;
-        
-        // Check if this is a hall victory entry (playerName is empty) or player victory entry
-        boolean isHallEntry = (entry.playerName == null || entry.playerName.trim().isEmpty());
-        
         if (isHallEntry) {
             // Hall victory format: round emoji hallElo [hallName] score [oppName] oppElo emoji
             // Draw left flush: round, emoji, hallElo
-            int leftX = x + 5;
+            int leftX = x;
             g2d.drawString(entry.round, leftX, textY);
             leftX += roundColWidth;
             
@@ -424,7 +557,7 @@ public class InfoImageGenerator {
             leftX += fm.stringWidth(entry.playerElo) + 8;
             
             // Draw right flush: oppElo, oppEmoji
-            int rightX = x + width - 5;
+            int rightX = x + width;
             rightX -= fm.stringWidth(entry.oppEmoji);
             g2d.drawString(entry.oppEmoji, rightX, textY);
             rightX -= 3;
@@ -455,7 +588,7 @@ public class InfoImageGenerator {
         } else {
             // Player victory format: round emoji playerHall playerElo [playerName] score [oppName] oppElo oppHall emoji
             // Draw left flush: round, emoji, playerHall, playerElo
-            int leftX = x + 5;
+            int leftX = x;
             g2d.drawString(entry.round, leftX, textY);
             leftX += roundColWidth;
             
@@ -470,7 +603,7 @@ public class InfoImageGenerator {
             
             // Draw right flush: oppElo, oppHall (padded to 3 chars), oppEmoji
             String paddedOppHall = String.format("%3s", entry.opponentHall);
-            int rightX = x + width - 5;
+            int rightX = x + width;
             
             rightX -= fm.stringWidth(entry.oppEmoji);
             g2d.drawString(entry.oppEmoji, rightX, textY);

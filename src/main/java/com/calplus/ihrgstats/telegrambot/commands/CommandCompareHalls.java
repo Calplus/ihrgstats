@@ -1011,17 +1011,15 @@ public class CommandCompareHalls {
         
         // Victory record (centered with round numbers)
         sb.append("**🏆 Victory Record:**\n```\n");
-        sb.append(String.format("%-3s  %s\n", "Rnd", "Result"));
-        sb.append(String.format("%-3s  %s\n", "---", "------"));
         for (String round : data.roundsIncluded) {
             HallVictoryRecord record = data.victoryRecords.get(round);
             if (record != null) {
-                // Get ELO values for this round
+                // Get ELO values for this round (no parentheses to match image)
                 Double hallElo = data.hallEloByRound.get(round);
-                String hallEloStr = hallElo != null ? String.format("(%.1f)", hallElo) : "";
-                String oppEloStr = record.oppHallElo != null ? String.format("(%.1f)", record.oppHallElo) : "";
+                String hallEloStr = hallElo != null ? String.format("%.1f", hallElo) : "?";
+                String oppEloStr = record.oppHallElo != null ? String.format("%.1f", record.oppHallElo) : "?";
                 
-                // Format hall names
+                // Format hall names (use full hall names)
                 String formattedHall = formatHallNameForImage(data.hallName);
                 String formattedOppHall = "WALKOVER".equalsIgnoreCase(record.oppHall) ? "WALKOVER" : formatHallNameForImage(record.oppHall);
                 
@@ -1030,22 +1028,27 @@ public class CommandCompareHalls {
                 Integer oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
                 String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
                 
-                // Format score
-                String score = String.format("%.0f-%.0f", record.hallScore, record.oppScore);
+                // Format score - use integers if whole numbers
+                String score;
+                if (record.hallScore == Math.floor(record.hallScore) && record.oppScore == Math.floor(record.oppScore)) {
+                    score = String.format("%d-%d", (int)record.hallScore, (int)record.oppScore);
+                } else {
+                    score = String.format("%.1f-%.1f", record.hallScore, record.oppScore);
+                }
                 
-                // Build line with ELO in brackets
-                String line = String.format("%s %s %s %s %s %s %s %s",
+                // Build line matching image format: Rnd emoji hallElo hallName score oppName oppElo emoji
+                String line = String.format("%-3s %s %-4s %-15s %s %-15s %-4s %s",
                     VictoryRecordCalculator.getRoundDisplayName(round),
                     hallEmoji,
-                    formattedHall,
                     hallEloStr,
+                    formattedHall,
                     score,
                     formattedOppHall,
                     oppEloStr,
                     oppEmoji);
                 sb.append(line).append("\n");
             } else {
-                sb.append(String.format("%-3s  -NA-\n", VictoryRecordCalculator.getRoundDisplayName(round)));
+                sb.append(String.format("%-3s -NA-\n", VictoryRecordCalculator.getRoundDisplayName(round)));
             }
         }
         sb.append("```\n\n");

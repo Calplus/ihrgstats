@@ -2548,6 +2548,10 @@ public class TelegramListener {
                     } else {
                         sendLongMessageToCommandsChannel(response.message, message);
                     }
+                } else if (data.startsWith("help_cmd_")) {
+                    String command = data.substring("help_cmd_".length());
+                    response = helpCommand.handleCommandDetail(userId, command);
+                    sendLongMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("help_filetype_")) {
                     String fileType = data.substring("help_filetype_".length());
                     response = helpCommand.handleFileTypeSelection(userId, fileType);

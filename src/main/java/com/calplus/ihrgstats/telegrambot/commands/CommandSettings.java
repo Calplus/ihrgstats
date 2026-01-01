@@ -25,6 +25,7 @@ public class CommandSettings {
      */
     private static class SettingsSelectionState extends SelectionState {
         boolean awaitingManualInput = false;
+        String settingKey = null; // The setting key being modified (e.g., "settings.homeHall" or "settings.maxSeeds")
     }
 
     public CommandSettings() {
@@ -96,6 +97,18 @@ public class CommandSettings {
                 // Create button for homeHall selection
                 buttonLabels.add("🏠 Change Home Hall");
                 buttonCallbacks.add("setting_homeHall_select");
+                continue;
+            }
+            
+            // Special handling for maxSeeds (integer)
+            if (key.equals("settings.maxSeeds")) {
+                String currentSeeds = value.isEmpty() ? "Not set" : value;
+                message.append(String.format("🎯 **Max Seeds: %s**\n", currentSeeds));
+                message.append(String.format("   %s\n\n", description));
+                
+                // Create button for maxSeeds input
+                buttonLabels.add("🎯 Change Max Seeds");
+                buttonCallbacks.add("setting_maxSeeds_select");
                 continue;
             }
             
@@ -325,6 +338,7 @@ public class CommandSettings {
             // Set user state to await manual input
             SettingsSelectionState state = userSelectionStates.computeIfAbsent(userId, k -> new SettingsSelectionState());
             state.awaitingManualInput = true;
+            state.settingKey = "settings.homeHall";
             
             String currentHomeHall = PropertyResolver.getProperty("settings.homeHall", "");
             String currentValueDisplay = currentHomeHall.isEmpty() ? "Not set" : currentHomeHall;
@@ -384,9 +398,45 @@ public class CommandSettings {
         }
         
         // Clean up state
+        String settingKey = state.settingKey;
         userSelectionStates.remove(userId);
         
-        // Trim and validate input
+        // Handle maxSeeds setting
+        if ("settings.maxSeeds".equals(settingKey)) {
+            String inputValue = text.trim();
+            
+            // Validate positive integer
+            try {
+                double maxSeedsValue = Double.parseDouble(inputValue);
+                if (maxSeedsValue <= 0) {
+                    return "❌ Invalid input: Max seeds must be a positive integer.";
+                }
+                
+                discordLog.logInfo(String.format("Admin %s setting maxSeeds to: %d", userId, maxSeedsValue));
+                telegramLog.logInfo(String.format("Admin %s setting maxSeeds to: %d", userId, maxSeedsValue));
+                
+                // Update property
+                boolean success = PropertyManager.updateProperty("settings.maxSeeds", String.valueOf(maxSeedsValue));
+                
+                if (success) {
+                    String successMsg = String.format("🎯 Successfully set maxSeeds to **%d**\n\nUse /settings to see updated configuration.", maxSeedsValue);
+                    
+                    discordLog.logSuccess(String.format("MaxSeeds set to %d", maxSeedsValue));
+                    telegramLog.logSuccess(String.format("MaxSeeds set to %d", maxSeedsValue));
+                    
+                    return successMsg;
+                } else {
+                    String errorMsg = "❌ Error: Failed to update maxSeeds setting";
+                    discordLog.logError(errorMsg);
+                    telegramLog.logError(errorMsg);
+                    return errorMsg;
+                }
+            } catch (NumberFormatException e) {
+                return "❌ Invalid input: Max seeds must be a valid positive integer.";
+            }
+        }
+        
+        // Handle homeHall setting (default)
         String hallValue = text.trim();
         if (hallValue.isEmpty()) {
             return "❌ Invalid input: Hall value cannot be empty.";
@@ -411,6 +461,57 @@ public class CommandSettings {
             telegramLog.logError(errorMsg);
             return errorMsg;
         }
+    }
+
+    /**
+     * Handles the max seeds selection request (direct to manual input)
+     * @param userId The user ID who requested maxSeeds change
+     * @return Response prompting for manual input
+     */
+    public SettingsResponse handleMaxSeedsSelection(String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to change maxSeeds", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to change maxSeeds", userId));
+            return new SettingsResponse(errorMsg, null);
+        }
+
+        discordLog.logInfo(String.format("Admin %s requested maxSeeds change", userId));
+        telegramLog.logInfo(String.format("Admin %s requested maxSeeds change", userId));
+
+        // Set manual input mode
+        SettingsSelectionState state = new SettingsSelectionState();
+        state.awaitingManualInput = true;
+        state.settingKey = "settings.maxSeeds";
+        userSelectionStates.put(userId, state);
+
+        String currentMaxSeeds = PropertyResolver.getProperty("settings.maxSeeds", "361");
+        String message = String.format("Please enter the new maxSeeds value (positive integer).\n\nCurrent value: **%s**", currentMaxSeeds);
+
+        return new SettingsResponse(message, null);
+    }
+
+    /**
+     * Handles the maxSeeds callback
+     * This is only for cancel operation as selection goes directly to manual input
+     */
+    public String handleMaxSeedsCallback(String callbackData, String userId) {
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can change settings.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted unauthorized maxSeeds callback", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted unauthorized maxSeeds callback", userId));
+            return errorMsg;
+        }
+
+        // Only cancel is expected here
+        if (callbackData.equals("settings_cancel")) {
+            userSelectionStates.remove(userId);
+            return "🔄 Cancelled maxSeeds change.";
+        }
+
+        return "❌ Unknown callback for maxSeeds";
     }
 
     /**

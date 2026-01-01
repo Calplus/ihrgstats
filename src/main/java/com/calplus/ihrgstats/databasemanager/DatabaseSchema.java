@@ -206,6 +206,18 @@ public class DatabaseSchema {
         playerStatsColumns.add(new ColumnDefinition("volTrueEloT4", "REAL"));
         playerStatsColumns.add(new ColumnDefinition("volTrueEloT2", "REAL"));
 
+        // Player Score
+        playerStatsColumns.add(new ColumnDefinition("scoreR1", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreR2", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreR3", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreR4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreR5", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreR6", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreT16", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreT8", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreT4", "REAL"));
+        playerStatsColumns.add(new ColumnDefinition("scoreT2", "REAL"));
+
         // Performance Elo
         playerStatsColumns.add(new ColumnDefinition("perfEloR1", "INTEGER"));
         playerStatsColumns.add(new ColumnDefinition("perfEloR2", "INTEGER"));
