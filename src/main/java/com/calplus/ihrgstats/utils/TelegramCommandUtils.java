@@ -47,10 +47,18 @@ public class TelegramCommandUtils {
     public static class ButtonConfig {
         public final String[] labels;
         public final String[] callbacks;
+        public final Integer columnsPerRow;  // null = default (4), or specific number
         
         public ButtonConfig(String[] labels, String[] callbacks) {
             this.labels = labels;
             this.callbacks = callbacks;
+            this.columnsPerRow = null;  // default
+        }
+        
+        public ButtonConfig(String[] labels, String[] callbacks, int columnsPerRow) {
+            this.labels = labels;
+            this.callbacks = callbacks;
+            this.columnsPerRow = columnsPerRow;
         }
     }
     

@@ -20,9 +20,9 @@ public class Main {
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
         
-        System.out.println("==========================================");
+        System.out.println("====================================");
         System.out.println("   IHRG Stats Application Started");
-        System.out.println("==========================================");
+        System.out.println("====================================");
         
         discordLog.logInfo("IHRG Stats Application Started");
         telegramLog.logInfo("IHRG Stats Application Started");

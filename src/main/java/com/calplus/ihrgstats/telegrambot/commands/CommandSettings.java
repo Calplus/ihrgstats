@@ -3,9 +3,11 @@ package com.calplus.ihrgstats.telegrambot.commands;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
+import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Command handler for /settings command.
@@ -16,6 +18,14 @@ public class CommandSettings {
     private final TelegramLog telegramLog;
     private final String adminUserId;
     private final String dbPath;
+    private static final Map<String, SettingsSelectionState> userSelectionStates = new ConcurrentHashMap<>();
+
+    /**
+     * Selection state for settings command
+     */
+    private static class SettingsSelectionState extends SelectionState {
+        boolean awaitingManualInput = false;
+    }
 
     public CommandSettings() {
         // Load environment variables
@@ -311,7 +321,19 @@ public class CommandSettings {
         if (callbackData.equals("setting_homeHall_manual")) {
             discordLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
             telegramLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
-            return "✏️ Please type your desired home hall value and update it manually in application.properties.\n\nCurrent setting: settings.homeHall";
+            
+            // Set user state to await manual input
+            SettingsSelectionState state = userSelectionStates.computeIfAbsent(userId, k -> new SettingsSelectionState());
+            state.awaitingManualInput = true;
+            
+            String currentHomeHall = PropertyResolver.getProperty("settings.homeHall", "");
+            String currentValueDisplay = currentHomeHall.isEmpty() ? "Not set" : currentHomeHall;
+            
+            return String.format("✏️ **Manual Home Hall Input**\n\n" +
+                                "Please reply with the hall number or name you want to set as your home hall.\n\n" +
+                                "**Current home hall:** %s\n\n" +
+                                "_Example: Type '4' or 'Hall 4' to set Hall 4 as your home hall_", 
+                                currentValueDisplay);
         }
 
         // Extract hall value from callback data
@@ -332,6 +354,55 @@ public class CommandSettings {
             
             discordLog.logSuccess(String.format("Home hall set to %s", hallValue));
             telegramLog.logSuccess(String.format("Home hall set to %s", hallValue));
+            
+            return successMsg;
+        } else {
+            String errorMsg = "❌ Error: Failed to update home hall setting";
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+    }
+
+    /**
+     * Handles text input for manual home hall entry
+     * @param userId The user ID who sent the text
+     * @param text The text message content
+     * @return Response message after processing the input
+     */
+    public String handleTextInput(String userId, String text) {
+        // Check if user is in manual input mode
+        SettingsSelectionState state = userSelectionStates.get(userId);
+        if (state == null || !state.awaitingManualInput) {
+            return null; // Not awaiting input, ignore
+        }
+        
+        // Check admin authorization
+        if (!isAdmin(userId)) {
+            userSelectionStates.remove(userId);
+            return "❌ Access Denied: Only administrators can change settings.";
+        }
+        
+        // Clean up state
+        userSelectionStates.remove(userId);
+        
+        // Trim and validate input
+        String hallValue = text.trim();
+        if (hallValue.isEmpty()) {
+            return "❌ Invalid input: Hall value cannot be empty.";
+        }
+        
+        discordLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, hallValue));
+        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, hallValue));
+        
+        // Update property
+        boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
+        
+        if (success) {
+            String successMsg = String.format("🏠 Successfully set home hall to **%s**\n\nUse /settings to see updated configuration.", hallValue);
+            
+            discordLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
+            telegramLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
             
             return successMsg;
         } else {

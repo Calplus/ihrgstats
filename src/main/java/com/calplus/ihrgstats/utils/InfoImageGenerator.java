@@ -1,0 +1,632 @@
+package com.calplus.ihrgstats.utils;
+
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+
+/**
+ * Utility class for generating single-entity information images.
+ * Used for displaying detailed information about a single player or hall.
+ */
+public class InfoImageGenerator {
+    
+    private static final int ROW_HEIGHT = 30;
+    private static final int LARGE_ICON_SIZE = 192;
+    private static final int PADDING = 20;
+    private static final int SECTION_SPACING = 30;
+    private static final int HEADER_TO_TABLE_SPACING = 50;
+    
+    // Background color - light yellow
+    private static final Color BACKGROUND = new Color(255, 255, 224);
+    
+    // Table colors
+    private static final Color TABLE_LIGHT = new Color(173, 216, 230);
+    private static final Color TABLE_LIGHTER = new Color(224, 255, 255);
+    
+    private static final Color TEXT_COLOR = Color.BLACK;
+    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
+    private static final Font HEADER_FONT = new Font("SansSerif", Font.BOLD, 32);
+    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 48);
+    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 20);
+    
+    /**
+     * Image metadata
+     */
+    public static class ImageMetadata {
+        public String title;
+        public String subtitle;
+        public String lastRound;
+        public String generatedDate;
+        
+        public ImageMetadata() {
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            this.generatedDate = dateFormat.format(new Date());
+        }
+    }
+    
+    /**
+     * Represents a section of data
+     */
+    public static class Section {
+        public String header;
+        public List<Row> rows;
+        public List<VictoryEntry> victoryEntries;
+        
+        public Section(String header) {
+            this.header = header;
+            this.rows = new ArrayList<>();
+            this.victoryEntries = new ArrayList<>();
+        }
+        
+        public void addRow(String label, String value) {
+            rows.add(new Row(label, value));
+        }
+        
+        public void addMonospacedRow(String value) {
+            rows.add(new Row("", value, true));
+        }
+        
+        public void addVictoryEntry(VictoryEntry entry) {
+            victoryEntries.add(entry);
+        }
+    }
+    
+    /**
+     * Represents a data row
+     */
+    public static class Row {
+        public String label;
+        public String value;
+        public boolean leftAlign;  // If true, left-align the value (for monospaced format)
+        
+        public Row(String label, String value) {
+            this(label, value, false);
+        }
+        
+        public Row(String label, String value, boolean leftAlign) {
+            this.label = label;
+            this.value = value;
+            this.leftAlign = leftAlign;
+        }
+    }
+    
+    /**
+     * Victory record entry
+     */
+    public static class VictoryEntry {
+        public String round;
+        public String hallEmoji;        // Outcome emoji for player/hall
+        public String playerHall;       // Player's hall (shortened, e.g. "H1")
+        public String playerElo;        // Player's ELO as string
+        public String playerName;       // Player's name
+        public String score;            // Match score (e.g. "1-0", "0.5-0.5")
+        public String opponentName;     // Opponent's name
+        public String opponentElo;      // Opponent's ELO as string
+        public String opponentHall;     // Opponent's hall (shortened, e.g. "H2")
+        public String oppEmoji;         // Outcome emoji for opponent
+        public boolean isNA;            // True if this round is N/A
+        
+        // Legacy fields for backward compatibility
+        public String result;           // Deprecated: use hallEmoji instead
+        public int _deprecatedOppElo;   // Deprecated: use opponentElo string instead
+    }
+    
+    /**
+     * Generates an information image for a single entity
+     */
+    public static Path generateInfoImage(ImageMetadata metadata, List<Section> sections, String hallIdentifier) throws IOException {
+        // Create temporary graphics to calculate dimensions
+        BufferedImage tempImg = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D tempG2d = tempImg.createGraphics();
+        tempG2d.setFont(TABLE_FONT);
+        FontMetrics fm = tempG2d.getFontMetrics();
+        
+        // Calculate header height
+        int headerHeight = calculateHeaderHeight(tempG2d, metadata);
+        
+        // Calculate content width and height
+        int contentWidth = calculateMaxWidth(sections, fm);
+        int contentHeight = calculateContentHeight(sections, fm);
+        
+        // Determine spacing based on image type
+        // Match info (hallIdentifier == null) needs less spacing, player/hall info needs standard spacing
+        int headerToTableSpacing = (hallIdentifier == null) ? 25 : HEADER_TO_TABLE_SPACING;
+        
+        // Total dimensions
+        int imageWidth = contentWidth + (PADDING * 2);
+        int imageHeight = headerHeight + headerToTableSpacing + contentHeight + PADDING;
+        
+        tempG2d.dispose();
+        
+        // Create actual image
+        BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = image.createGraphics();
+        
+        // Enable antialiasing
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        
+        // Draw tiled background
+        drawTiledBackground(g2d, hallIdentifier, 0, 0, imageWidth, imageHeight);
+        
+        // Draw header
+        drawHeaderSection(g2d, metadata, hallIdentifier, imageWidth);
+        
+        // Draw sections
+        int yOffset = headerHeight + headerToTableSpacing;
+        for (Section section : sections) {
+            yOffset = drawSection(g2d, section, PADDING, yOffset, contentWidth, fm);
+            yOffset += SECTION_SPACING;
+        }
+        
+        g2d.dispose();
+        
+        // Save image
+        Path outputPath = Paths.get(System.getProperty("java.io.tmpdir"), "player_info_" + System.currentTimeMillis() + ".png");
+        ImageIO.write(image, "PNG", outputPath.toFile());
+        
+        return outputPath;
+    }
+    
+    /**
+     * Calculates dynamic header height
+     */
+    private static int calculateHeaderHeight(Graphics2D tempG2d, ImageMetadata metadata) {
+        int height = PADDING * 2;
+        
+        // Title
+        tempG2d.setFont(TITLE_FONT);
+        FontMetrics titleFm = tempG2d.getFontMetrics();
+        height += titleFm.getHeight();
+        
+        // Subtitle
+        if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
+            tempG2d.setFont(HEADER_FONT);
+            FontMetrics subtitleFm = tempG2d.getFontMetrics();
+            height += subtitleFm.getHeight() + 10;
+        }
+        
+        // Icon
+        height = Math.max(height, LARGE_ICON_SIZE + PADDING * 2);
+        
+        // Generated date
+        tempG2d.setFont(METADATA_FONT);
+        FontMetrics metaFm = tempG2d.getFontMetrics();
+        height += metaFm.getHeight() + 10;
+        
+        // Last round
+        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+            height += metaFm.getHeight() + 5;
+        }
+        
+        return height;
+    }
+    
+    /**
+     * Draws header section with metadata
+     */
+    private static void drawHeaderSection(Graphics2D g2d, ImageMetadata metadata, String hallIdentifier, int imageWidth) {
+        int yOffset = PADDING;
+        
+        // Draw title
+        g2d.setFont(TITLE_FONT);
+        g2d.setColor(TEXT_COLOR);
+        FontMetrics titleFm = g2d.getFontMetrics();
+        int titleWidth = titleFm.stringWidth(metadata.title);
+        g2d.drawString(metadata.title, (imageWidth - titleWidth) / 2, yOffset + titleFm.getAscent());
+        yOffset += titleFm.getHeight();
+        
+        // Draw subtitle
+        if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
+            g2d.setFont(HEADER_FONT);
+            FontMetrics subtitleFm = g2d.getFontMetrics();
+            int subtitleWidth = subtitleFm.stringWidth(metadata.subtitle);
+            g2d.drawString(metadata.subtitle, (imageWidth - subtitleWidth) / 2, yOffset + subtitleFm.getAscent() + 10);
+            yOffset += subtitleFm.getHeight() + 10;
+        }
+        
+        // Draw hall icon
+        try {
+            String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
+            InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+            
+            if (iconStream != null) {
+                BufferedImage icon = ImageIO.read(iconStream);
+                int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
+                g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                yOffset += LARGE_ICON_SIZE + 10;
+            }
+        } catch (Exception e) {
+            // Icon not found, skip
+        }
+        
+        // Draw generated date
+        g2d.setFont(METADATA_FONT);
+        g2d.setColor(Color.GRAY);
+        FontMetrics metaFm = g2d.getFontMetrics();
+        String dateText = "Generated: " + metadata.generatedDate;
+        int dateWidth = metaFm.stringWidth(dateText);
+        g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
+        yOffset += metaFm.getHeight() + 5;
+        
+        // Draw last round if available
+        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+            String roundText = "Last Round: " + metadata.lastRound;
+            int roundWidth = metaFm.stringWidth(roundText);
+            g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
+        }
+    }
+    
+    /**
+     * Draws tiled background
+     */
+    private static void drawTiledBackground(Graphics2D g2d, String hallName, int x, int y, int width, int height) {
+        // Fill with solid background color
+        g2d.setColor(BACKGROUND);
+        g2d.fillRect(x, y, width, height);
+        
+        // Try to load and tile hall icon as watermark
+        try {
+            String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
+            InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+            
+            if (iconStream != null) {
+                BufferedImage icon = ImageIO.read(iconStream);
+                
+                // Create semi-transparent version
+                BufferedImage tiledIcon = new BufferedImage(icon.getWidth(), icon.getHeight(), 
+                                                            BufferedImage.TYPE_INT_ARGB);
+                Graphics2D iconG2d = tiledIcon.createGraphics();
+                iconG2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.2f));
+                iconG2d.drawImage(icon, 0, 0, null);
+                iconG2d.dispose();
+                
+                // Save current transform and clip
+                AffineTransform oldTransform = g2d.getTransform();
+                Shape oldClip = g2d.getClip();
+                
+                // Set clip to constrain drawing to this region only
+                g2d.setClip(x, y, width, height);
+                
+                // Rotate 15 degrees around center of this region
+                g2d.translate(x + width / 2, y + height / 2);
+                g2d.rotate(Math.toRadians(-15));
+                g2d.translate(-(x + width / 2), -(y + height / 2));
+                
+                // Tile the icon (with extra tiles to cover rotation)
+                int iconSize = 100;
+                int tilesX = (int) Math.ceil((double) width / iconSize) + 4;
+                int tilesY = (int) Math.ceil((double) height / iconSize) + 4;
+                
+                for (int i = -2; i < tilesX; i++) {
+                    for (int j = -2; j < tilesY; j++) {
+                        int tileX = x + i * iconSize;
+                        int tileY = y + j * iconSize;
+                        g2d.drawImage(tiledIcon, tileX, tileY, iconSize, iconSize, null);
+                    }
+                }
+                
+                // Restore transform and clip
+                g2d.setTransform(oldTransform);
+                g2d.setClip(oldClip);
+            }
+        } catch (Exception e) {
+            // Ignore - just use solid background
+        }
+    }
+    
+    /**
+     * Draws a section
+     */
+    private static int drawSection(Graphics2D g2d, Section section, int x, int y, int width, FontMetrics fm) {
+        int yOffset = y;
+        
+        // Draw section header (centered)
+        g2d.setFont(HEADER_FONT);
+        g2d.setColor(TEXT_COLOR);
+        FontMetrics headerFm = g2d.getFontMetrics();
+        int headerWidth = headerFm.stringWidth(section.header);
+        g2d.drawString(section.header, x + (width - headerWidth) / 2, yOffset + headerFm.getAscent());
+        yOffset += headerFm.getHeight() + 10;
+        
+        g2d.setFont(TABLE_FONT);
+        
+        // Draw rows
+        boolean alternate = false;
+        for (Row row : section.rows) {
+            // Draw row background
+            g2d.setColor(alternate ? TABLE_LIGHT : TABLE_LIGHTER);
+            g2d.fillRect(x, yOffset, width, ROW_HEIGHT);
+            
+            // Draw text
+            g2d.setColor(TEXT_COLOR);
+            int textY = yOffset + (ROW_HEIGHT + fm.getAscent()) / 2;
+            
+            // Determine how to draw the row
+            if (row.leftAlign) {
+                // Left-aligned monospaced format (like ComparisonImageGenerator)
+                g2d.drawString(row.value, x + 5, textY);
+            } else if (row.label == null || row.label.trim().isEmpty()) {
+                // Center the value
+                int valueWidth = fm.stringWidth(row.value);
+                g2d.drawString(row.value, x + (width - valueWidth) / 2, textY);
+            } else {
+                // Standard two-column layout
+                g2d.drawString(row.label, x + 10, textY);
+                g2d.drawString(row.value, x + width / 2, textY);
+            }
+            
+            yOffset += ROW_HEIGHT;
+            alternate = !alternate;
+        }
+        
+        // Draw victory entries
+        for (VictoryEntry entry : section.victoryEntries) {
+            yOffset = drawVictoryEntry(g2d, entry, x, yOffset, width, fm, alternate);
+            alternate = !alternate;
+        }
+        
+        return yOffset;
+    }
+    
+    /**
+     * Draws a victory record entry
+     */
+    private static int drawVictoryEntry(Graphics2D g2d, VictoryEntry entry, int x, int y, int width, FontMetrics fm, boolean alternate) {
+        // Draw row background
+        g2d.setColor(alternate ? TABLE_LIGHT : TABLE_LIGHTER);
+        g2d.fillRect(x, y, width, ROW_HEIGHT);
+        
+        // Draw text
+        g2d.setColor(TEXT_COLOR);
+        int textY = y + (ROW_HEIGHT + fm.getAscent()) / 2;
+        
+        // Handle N/A entries
+        if (entry.isNA) {
+            g2d.drawString(entry.round, x + 5, textY);
+            int naWidth = fm.stringWidth("-NA-");
+            g2d.drawString("-NA-", x + (width - naWidth) / 2, textY);
+            return y + ROW_HEIGHT;
+        }
+        
+        // Fixed width for round column to ensure vertical alignment
+        int roundColWidth = fm.stringWidth("T16 ");
+        
+        // Calculate score position (dead center)
+        int scoreWidth = fm.stringWidth(entry.score);
+        int centerX = x + width / 2;
+        int scoreX = centerX - scoreWidth / 2;
+        
+        // Check if this is a hall victory entry (playerName is empty) or player victory entry
+        boolean isHallEntry = (entry.playerName == null || entry.playerName.trim().isEmpty());
+        
+        if (isHallEntry) {
+            // Hall victory format: round emoji hallElo [hallName] score [oppName] oppElo emoji
+            // Draw left flush: round, emoji, hallElo
+            int leftX = x + 5;
+            g2d.drawString(entry.round, leftX, textY);
+            leftX += roundColWidth;
+            
+            g2d.drawString(entry.hallEmoji, leftX, textY);
+            leftX += fm.stringWidth(entry.hallEmoji) + 3;
+            
+            g2d.drawString(entry.playerElo, leftX, textY);
+            leftX += fm.stringWidth(entry.playerElo) + 8;
+            
+            // Draw right flush: oppElo, oppEmoji
+            int rightX = x + width - 5;
+            rightX -= fm.stringWidth(entry.oppEmoji);
+            g2d.drawString(entry.oppEmoji, rightX, textY);
+            rightX -= 3;
+            
+            rightX -= fm.stringWidth(entry.opponentElo);
+            g2d.drawString(entry.opponentElo, rightX, textY);
+            rightX -= 8;
+            
+            // Draw score at dead center
+            g2d.drawString(entry.score, scoreX, textY);
+            
+            // Draw hall names centered around score
+            int hallNameSpace = scoreX - 8 - leftX;
+            int oppNameSpace = rightX - (scoreX + scoreWidth + 8);
+            
+            // Hall name (right-justified before score)
+            if (hallNameSpace > 20) {
+                String displayName = shortenNameWithInitials(entry.playerHall, hallNameSpace, fm);
+                int nameWidth = fm.stringWidth(displayName);
+                g2d.drawString(displayName, scoreX - 8 - nameWidth, textY);
+            }
+            
+            // Opponent name (left-justified after score)
+            if (oppNameSpace > 20) {
+                String displayName = shortenNameWithInitials(entry.opponentHall, oppNameSpace, fm);
+                g2d.drawString(displayName, scoreX + scoreWidth + 8, textY);
+            }
+        } else {
+            // Player victory format: round emoji playerHall playerElo [playerName] score [oppName] oppElo oppHall emoji
+            // Draw left flush: round, emoji, playerHall, playerElo
+            int leftX = x + 5;
+            g2d.drawString(entry.round, leftX, textY);
+            leftX += roundColWidth;
+            
+            g2d.drawString(entry.hallEmoji, leftX, textY);
+            leftX += fm.stringWidth(entry.hallEmoji) + 6;
+            
+            g2d.drawString(entry.playerHall, leftX, textY);
+            leftX += fm.stringWidth(entry.playerHall) + 6;
+            
+            g2d.drawString(entry.playerElo, leftX, textY);
+            leftX += fm.stringWidth(entry.playerElo) + 20;
+            
+            // Draw right flush: oppElo, oppHall (padded to 3 chars), oppEmoji
+            String paddedOppHall = String.format("%3s", entry.opponentHall);
+            int rightX = x + width - 5;
+            
+            rightX -= fm.stringWidth(entry.oppEmoji);
+            g2d.drawString(entry.oppEmoji, rightX, textY);
+            rightX -= 6;
+            
+            rightX -= fm.stringWidth(paddedOppHall);
+            g2d.drawString(paddedOppHall, rightX, textY);
+            rightX -= 6;
+            
+            rightX -= fm.stringWidth(entry.opponentElo);
+            g2d.drawString(entry.opponentElo, rightX, textY);
+            rightX -= 20;
+            
+            // Draw score at dead center
+            g2d.drawString(entry.score, scoreX, textY);
+            
+            // Calculate available space for names
+            int playerNameSpace = scoreX - 20 - leftX;
+            int oppNameSpace = rightX - (scoreX + scoreWidth + 20);
+            
+            // Draw player name (right-justified before score)
+            if (playerNameSpace > 20) {
+                String displayName = shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
+                int nameWidth = fm.stringWidth(displayName);
+                g2d.drawString(displayName, scoreX - 20 - nameWidth, textY);
+            }
+            
+            // Draw opponent name (left-justified after score)
+            if (oppNameSpace > 20) {
+                String displayName = shortenNameWithInitials(entry.opponentName, oppNameSpace, fm);
+                g2d.drawString(displayName, scoreX + scoreWidth + 20, textY);
+            }
+        }
+        
+        return y + ROW_HEIGHT;
+    }
+    
+    /**
+     * Shortens a name by converting words to initials until it fits in the available width.
+     * Always shortens the longest word first.
+     * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
+     */
+    private static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+        // Split name into words
+        String[] words = name.split("\\s+");
+        if (words.length == 1) {
+            // Single word - return as-is if <= 20 chars, otherwise truncate
+            if (name.length() <= 20) {
+                return name;
+            }
+            // Truncate to 20 chars with ellipsis
+            return name.substring(0, 17) + "...";
+        }
+        
+        // Track which words are already initials
+        boolean[] isInitial = new boolean[words.length];
+        
+        // Keep shortening one word at a time until name is <= 20 characters
+        while (true) {
+            // Build current name
+            StringBuilder current = new StringBuilder();
+            for (int i = 0; i < words.length; i++) {
+                if (i > 0) current.append(" ");
+                current.append(words[i]);
+            }
+            
+            String currentName = current.toString();
+            
+            // If current name is 20 chars or less, we're done
+            if (currentName.length() <= 20) {
+                return currentName;
+            }
+            
+            // Find longest non-initial word to shorten
+            int longestIndex = -1;
+            int longestLength = 0;
+            for (int i = 0; i < words.length; i++) {
+                if (!isInitial[i] && words[i].length() > longestLength) {
+                    longestLength = words[i].length();
+                    longestIndex = i;
+                }
+            }
+            
+            if (longestIndex == -1) {
+                // All words are already initials, can't shorten more
+                // Return as-is even if > 20 chars
+                return currentName;
+            }
+            
+            // Shorten the longest word to initial
+            words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
+            isInitial[longestIndex] = true;
+        }
+    }
+    
+    /**
+     * Calculates maximum width needed for all sections
+     */
+    private static int calculateMaxWidth(List<Section> sections, FontMetrics fm) {
+        int maxWidth = 800;  // Minimum width
+        
+        for (Section section : sections) {
+            for (Row row : section.rows) {
+                int rowWidth = fm.stringWidth(row.label) + fm.stringWidth(row.value) + 100;
+                maxWidth = Math.max(maxWidth, rowWidth);
+            }
+            
+            for (VictoryEntry entry : section.victoryEntries) {
+                if (entry.isNA) {
+                    int entryWidth = fm.stringWidth(entry.round + " -NA-") + 50;
+                    maxWidth = Math.max(maxWidth, entryWidth);
+                } else {
+                    // Calculate width for new format: round + emoji + hall + elo + name + score + name + elo + hall + emoji + spacing
+                    int roundWidth = fm.stringWidth("T16 ");
+                    int emojiWidth = fm.stringWidth(entry.hallEmoji != null ? entry.hallEmoji : "✅") + 6;
+                    int hallWidth = fm.stringWidth(entry.playerHall != null ? entry.playerHall : "H1") + 6;
+                    int eloWidth = fm.stringWidth(entry.playerElo != null ? entry.playerElo : "1500") + 20;
+                    int nameWidth = fm.stringWidth(entry.playerName != null ? shortenNameWithInitials(entry.playerName, 999, fm) : "") + 20;
+                    int scoreWidth = fm.stringWidth(entry.score != null ? entry.score : "1-0") + 40;
+                    int oppNameWidth = fm.stringWidth(entry.opponentName != null ? shortenNameWithInitials(entry.opponentName, 999, fm) : "") + 20;
+                    int oppEloWidth = fm.stringWidth(entry.opponentElo != null ? entry.opponentElo : "1500") + 6;
+                    int oppHallWidth = fm.stringWidth(entry.opponentHall != null ? String.format("%3s", entry.opponentHall) : "H1") + 6;
+                    int oppEmojiWidth = fm.stringWidth(entry.oppEmoji != null ? entry.oppEmoji : "❌");
+                    
+                    int entryWidth = roundWidth + emojiWidth + hallWidth + eloWidth + nameWidth + 
+                                   scoreWidth + oppNameWidth + oppEloWidth + oppHallWidth + oppEmojiWidth + 60;
+                    maxWidth = Math.max(maxWidth, entryWidth);
+                }
+            }
+        }
+        
+        return maxWidth;
+    }
+    
+    /**
+     * Calculates content height for all sections
+     */
+    private static int calculateContentHeight(List<Section> sections, FontMetrics fm) {
+        int height = 0;
+        
+        Graphics2D tempG2d = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
+        tempG2d.setFont(HEADER_FONT);
+        FontMetrics headerFm = tempG2d.getFontMetrics();
+        
+        for (Section section : sections) {
+            // Header height
+            height += headerFm.getHeight() + 10;
+            
+            // Rows height
+            height += (section.rows.size() + section.victoryEntries.size()) * ROW_HEIGHT;
+            
+            // Section spacing
+            height += SECTION_SPACING;
+        }
+        
+        tempG2d.dispose();
+        return height;
+    }
+}

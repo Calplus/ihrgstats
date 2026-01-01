@@ -4,6 +4,7 @@ import com.calplus.ihrgstats.databasemanager.A1_PlayerStats;
 import com.calplus.ihrgstats.databasemanager.A2_CappedPlayers;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.telegrambot.commands.CommandSettings;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramFileDownloader;
@@ -770,6 +771,30 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle help callbacks
+            if (data.startsWith("help_")) {
+                handleHelpCallback(callbackQuery, data, userId);
+                return;
+            }
+            
+            // Handle info player callbacks
+            if (data.startsWith("infoplayer_")) {
+                handleInfoPlayerCallback(callbackQuery, data, userId);
+                return;
+            }
+            
+            // Handle info hall callbacks
+            if (data.startsWith("infohall_")) {
+                handleInfoHallCallback(callbackQuery, data, userId);
+                return;
+            }
+            
+            // Handle info match callbacks
+            if (data.startsWith("infomatch_")) {
+                handleInfoMatchCallback(callbackQuery, data, userId);
+                return;
+            }
+            
             // Handle multi-choice confirmation
             MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
             if (request != null) {
@@ -835,6 +860,14 @@ public class TelegramListener {
         // Check for commands
         if (text.startsWith("/")) {
             handleCommand(text.trim(), message);
+            return;
+        }
+
+        // Check if user is awaiting manual home hall input
+        CommandSettings settingsCommand = new CommandSettings();
+        String settingsResponse = settingsCommand.handleTextInput(userId, text);
+        if (settingsResponse != null) {
+            sendMessageToCommandsChannel(settingsResponse, message);
             return;
         }
 
@@ -1266,6 +1299,16 @@ public class TelegramListener {
             handleCompareHallsCommand(message);
         } else if (command.equalsIgnoreCase("/compareplayers")) {
             handleComparePlayersCommand(message);
+        } else if (command.equalsIgnoreCase("/about")) {
+            handleAboutCommand(message);
+        } else if (command.equalsIgnoreCase("/help")) {
+            handleHelpCommand(message);
+        } else if (command.equalsIgnoreCase("/infoplayer")) {
+            handleInfoPlayerCommand(message);
+        } else if (command.equalsIgnoreCase("/infohall")) {
+            handleInfoHallCommand(message);
+        } else if (command.equalsIgnoreCase("/infomatch")) {
+            handleInfoMatchCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -2310,6 +2353,382 @@ public class TelegramListener {
     }
 
     /**
+     * Handles /about command
+     */
+    private void handleAboutCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandAbout aboutCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandAbout(botToken);
+            
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = 
+                aboutCommand.handleCommand(userId);
+            
+            sendMessageToCommandsChannel(response.message, message);
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /about command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /help command
+     */
+    private void handleHelpCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandHelp helpCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandHelp();
+            
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = 
+                helpCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /help command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /infoplayer command
+     */
+    private void handleInfoPlayerCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response = 
+                infoCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                // Send text message
+                sendLongMessageToCommandsChannel(response.message, message);
+                
+                // Send image if available
+                if (response.imagePath != null) {
+                    sendImageToCommandsChannel(response.imagePath, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /infoplayer command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /infohall command
+     */
+    private void handleInfoHallCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response = 
+                infoCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                // Send text message
+                sendLongMessageToCommandsChannel(response.message, message);
+                
+                // Send image if available
+                if (response.imagePath != null) {
+                    sendImageToCommandsChannel(response.imagePath, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /infohall command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /infomatch command
+     */
+    private void handleInfoMatchCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response = 
+                infoCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                // Send text message
+                sendLongMessageToCommandsChannel(response.message, message);
+                
+                // Send image if available
+                if (response.imagePath != null) {
+                    sendImageToCommandsChannel(response.imagePath, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /infomatch command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles help callback queries
+     */
+    private void handleHelpCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandHelp helpCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandHelp();
+            
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("help_cancel")) {
+                    response = helpCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("help_category_")) {
+                    String category = data.substring("help_category_".length());
+                    response = helpCommand.handleCategorySelection(userId, category);
+                    
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendLongMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("help_filetype_")) {
+                    String fileType = data.substring("help_filetype_".length());
+                    response = helpCommand.handleFileTypeSelection(userId, fileType);
+                    sendLongMessageToCommandsChannel(response.message, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing help callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles info player callback queries
+     */
+    private void handleInfoPlayerCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("infoplayer_cancel")) {
+                    response = infoCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("infoplayer_hall_")) {
+                    String hall = data.substring("infoplayer_hall_".length());
+                    response = infoCommand.handleHallSelection(userId, hall);
+                    
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("infoplayer_player_")) {
+                    String player = data.substring("infoplayer_player_".length());
+                    response = infoCommand.handlePlayerSelection(userId, player);
+                    
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("infoplayer_round_")) {
+                    String round = data.substring("infoplayer_round_".length());
+                    response = infoCommand.handleRoundSelection(userId, round);
+                    
+                    // Send message
+                    sendLongMessageToCommandsChannel(response.message, message);
+                    
+                    // Send image if available
+                    if (response.imagePath != null) {
+                        sendImageToCommandsChannel(response.imagePath, message);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing info player callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles info hall callback queries
+     */
+    private void handleInfoHallCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("infohall_cancel")) {
+                    response = infoCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("infohall_hall_")) {
+                    String hall = data.substring("infohall_hall_".length());
+                    response = infoCommand.handleHallSelection(userId, hall);
+                    
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("infohall_round_")) {
+                    String round = data.substring("infohall_round_".length());
+                    response = infoCommand.handleRoundSelection(userId, round);
+                    
+                    // Send message
+                    sendLongMessageToCommandsChannel(response.message, message);
+                    
+                    // Send image if available
+                    if (response.imagePath != null) {
+                        sendImageToCommandsChannel(response.imagePath, message);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing info hall callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles info match callback queries
+     */
+    private void handleInfoMatchCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("infomatch_cancel")) {
+                    response = infoCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("infomatch_round_")) {
+                    String round = data.substring("infomatch_round_".length());
+                    response = infoCommand.handleRoundSelection(userId, round);
+                    
+                    // Send message
+                    sendLongMessageToCommandsChannel(response.message, message);
+                    
+                    // Send image if available
+                    if (response.imagePath != null) {
+                        sendImageToCommandsChannel(response.imagePath, message);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing info match callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * Sends an image to the commands channel (both compressed and uncompressed)
      */
     private void sendImageToCommandsChannel(java.nio.file.Path imagePath, JsonObject originalMessage) {
@@ -2628,6 +3047,107 @@ public class TelegramListener {
         } catch (Exception e) {
             discordLog.logError("Error sending export buttons: " + e.getMessage());
             telegramLog.logError("Error sending export buttons: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Sends a message with generic buttons (4-column layout)
+     * This is a general-purpose method that can be used for any command with buttons
+     */
+    private void sendMessageWithGenericButtons(String message, 
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
+            JsonObject originalMessage) {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            
+            JsonObject payload = new JsonObject();
+            
+            // Determine where to send
+            if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
+                JsonObject chat = originalMessage.getAsJsonObject("chat");
+                payload.addProperty("chat_id", chat.get("id").getAsString());
+                
+                if (originalMessage.has("message_thread_id")) {
+                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                }
+            } else {
+                String[] chatAndThread = getCommandsChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null) return;
+                
+                payload.addProperty("chat_id", chatAndThread[0]);
+                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
+                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                }
+            }
+            
+            payload.addProperty("text", message);
+            
+            // Add parse_mode for markdown if message contains code blocks or formatting
+            if (message.contains("```") || message.contains("**") || message.contains("__") || message.contains("*")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
+            
+            // Create inline keyboard with configurable columns per row
+            JsonObject replyMarkup = new JsonObject();
+            JsonArray keyboard = new JsonArray();
+            
+            int columnsPerRow = buttonConfig.columnsPerRow != null ? buttonConfig.columnsPerRow : 4;
+            JsonArray currentRow = new JsonArray();
+            
+            for (int i = 0; i < buttonConfig.labels.length; i++) {
+                String label = buttonConfig.labels[i];
+                String callback = buttonConfig.callbacks[i];
+                
+                JsonObject button = new JsonObject();
+                button.addProperty("text", label);
+                button.addProperty("callback_data", callback);
+                
+                // Check if this button should be on its own row (actions like Cancel, Back)
+                boolean isActionButton = label.contains("❌") || label.contains("Cancel") || 
+                                        label.contains("Back") || callback.endsWith("_cancel") || 
+                                        callback.endsWith("_back");
+                
+                if (isActionButton) {
+                    // Add current row if it has buttons
+                    if (currentRow.size() > 0) {
+                        keyboard.add(currentRow);
+                        currentRow = new JsonArray();
+                    }
+                    // Add action button on its own row
+                    JsonArray singleRow = new JsonArray();
+                    singleRow.add(button);
+                    keyboard.add(singleRow);
+                } else {
+                    currentRow.add(button);
+                    
+                    // Add row when we reach columnsPerRow
+                    if (currentRow.size() >= columnsPerRow) {
+                        keyboard.add(currentRow);
+                        currentRow = new JsonArray();
+                    }
+                }
+            }
+            
+            // Add any remaining buttons
+            if (currentRow.size() > 0) {
+                keyboard.add(currentRow);
+            }
+            
+            replyMarkup.add("inline_keyboard", keyboard);
+            payload.add("reply_markup", replyMarkup);
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+                .build();
+            
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        } catch (Exception e) {
+            discordLog.logError("Error sending generic buttons: " + e.getMessage());
+            telegramLog.logError("Error sending generic buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }
