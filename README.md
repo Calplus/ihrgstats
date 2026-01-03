@@ -3,7 +3,7 @@
 # IHRG Statistics Bot
 
 ![IHRG Stats Icon](Github%20Images/Icon_IHRGStats.png)
-![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2002,%202026-red)
+![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2004,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -66,7 +66,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 Get comprehensive statistics for any player. View their Elo, Past seating, Victory records, Hall affiliation, and performance trends over time.
 
 <div align = "center">
-![Info Player Example](Github%20Images/SAMPLE_InfoPlayer.png)
+<img src="Github%20Images/SAMPLE_InfoPlayer.png.png">
 </div>
 
 **2. Player Rankings (/rankplayers)**
