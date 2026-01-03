@@ -3,6 +3,7 @@
 # IHRG Statistics Bot
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
+
 ![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2004,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
