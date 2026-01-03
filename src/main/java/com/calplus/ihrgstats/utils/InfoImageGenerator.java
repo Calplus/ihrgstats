@@ -49,6 +49,7 @@ public class InfoImageGenerator {
         public String description;
         public String lastRound;
         public String generatedDate;
+        public String secondHallIdentifier;  // Optional: for displaying two halls side-by-side
         
         public ImageMetadata() {
             this.generatedDate = TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss");
@@ -295,24 +296,71 @@ public class InfoImageGenerator {
         
         // Draw hall icon (if available)
         if (hallIdentifier != null) {
-            try {
-                String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
-                InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+            // Check if we need to draw two hall icons side by side
+            if (metadata.secondHallIdentifier != null) {
+                // Draw two icons side by side
+                int iconSpacing = 40;  // Space between icons
+                int totalWidth = (LARGE_ICON_SIZE * 2) + iconSpacing;
+                int startX = (imageWidth - totalWidth) / 2;
                 
-                // Try unknown.png fallback if icon not found
-                if (iconStream == null) {
-                    iconPath = "/halls/unknown.png";
-                    iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+                // Draw first hall icon
+                try {
+                    String iconPath1 = "/halls/" + hallIdentifier.toLowerCase() + ".png";
+                    InputStream iconStream1 = InfoImageGenerator.class.getResourceAsStream(iconPath1);
+                    
+                    if (iconStream1 == null) {
+                        iconPath1 = "/halls/unknown.png";
+                        iconStream1 = InfoImageGenerator.class.getResourceAsStream(iconPath1);
+                    }
+                    
+                    if (iconStream1 != null) {
+                        BufferedImage icon1 = ImageIO.read(iconStream1);
+                        g2d.drawImage(icon1, startX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                    }
+                } catch (Exception e) {
+                    // Icon not found, skip
                 }
                 
-                if (iconStream != null) {
-                    BufferedImage icon = ImageIO.read(iconStream);
-                    int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
-                    g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
-                    yOffset += LARGE_ICON_SIZE + 10;
+                // Draw second hall icon
+                try {
+                    String iconPath2 = "/halls/" + metadata.secondHallIdentifier.toLowerCase() + ".png";
+                    InputStream iconStream2 = InfoImageGenerator.class.getResourceAsStream(iconPath2);
+                    
+                    if (iconStream2 == null) {
+                        iconPath2 = "/halls/unknown.png";
+                        iconStream2 = InfoImageGenerator.class.getResourceAsStream(iconPath2);
+                    }
+                    
+                    if (iconStream2 != null) {
+                        BufferedImage icon2 = ImageIO.read(iconStream2);
+                        g2d.drawImage(icon2, startX + LARGE_ICON_SIZE + iconSpacing, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                    }
+                } catch (Exception e) {
+                    // Icon not found, skip
                 }
-            } catch (Exception e) {
-                // Icon not found, skip
+                
+                yOffset += LARGE_ICON_SIZE + 10;
+            } else {
+                // Draw single icon (original behavior)
+                try {
+                    String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
+                    InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+                    
+                    // Try unknown.png fallback if icon not found
+                    if (iconStream == null) {
+                        iconPath = "/halls/unknown.png";
+                        iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
+                    }
+                    
+                    if (iconStream != null) {
+                        BufferedImage icon = ImageIO.read(iconStream);
+                        int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
+                        g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                        yOffset += LARGE_ICON_SIZE + 10;
+                    }
+                } catch (Exception e) {
+                    // Icon not found, skip
+                }
             }
         } else {
             // For match info: draw metadata after subtitle

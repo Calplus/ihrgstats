@@ -45,7 +45,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **2. Ease of Management**: Administrators can optionally set up detailed logs to both Telegram and Discord, without the need to open up server console!
 
-**3. Advanced ELO System**: Uses Batch Glicko-2 with increased volatility for precise skill assessment with as few games as possible. Track player skills using numbers with industry-standard algorithms used by professional organizations.
+**3. Advanced ELO System**: Uses Batch Glicko-2 with increased volatility for precise and distinct skill assessment with as few games as possible. Track player skills using numbers with industry-standard algorithms used by professional organizations.
 
 **4. Quick Data Retrieval**: Built on SQLite with comprehensive validation, your tournament data is stored reliably. Every file upload is thoroughly verified, every mismatch is caught, and every change is logged.
 
@@ -101,6 +101,15 @@ Compare two halls side-by-side to analyze team strength differences, member stat
 Retrieve detailed breakdowns of any match by round number. See all participating players, scores, ELO changes, and match outcomes including proper WALKOVER handling.
 
 ![Info Match Example](Github%20Images/SAMPLE_InfoMatch.png)
+
+**Hall Match Details**
+View comprehensive match information for a specific hall in a specific round using the `/infomatchhall` command. Get three detailed tables:
+
+- **Table 1 - Player ELO Stats**: Shows all players from the hall with their rank, ELO rating, and changes from the previous round (ΔRank and ΔELO)
+- **Table 2 - Seating**: Displays the seating arrangement with seat numbers and player names
+- **Table 3 - Match Details**: Individual match results for each seat showing opponents, scores, and outcomes (✅ Win, 🟰 Draw, ❌ Loss)
+
+This command is perfect for captains and managers who want to analyze their team's performance in a specific round, or players wanting to review their hall's match history.
 
 **Round Processing**
 Upload round result files and watch as the bot automatically calculates ELO changes, updates player statistics, tracks victories, and generates comprehensive match summaries.
@@ -487,6 +496,37 @@ Display detailed match information for a specific round.
 - Round not found: "No data found for round X"
 - No match data: "No matches recorded for round X"
 - Database error: "Error retrieving match information. Please try again later."
+
+---
+
+**`/infomatchhall`**
+Display comprehensive match details for a specific hall in a specific round with interactive selection.
+
+```
+/infomatchhall
+# Step 1: Bot shows hall selection buttons
+# Step 2: Select a hall (e.g., Hall4, Binjai)
+# Step 3: Bot shows available round buttons  
+# Step 4: Select a round (e.g., Round 1, Round T4)
+# Step 5: View three detailed tables
+```
+
+**Output Tables:**
+- **Table 1 - Player ELO Stats**: Player names, ranks, ELO ratings, and changes (ΔRank, ΔELO) from previous round
+- **Table 2 - Seating**: Seat numbers and corresponding player names
+- **Table 3 - Match Details**: Individual match results with opponents, scores, and outcome emojis (✅ Win, 🟰 Draw, ❌ Loss)
+
+**Notes:**
+- For round 1, ΔRank shows "-" (no previous rank)
+- prevElo for round 1 uses base ELO from database (typically 1000)
+- WALKOVER opponents show "-" for ELO
+- Tables available in both text and image format
+
+**Error Handling:**
+- No rounds found: "No rounds found in database. Please process rounds first."
+- No data for hall: "No players found for hall X in round Y"
+- Invalid selection: Returns to appropriate step (hall or round selection)
+- Database error: "Error retrieving hall match information. Please try again later."
 
 ---
 

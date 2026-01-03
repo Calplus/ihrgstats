@@ -121,6 +121,7 @@ public class CommandHelp {
         
         message.append("<b>Match & Data Commands:</b>\n");
         message.append("• /infomatch - Get details of a match for a specific round\n");
+        message.append("• /infomatchhall - Get detailed match information for a hall in a specific round\n");
         message.append("• /exportplayers - Exports latest player data as a .csv. File can be uploaded to set default values in a blank database table.\n\n");
         
         message.append("<b>Utility Commands:</b>\n");
@@ -137,19 +138,21 @@ public class CommandHelp {
             "/rankplayers", "/rankhalls",
             "/compareplayers", "/comparehalls",
             "/infoplayer", "/infohall",
-            "/infomatch", "/exportplayers",
-            "/settings", "/exportdatabase",
-            "/about", "/help",
-            "🔙 Back", "❌ Cancel"
+            "/infomatch", "/infomatchhall",
+            "/exportplayers", "/settings",
+            "/exportdatabase", "/about",
+            "/help", "🔙 Back",
+            "❌ Cancel"
         };
         String[] callbacks = {
             "help_cmd_rankplayers", "help_cmd_rankhalls",
             "help_cmd_compareplayers", "help_cmd_comparehalls",
             "help_cmd_infoplayer", "help_cmd_infohall",
-            "help_cmd_infomatch", "help_cmd_exportplayers",
-            "help_cmd_settings", "help_cmd_exportdatabase",
-            "help_cmd_about", "help_cmd_help",
-            "help_back", "help_cancel"
+            "help_cmd_infomatch", "help_cmd_infomatchhall",
+            "help_cmd_exportplayers", "help_cmd_settings",
+            "help_cmd_exportdatabase", "help_cmd_about",
+            "help_cmd_help", "help_back",
+            "help_cancel"
         };
         
         logHelper.logSuccess("Generated commands help menu with buttons");
@@ -490,6 +493,37 @@ public class CommandHelp {
                 message.append("<b>Interpretation:</b>\n");
                 message.append("• Match wins = number of rounds won\n");
                 message.append("• Board wins = total individual game victories across all rounds\n");
+                break;
+                
+            case "infomatchhall":
+                message.append("<b>/infomatchhall</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("View detailed match information for a specific hall in a specific round, including player stats, seating, and individual match results.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/infomatchhall</code>\n\n");
+                message.append("<b>Steps:</b>\n");
+                message.append("1. Select a hall from the list\n");
+                message.append("2. Select a round from available rounds\n");
+                message.append("3. View detailed statistics with three tables\n\n");
+                message.append("<b>Output Tables:</b>\n");
+                message.append("<b>Table 1 - Player ELO Stats:</b>\n");
+                message.append("• Player names from the selected hall\n");
+                message.append("• Current rank and ELO rating for the round\n");
+                message.append("• ΔRank: Change in rank from previous round (+ = improvement, - = decline, = = no change, - = first round)\n");
+                message.append("• ΔELO: Change in ELO from previous round\n\n");
+                message.append("<b>Table 2 - Seating:</b>\n");
+                message.append("• Seat number assignment\n");
+                message.append("• Player name for each seat\n");
+                message.append("• Shows the seating order for the round\n\n");
+                message.append("<b>Table 3 - Match Details:</b>\n");
+                message.append("• Individual match results per seat\n");
+                message.append("• Format: Seat | Emoji | Hall | ELO | Player | Score | Opponent | ELO | Hall | Emoji\n");
+                message.append("• Outcome emoji: ✅ Win, 🟰 Draw, ❌ Loss\n");
+                message.append("• Score format shows board wins\n");
+                message.append("• WALKOVER opponents shown with \"-\" ELO\n\n");
+                message.append("<b>Note:</b>\n");
+                message.append("• For round 1, ΔRank will show \"-\" (no previous rank)\n");
+                message.append("• prevElo for round 1 uses baseElo from database (typically 1000)\n");
                 break;
                 
             case "settings":

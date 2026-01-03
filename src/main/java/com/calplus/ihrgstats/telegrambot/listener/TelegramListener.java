@@ -581,10 +581,11 @@ public class TelegramListener {
             String data = callbackQuery.get("data").getAsString();
             JsonObject from = callbackQuery.getAsJsonObject("from");
             String userId = from.get("id").getAsString();
-            String userName = from.has("username") ? from.get("username").getAsString() : "User";
+            String userName = from.has("username") ? from.get("username").getAsString() : null;
+            String userInfo = userName != null ? String.format("@%s (ID: %s)", userName, userId) : String.format("User (ID: %s)", userId);
             
-            discordLog.logInfo(String.format("Button clicked by %s (ID: %s): %s", userName, userId, data));
-            telegramLog.logInfo(String.format("Button clicked by %s (ID: %s): %s", userName, userId, data));
+            discordLog.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
+            telegramLog.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
             
             // Answer the callback query to remove loading state
             answerCallbackQuery(callbackId);
@@ -875,6 +876,12 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle info match hall callbacks
+            if (data.startsWith("infomatchhall_")) {
+                handleInfoMatchHallCallback(callbackQuery, data, userId);
+                return;
+            }
+            
             // Handle multi-choice confirmation
             MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
             if (request != null) {
@@ -972,6 +979,29 @@ public class TelegramListener {
             System.out.println("No pending confirmation found for text: '" + text + "'");
         }
     }
+    
+    /**
+     * Extracts user information from a message for logging
+     * Returns formatted string like "@username (ID: 123456)" or "User (ID: 123456)" if username not available
+     */
+    private String getUserInfoFromMessage(JsonObject message) {
+        try {
+            if (message.has("from")) {
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.has("id") ? from.get("id").getAsString() : "unknown";
+                String username = from.has("username") ? from.get("username").getAsString() : null;
+                
+                if (username != null && !username.isEmpty()) {
+                    return String.format("@%s (ID: %s)", username, userId);
+                } else {
+                    return String.format("User (ID: %s)", userId);
+                }
+            }
+            return "Unknown user";
+        } catch (Exception e) {
+            return "Unknown user";
+        }
+    }
 
     /**
      * Handles file upload
@@ -981,12 +1011,14 @@ public class TelegramListener {
             String fileName = document.get("file_name").getAsString();
             String fileId = document.get("file_id").getAsString();
             
+            // Extract user information
             JsonObject from = message.getAsJsonObject("from");
             String userId = from.get("id").getAsString();
             String username = from.has("username") ? from.get("username").getAsString() : "Unknown";
+            String userInfo = from.has("username") ? String.format("@%s (ID: %s)", username, userId) : String.format("User (ID: %s)", userId);
             
-            discordLog.logInfo(String.format("File upload detected: %s from user %s (ID: %s)", fileName, username, userId));
-            telegramLog.logInfo(String.format("File upload detected: %s from user %s (ID: %s)", fileName, username, userId));
+            discordLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
+            telegramLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
             
             // Additional safety check: validate file upload channel when allowAllChannelsProcessing is false
             if (!allowAllChannelsProcessing && !publicChatId.isEmpty()) {
@@ -1389,6 +1421,8 @@ public class TelegramListener {
             handleInfoHallCommand(message);
         } else if (command.equalsIgnoreCase("/infomatch")) {
             handleInfoMatchCommand(message);
+        } else if (command.equalsIgnoreCase("/infomatchhall")) {
+            handleInfoMatchHallCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -1398,8 +1432,9 @@ public class TelegramListener {
      * Handles /exportplayers command
      */
     private void handleExportPlayersCommand(JsonObject message) {
-        discordLog.logInfo("Processing /exportplayers command...");
-        telegramLog.logInfo("Processing /exportplayers command...");
+        String userInfo = getUserInfoFromMessage(message);
+        discordLog.logInfo(String.format("User %s: Processing /exportplayers command", userInfo));
+        telegramLog.logInfo(String.format("User %s: Processing /exportplayers command", userInfo));
 
         try {
             com.calplus.ihrgstats.telegrambot.commands.CommandExportPlayers exporter = 
@@ -2626,6 +2661,42 @@ public class TelegramListener {
     }
 
     /**
+     * Handles /infomatchhall command
+     */
+    private void handleInfoMatchHallCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response = 
+                infoCommand.handleCommand(userId);
+            
+            // Send message with buttons if available
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                // Send text message
+                sendLongMessageToCommandsChannel(response.message, message);
+                
+                // Send image if available
+                if (response.imagePath != null) {
+                    sendImageToCommandsChannel(response.imagePath, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /infomatchhall command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
      * Handles help callback queries
      */
     private void handleHelpCallback(JsonObject callbackQuery, String data, String userId) {
@@ -2836,6 +2907,61 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing info match callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles info match hall callback queries
+     */
+    private void handleInfoMatchHallCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall infoCommand = 
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall();
+            
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response;
+            
+            // Get original message
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+                
+                // Remove buttons from original message
+                removeInlineKeyboard(chatId, messageId);
+                
+                if (data.equals("infomatchhall_cancel")) {
+                    response = infoCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("infomatchhall_hall_")) {
+                    String hall = data.substring("infomatchhall_hall_".length());
+                    response = infoCommand.handleHallSelection(userId, hall);
+                    
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("infomatchhall_round_")) {
+                    String round = data.substring("infomatchhall_round_".length());
+                    response = infoCommand.handleRoundSelection(userId, round);
+                    
+                    // Send message
+                    sendLongMessageToCommandsChannel(response.message, message);
+                    
+                    // Send image if available
+                    if (response.imagePath != null) {
+                        sendImageToCommandsChannel(response.imagePath, message);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing info match hall callback: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             e.printStackTrace();
