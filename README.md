@@ -1,13 +1,24 @@
+<div align = "center">
+
 # IHRG Statistics Bot
 
 ![IHRG Stats Icon](Github%20Images/Icon_IHRGStats.png)
-**Version:** 1.0.0 (January 2, 2026)
+![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2002,%202026-red)
 
-A powerful and intelligent statistics tracking bot designed specifically for NTU's Inter-Hall Recreational Games (IHRG). Transform your hanafuda tournament data into stunning visualizations, detailed player analytics, and comprehensive rankings with just a few commands. Whether you're managing a competitive league or tracking casual play, IHRG Statistics Bot delivers professional-grade statistics with minimal effort.
+<img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
+</div>
+
+A powerful and intelligent statistics tracking bot designed specifically for NTU's Inter-Hall Recreational Games (IHRG). View stunning visualizations, detailed player/team analytics, and comprehensive rankings with just a few commands. Whether you're a manager/captain wondering about your opponent's skills, or a player wishing to know more about their upcoming opponent, the IHRG Statistics Bot delivers professional-grade statistics with minimal effort for everyone!
+
+<div align = "center">
+
+*Note: All data used in the examples here are compeltely made-up and randomly generated, and not representitive of any of the aforementioned person's skills or talent. All names used are either fictional or historical figures, and are merely used for fun. All fictional names belong to their respective copyright holder(s). Any coincidences or similarities to real-life events involving historical figures are completely coincidental. No harm or message is intended by the examples used here.*
+
+</div>
 
 ## Table of Contents
 
-- [Why Choose IHRG Statistics Bot?](#why-choose-ihrg-statistics-bot)
+- [About IHRGStats](#About-IHRGStats)
 - [Key Features](#key-features)
 - [Installation & Server Deployment](#installation--server-deployment)
 - [Configuration](#configuration)
@@ -18,35 +29,47 @@ A powerful and intelligent statistics tracking bot designed specifically for NTU
 - [Project Structure](#project-structure)
 - [Support](#support)
 
-## Why Choose IHRG Statistics Bot?
+## About IHRGStats
 
-IHRG Statistics Bot is the complete solution for tournament organizers and competitive players who demand accuracy, automation, and beautiful presentation. Built from the ground up for hanafuda tournaments, this bot eliminates manual spreadsheet work and delivers instant insights through an intuitive command interface.
+IHRG Statistics Bot is the complete solution for tournament organizers and competitive players who demand accuracy, automation, and beautiful presentation. Built from the ground up for IHRG tournaments, this bot eliminates manual spreadsheet work and delivers instant insights through an intuitive command interface.
 
-### What Makes It Special
+### Who is it for?
 
-**Dual Platform Support**: Seamlessly operates on both Telegram and Discord simultaneously, ensuring your community can access statistics on their platform of choice.
+**- Captains/Managers**: Check how your team is doing against other teams in a tournament, and view statistics about your or your opponent's teams!
 
-**Advanced ELO System**: Implements dual ELO rating calculations (True Elo and Performance Elo) with Glicko-2 volatility for precise skill assessment. Track player progression with industry-standard algorithms used by professional gaming leagues.
+**- Players**: View your previous tournament matches, and check how good your opponent(s) are!
 
-**Zero Data Loss**: Built on SQLite with comprehensive validation, your tournament data is stored reliably with automatic backup capabilities. Every upload is verified, every mismatch is caught, and every change is logged.
+### Features
 
-**Professional Visualizations**: Generate publication-quality images for rankings, player profiles, and head-to-head comparisons. Each image is timestamped, customizable, and ready to share with your community.
+**1. Simple Telegram Integration**: Seamlessly integrate the bot on Telegram, ensuring your community can access statistics anytime!
 
-**Smart Automation**: Intelligent file processing detects errors before they corrupt your database. Interactive confirmation dialogs guide you through data conflicts, and comprehensive error messages explain exactly what went wrong and how to fix it.
+**2. Ease of Management**: Administrators can optionally set up detailed logs to both Telegram and Discord, without the need to open up server console!
 
-**Admin-Friendly**: Granular permission controls, interactive settings management, and detailed activity logging ensure secure administration without technical complexity.
+**3. Advanced ELO System**: Uses Batch Glicko-2 with increased volatility for precise skill assessment with as few games as possible. Track player skills using numbers with industry-standard algorithms used by professional organizations.
+
+**4. Quick Data Retrieval**: Built on SQLite with comprehensive validation, your tournament data is stored reliably. Every file upload is thoroughly verified, every mismatch is caught, and every change is logged.
+
+**5. Professional Visualizations**: Generate publication-quality images for rankings, player profiles, and head-to-head comparisons. Each image is timestamped, customizable, and ready to share with your community.
+
+**6. Smart Automation**: Intelligent file processing detects errors before they corrupt your database. Interactive confirmation dialogs guide you through data conflicts, and comprehensive error messages explain exactly what went wrong and how to fix it.
+
+**7. Admin-Friendly**: Granular permission controls, interactive settings management, and detailed activity logging ensure secure administration without technical complexity.
 
 ## Key Features
 
+<div align = "center">
 ### Player Analytics
+</div>
 
-**Individual Player Profiles**
-Get comprehensive statistics for any player with the `/infoplayer` command. View their current ELO ratings, match history, victory records, hall affiliation, and performance trends over time.
+**1. Individual Player Profiles**
+
+Get comprehensive statistics for any player with the `/infoplayer` command. View their elo, past seating, victory records, hall affiliation, and performance trends over time.
 
 ![Info Player Example](Github%20Images/SAMPLE_InfoPlayer.png)
 
-**Player Rankings**
-Display dynamic leaderboards sorted by True ELO or Performance ELO. Filter by hall affiliation or view top performers across all halls. Rankings update automatically with each processed round.
+**2.  Player Rankings**
+
+Display leaderboards sorted by True ELO or Performance ELO. Filter by hall affiliation or view top performers across all halls. Rankings update automatically with each processed round.
 
 ![Rank Players Example](Github%20Images/SAMPLE_RankPlayers.png)
 
