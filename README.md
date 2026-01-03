@@ -10,22 +10,24 @@
 
 A powerful and intelligent statistics tracking bot designed specifically for NTU's Inter-Hall Recreational Games (IHRG). View stunning visualizations, detailed player/team analytics, and comprehensive rankings with just a few commands. Whether you're a manager/captain wondering about your opponent's skills, or a player wishing to know more about their upcoming opponent, the IHRG Statistics Bot delivers professional-grade statistics with minimal effort for everyone!
 
+
+
 <div align = "center">
 
-*Note: All data used in the examples here are compeltely made-up and randomly generated, and not representitive of any of the aforementioned person's skills or talent. All names used are either fictional or historical figures, and are merely used for fun. All fictional names belong to their respective copyright holder(s). Any coincidences or similarities to real-life events involving historical figures are completely coincidental. No harm or message is intended by the examples used here.*
+*DISCLAIMER: All data used in the examples here are compeltely made-up and randomly generated, and not representitive of any of the aforementioned person's skills or talent. All names used are either fictional or historical figures, and are merely used for fun. All fictional names belong to their respective copyright holder(s). Any coincidences or similarities to real-life events involving historical figures are completely coincidental. No harm or message is intended by the examples used here. Hall Logos used are designed by the respective JCRCs of NTU Halls.*
 
 </div>
+
+
 
 ## Table of Contents
 
 - [About IHRGStats](#About-IHRGStats)
-- [Key Features](#key-features)
+- [Commands](#commands)
+- [File Uploads & Data Handling](#File-Uploads--Data-Handling)
 - [Installation & Server Deployment](#installation--server-deployment)
-- [Configuration](#configuration)
-- [Commands Reference](#commands-reference)
 - [File Upload System](#file-upload-system)
 - [Error Handling & Reliability](#error-handling--reliability)
-- [Visual Examples](#visual-examples)
 - [Project Structure](#project-structure)
 - [Support](#support)
 
@@ -39,7 +41,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **- Players**: View your previous tournament matches, and check how good your opponent(s) are!
 
-### Features
+### Key Features
 
 **1. Simple Telegram Integration**: Seamlessly integrate the bot on Telegram, ensuring your community can access statistics anytime!
 
@@ -55,84 +57,113 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **7. Admin-Friendly**: Granular permission controls, interactive settings management, and detailed activity logging ensure secure administration without technical complexity.
 
-## Key Features
+## Commands
+
+### Player Analytics
+
+**1. Individual Player Profiles (/infoplayer)**
+
+Get comprehensive statistics for any player. View their Elo, Past seating, Victory records, Hall affiliation, and performance trends over time.
 
 <div align = "center">
-### Player Analytics
+![Info Player Example](Github%20Images/SAMPLE_InfoPlayer.png)
 </div>
 
-**1. Individual Player Profiles**
+**2. Player Rankings (/rankplayers)**
 
-Get comprehensive statistics for any player with the `/infoplayer` command. View their elo, past seating, victory records, hall affiliation, and performance trends over time.
-
-![Info Player Example](Github%20Images/SAMPLE_InfoPlayer.png)
-
-**2.  Player Rankings**
-
-Display leaderboards sorted by True ELO or Performance ELO. Filter by hall affiliation or view top performers across all halls. Rankings update automatically with each processed round.
+Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played. Players part of the hall you selected will be highlighted!
 
 ![Rank Players Example](Github%20Images/SAMPLE_RankPlayers.png)
 
-**Player Comparisons**
-Compare two players side-by-side with visual split-screen layouts. See win rates, ELO differences, head-to-head records, and statistical advantages at a glance.
+**3. Player Comparisons (/compareplayers)**
+
+Compare two players side-by-side with visual split-screen layouts. See Round Stats, Past Seating and Victory Records at a glance.
 
 ![Compare Players Example](Github%20Images/SAMPLE_ComparePlayers.png)
 
-### Hall Management
 
-**Hall Rankings**
-Track team performance with comprehensive hall-level statistics. See which halls dominate the competition based on aggregate player performance and match results.
 
-![Rank Halls Example](Github%20Images/SAMPLE_RankHalls.png)
+### Hall Analytics
 
-**Hall Information**
+**4. Hall Information (infohall)**
+
 View detailed statistics for individual halls including member rosters, win/loss records, average ELO ratings, and recent performance trends.
 
 ![Info Hall Example](Github%20Images/SAMPLE_InfoHall.png)
 
-**Hall Comparisons**
-Compare two halls side-by-side to analyze team strength differences, member statistics, and competitive advantages.
+**5. Hall Rankings (/rankhalls)**
+
+See which halls dominate the competition based on aggregate player performance and match results! Easily view each hall's total Cap Points and Average Elo, taken from the top 5 players of the team. The hall you selected in the settings will be highlighted!
+
+![Rank Halls Example](Github%20Images/SAMPLE_RankHalls.png)
+
+**6. Hall Comparisons (/comparehalls)**
+
+Compare two halls side-by-side to analyze team strength differences, member statistics, and competitive advantages!
 
 ![Compare Halls Example](Github%20Images/SAMPLE_CompareHalls.png)
 
+
+
 ### Match & Tournament Data
 
-**Match Information**
-Retrieve detailed breakdowns of any match by round number. See all participating players, scores, ELO changes, and match outcomes including proper WALKOVER handling.
+**7. Match Information (/infomatch)**
+
+Retrieve a high-level breakdown of any match by round number. See all participating teams, scores and match outcomes including proper WALKOVER handling.
 
 ![Info Match Example](Github%20Images/SAMPLE_InfoMatch.png)
 
-**Hall Match Details**
-View comprehensive match information for a specific hall in a specific round using the `/infomatchhall` command. Get three detailed tables:
+**8. Hall Match Details (/infomatchhall)**
 
-- **Table 1 - Player ELO Stats**: Shows all players from the hall with their rank, ELO rating, and changes from the previous round (ΔRank and ΔELO)
-- **Table 2 - Seating**: Displays the seating arrangement with seat numbers and player names
-- **Table 3 - Match Details**: Individual match results for each seat showing opponents, scores, and outcomes (✅ Win, 🟰 Draw, ❌ Loss)
+View comprehensive match information for a specific hall in a specific round. 
 
-This command is perfect for captains and managers who want to analyze their team's performance in a specific round, or players wanting to review their hall's match history.
+![Info Match Hall Example](Github%20Images/SAMPLE_InfoMatchHall.png)
 
-**Round Processing**
-Upload round result files and watch as the bot automatically calculates ELO changes, updates player statistics, tracks victories, and generates comprehensive match summaries.
 
-**Tournament Export**
-Export complete player databases or full tournament data to CSV format for external analysis, archival purposes, or migration to other systems.
 
-### Administrative Controls
+### Miscellanious
 
-**Interactive Settings**
-Access a full-featured settings panel with button-based controls:
-- Toggle Performance ELO calculations on/off
-- Enable/disable non-admin file uploads
-- Configure home hall for personalized queries
-- Set maximum seed values for calculations
-- Adjust timezone (UTC-12 to UTC+14) for accurate timestamps
-- Control channel processing permissions
+**9. Export Player Data (/exportplayers)**
 
-**Database Management**
-Export complete databases with administrative approval. All exports are timestamped and logged for audit trails.
+Exports a high-level overview of player data into a .csv, containing detailed information about each player. This .csv file can be reuploaded to the bot to instantiate data for a blank database (particularly trueElo and lastHall). Capped status does not carry over.
 
-**Permission System**
-Granular access controls ensure only authorized administrators can modify settings, process files, or export sensitive data.
+![Export Players Example](Github%20Images/SCREENSHOT_playerExport.png)
+
+**10. Help (/help)**
+
+You ask it for help. Or it asks you for help. Either way, you get to choose whether you need help for commands, or file upload format. You can also ask it for specifics of a file, if you so choose.
+
+<img src="Github%20Images/TELEGRAM_help.png" height="255"><img src="Github%20Images/TELEGRAM_helpfiles.png" height="255">
+
+<img src="Github%20Images/TELEGRAM_helpcommands.png" height="720"><img src="Github%20Images/TELEGRAM_helpfilesround.png" height="720">
+
+**11. About (/about)**
+
+about.
+
+![About](Github%20Images/TELEGRAM_about.png)
+
+
+
+### Administrator Commands
+
+**12. (ADMIN) Settings (/settings)**
+
+Fine-tune specific settings for your bot, from your home hall to allowing file processing in all channels!
+
+![Settings](Github%20Images/TELEGRAM_settings.png)
+
+**13. (ADMIN) Export Database (/exportdatabase)**
+
+Need to bug-test your database? Run your own data analytics? Migrating servers? Backing up your database? You need your database easily. Fetch your database easily at any time! Sent to your DM for additional privacy!
+
+![Settings](Github%20Images/TELEGRAM_settings.png)
+
+
+
+## File Uploads & Data Handling
+
+![Name Mismatch](Github%20Images/TELEGRAM_roundnamemismatch.png)
 
 ### Intelligent Data Processing
 
@@ -168,37 +199,20 @@ Automatic detection and proper scoring for walkover matches:
 - Apache Maven 3.6.0 or higher
 - Minimum 2GB RAM (4GB recommended)
 - Telegram Bot Token (from @BotFather)
-- Discord Bot Token (from Discord Developer Portal)
-- Server with persistent storage and internet connectivity
+- (OPTIONAL) Discord Bot Token (from Discord Developer Portal)
+- (OPTIONAL) Server with persistent storage and internet connectivity
 
 ### Step 1: Download and Extract
 
 ```bash
-# Clone the repository or download the source code
 git clone https://github.com/Calplus/ihrgstats.git
 cd ihrgstats
 ```
 
-### Step 2: Build the Application
-
-**Option A: Using Maven (Standard)**
+### Step 2: Build the Application (Maven)
 ```bash
-# Clean previous builds and compile
 mvn clean compile
-
-# Package as executable JAR with all dependencies
 mvn package
-
-# The compiled JAR will be in: target/ihrgstats-1.0-SNAPSHOT.jar
-```
-
-**Option B: Using Maven Daemon (Faster)**
-```bash
-# Install Maven Daemon from: https://github.com/apache/maven-mvnd
-# Then use mvnd instead of mvn for faster builds
-
-mvnd clean compile
-mvnd package
 ```
 
 ### Step 3: Configure Environment Variables
@@ -206,21 +220,25 @@ mvnd package
 Create a file named `.env.properties` in the project root directory:
 
 ```properties
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-TELEGRAM_BOT_USERNAME=your_bot_username
-TELEGRAM_CHAT_ID=your_telegram_channel_id
-TELEGRAM_CHAT_ID_COMMANDS=your_commands_thread_id
-TELEGRAM_CHAT_ID_STATUS=your_status_thread_id
-TELEGRAM_CHAT_ID_FILEUPLOAD=your_file_upload_thread_id
-TELEGRAM_ADMIN_ID=your_telegram_user_id
-
 # Discord Bot Configuration
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
-DISCORD_CHANNEL_ID_COMMANDS=your_discord_commands_channel_id
-DISCORD_CHANNEL_ID_STATUS=your_discord_status_channel_id
-DISCORD_ADMIN_ID=your_discord_user_id
+DISCORD_BOT_TOKEN=
+DISCORD_LOG_CHANNELID=
+DISCORD_ADMIN_USERID=
+
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_USERID=
+TELEGRAM_DEV_CHATID=
+TELEGRAM_DEV_CHATID_LOG=
+TELEGRAM_DEV_CHATID_STATUS=
+TELEGRAM_PUBLIC_CHATID=
+TELEGRAM_PUBLIC_CHATID_FILEUPLOAD=
+TELEGRAM_PUBLIC_CHATID_COMMANDS=
 ```
+
+*Note: ChatID subsettings only apply if you are using a telegram groups with multiple channels/threads. Populate it with the channel/thread ID. Else, leave it blank.*
+
+*Discord settings are optional and not required for core functionality.*
 
 **How to Get These Values:**
 
@@ -240,7 +258,7 @@ DISCORD_ADMIN_ID=your_discord_user_id
 2. Your user ID will be displayed
 
 **Discord Bot Token:**
-1. Visit [Discord Developer Portal](https://discord.com/developers/applications)
+1. Visit the [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a new application
 3. Go to "Bot" section and create a bot
 4. Copy the bot token
@@ -254,7 +272,7 @@ DISCORD_ADMIN_ID=your_discord_user_id
 **For Linux/Unix Servers:**
 ```bash
 # Transfer the JAR file and .env.properties to your server
-scp target/ihrgstats-1.0-SNAPSHOT.jar user@yourserver:/opt/ihrgstats/
+scp <JAR_NAME>.jar user@yourserver:/opt/ihrgstats/
 scp .env.properties user@yourserver:/opt/ihrgstats/
 
 # SSH into your server
@@ -265,6 +283,22 @@ cd /opt/ihrgstats
 
 # Run the bot
 java -jar ihrgstats-1.0-SNAPSHOT.jar
+```
+
+**For Oracle Cloud Servers:**
+```bash
+# Upload JAR file to server
+scp -i "<PUBLIC_KEY_FILEPATH>" "<.JAR FILEPATH>" opc@<SERVER_IP>:~/
+
+# SSH into your server
+ssh -i "<PUBLIC_KEY_FILEPATH>" opc@<SERVER_IP>
+cd <DIRECTORY>
+
+# Create .env.properties file
+nano .env.properties
+
+# Run the bot
+nohup java -Denv.file.path=./.env.properties -jar <.JAR NAME>.jar
 ```
 
 **For Windows Servers:**
@@ -322,361 +356,116 @@ sudo journalctl -u ihrgstats -f
 
 ### Verification
 
-After deployment, verify the bot is working:
-1. Check bot appears online in Telegram/Discord
-2. Send `/help` command
-3. Check logs for any error messages
-4. Upload a test file to verify file processing
-
-## Configuration
-
-### Application Settings
-
-Edit `src/main/resources/application.properties` before building:
-
-```properties
-# Database Configuration
-database.path=database/core/default.db
-
-# Default ELO Settings
-settings.performance.elo=true
-settings.max.seeds=10
-settings.home.hall=
-settings.timezone=+00:00
-
-# File Upload Settings
-settings.non.admin.uploads=false
-settings.allow.all.channels.processing=false
-
-# Logging Configuration
-logging.level.root=INFO
-logging.level.com.calplus.ihrgstats=DEBUG
-```
-
-**Key Settings Explained:**
-
-- `settings.performance.elo`: Enable/disable Performance ELO calculation
-- `settings.max.seeds`: Maximum seed value for calculations (default: 10)
-- `settings.home.hall`: Default hall for personalized queries (empty = none)
-- `settings.timezone`: UTC offset for timestamps (+08:00, -05:00, etc.)
-- `settings.non.admin.uploads`: Allow non-admins to upload files
-- `settings.allow.all.channels.processing`: Process commands from any channel
-
-These settings can also be changed at runtime using the `/settings` command (admin only).
-
-## Commands Reference
-
-All commands work on both Telegram and Discord. Commands are case-insensitive.
-
-### Player Commands
-
-**`/rankplayers [hall] [top N]`**
-Display player rankings sorted by ELO rating.
-
-```
-/rankplayers                    # Show all players
-/rankplayers 10                # Show top 10 players
-/rankplayers Hall4             # Show players from Hall 4
-/rankplayers Hall4 5           # Show top 5 players from Hall 4
-```
-
-**Error Handling:**
-- No rounds found: "No rounds with data found in database"
-- No player data: "No player data found for round X"
-- Invalid hall name: Shows available halls
-- Invalid number format: "Invalid number format. Please use: /rankplayers [hall] [top N]"
-
----
-
-**`/infoplayer <name>`**
-Display detailed information for a specific player.
-
-```
-/infoplayer John Doe
-/infoplayer JohnDoe
-```
-
-**Error Handling:**
-- Player not found: "Player 'Name' not found. Please check the spelling."
-- Missing name: "Please provide a player name. Usage: /infoplayer <name>"
-- No data available: "No statistics available for this player yet"
-- Database error: "Error retrieving player information. Please try again later."
-
----
-
-**`/compareplayers <name1> vs <name2>`**
-Compare two players side-by-side.
-
-```
-/compareplayers John Doe vs Jane Smith
-/compareplayers Alice vs Bob
-```
-
-**Error Handling:**
-- Invalid format: "Invalid format. Use: /compareplayers <name1> vs <name2>"
-- Player not found: "Player 'Name' not found. Please check the spelling."
-- Same player: "Cannot compare a player with themselves"
-- Missing vs keyword: "Please use 'vs' between player names"
-
----
-
-**`/exportplayers`**
-Export complete player database to CSV. Admin only.
-
-**Error Handling:**
-- Access denied: "Access Denied: Only administrators can export player data"
-- Database empty: "No player data available to export"
-- Export failed: "Failed to create export file. Please contact administrator."
-
----
-
-### Hall Commands
-
-**`/rankhalls [top N]`**
-Display hall rankings based on player performance.
-
-```
-/rankhalls          # Show all halls
-/rankhalls 5        # Show top 5 halls
-```
-
-**Error Handling:**
-- No rounds found: "No rounds with data found in database"
-- No player data: "No player data found for round X"
-- No hall rankings: "No hall rankings could be calculated for round X"
-- Invalid number: "Invalid number format. Please use: /rankhalls [top N]"
-
----
-
-**`/infohall <hall>`**
-Display detailed information for a specific hall.
-
-```
-/infohall Hall4
-/infohall Binjai
-```
-
-**Error Handling:**
-- Hall not found: "Hall 'Name' not found. Please check the spelling."
-- Missing hall name: "Please provide a hall name. Usage: /infohall <hall>"
-- No data available: "No statistics available for this hall yet"
-- Database error: "Error retrieving hall information. Please try again later."
-
----
-
-**`/comparehalls <hall1> vs <hall2>`**
-Compare two halls side-by-side.
-
-```
-/comparehalls Hall4 vs Binjai
-/comparehalls Sinar vs Cahaya
-```
-
-**Error Handling:**
-- Invalid format: "Invalid format. Use: /comparehalls <hall1> vs <hall2>"
-- Hall not found: "Hall 'Name' not found. Please check the spelling."
-- Same hall: "Cannot compare a hall with itself"
-- Missing vs keyword: "Please use 'vs' between hall names"
-
----
-
-### Match Commands
-
-**`/infomatch <round>`**
-Display detailed match information for a specific round.
-
-```
-/infomatch round_1
-/infomatch round_t4
-/infomatch 3
-```
-
-**Error Handling:**
-- Invalid round format: "Invalid round format. Use: /infomatch <round_number> or /infomatch round_X"
-- Round not found: "No data found for round X"
-- No match data: "No matches recorded for round X"
-- Database error: "Error retrieving match information. Please try again later."
-
----
-
-**`/infomatchhall`**
-Display comprehensive match details for a specific hall in a specific round with interactive selection.
-
-```
-/infomatchhall
-# Step 1: Bot shows hall selection buttons
-# Step 2: Select a hall (e.g., Hall4, Binjai)
-# Step 3: Bot shows available round buttons  
-# Step 4: Select a round (e.g., Round 1, Round T4)
-# Step 5: View three detailed tables
-```
-
-**Output Tables:**
-- **Table 1 - Player ELO Stats**: Player names, ranks, ELO ratings, and changes (ΔRank, ΔELO) from previous round
-- **Table 2 - Seating**: Seat numbers and corresponding player names
-- **Table 3 - Match Details**: Individual match results with opponents, scores, and outcome emojis (✅ Win, 🟰 Draw, ❌ Loss)
-
-**Notes:**
-- For round 1, ΔRank shows "-" (no previous rank)
-- prevElo for round 1 uses base ELO from database (typically 1000)
-- WALKOVER opponents show "-" for ELO
-- Tables available in both text and image format
-
-**Error Handling:**
-- No rounds found: "No rounds found in database. Please process rounds first."
-- No data for hall: "No players found for hall X in round Y"
-- Invalid selection: Returns to appropriate step (hall or round selection)
-- Database error: "Error retrieving hall match information. Please try again later."
-
----
-
-### Utility Commands
-
-**`/settings`**
-Open interactive settings menu. Admin only.
-
-**Error Handling:**
-- Access denied: "Access Denied: Only administrators can use the /settings command"
-- No settings found: "No configurable settings found in application.properties"
-- Setting not found: "Error: Setting not found: <setting_key>"
-- Update failed: "Error: Failed to update setting <setting_key>"
-
----
-
-**`/exportdatabase`**
-Export complete database (all tables). Admin only with confirmation.
-
-**Error Handling:**
-- Access denied: "Access Denied: Only administrators can export the database"
-- Database empty: "Database is empty. Nothing to export."
-- Export failed: "Failed to create database export. Please contact administrator."
-- Confirmation timeout: "Export cancelled due to timeout"
-
----
-
-**`/help`**
-Display command help and usage instructions.
-
-**Error Handling:**
-- Always returns help text (no errors)
-
----
-
-**`/about`**
-Display bot information, version, and statistics.
-
-**Error Handling:**
-- Error generating info: "Error generating about information. Please try again later."
-
----
+After deployment, the bot should send a ping message every 5 minutes to the dev/log channel you choose on Telegram.
 
 ## File Upload System
 
+
 The bot accepts three types of CSV files for data import. Upload files directly to the configured Telegram upload channel.
+
+You may refer to the "SAMPLE FILES" folder in the project repo.
 
 ### File Types
 
 #### 1. playerExport_YYYYMMDD_HHMMSS.csv
 Initial player data import file containing baseline player information.
 
-**Format:**
+**Format (csv):**
 ```csv
-name,trueElo,perfElo,baseRdTrueElo,baseVolTrueElo,baseRdPerfElo,baseVolPerfElo,lastRound,hall,capped,active,dateLogged,victories
-John Doe,1500.0,1500.0,350.0,0.06,350.0,0.06,round_1,Hall4,0,1,2026-01-02 12:00:00,[]
+name,trueElo,perfElo,rdTrueElo,volTrueElo,rdPerfElo,volPerfElo,lastRound,lastHall,capped
+Joyce Byers,933,768,244.1903,0.059694,240.8558,0.059666,t16,5,false
+Draco Malfoy,786,747,253.6173,0.059696,243.5927,0.059666,t16,4,false
+Jon Snow,1026,747,252.0210,0.059648,243.5917,0.059582,t2,3,true
 ```
 
 **Columns:**
-- `name`: Player full name
-- `trueElo`: True ELO rating (decimal)
-- `perfElo`: Performance ELO rating (decimal)
-- `baseRdTrueElo`: Rating deviation for True ELO
-- `baseVolTrueElo`: Volatility for True ELO
-- `baseRdPerfElo`: Rating deviation for Performance ELO
-- `baseVolPerfElo`: Volatility for Performance ELO
-- `lastRound`: Last played round (e.g., "round_1")
-- `hall`: Player's hall affiliation
-- `capped`: 0 or 1 (capped status)
-- `active`: 0 or 1 (active status)
-- `dateLogged`: Timestamp (YYYY-MM-DD HH:MM:SS)
-- `victories`: JSON array of victory records
+- `name`: Player's stored name
+- `trueElo`: True ELO rating
+- `perfElo`: Performance ELO rating
+- `rdTrueElo`: Rating deviation for True ELO
+- `volTrueElo`: Volatility for True ELO
+- `rdPerfElo`: Rating deviation for Performance ELO
+- `volPerfElo`: Volatility for Performance ELO
+- `lastRound`: Last played round
+- `lastHall`: Player's hall affiliation as of download.
+- `capped`: TRUE/FALSE (capped status; will not be uploaded. Use cappedlist.csv.)
 
 **Error Handling:**
 - File not found: "Failed to download file from Telegram"
 - Invalid format: "Invalid CSV format: Header must match expected columns"
-- Duplicate players: "Duplicate player found: <name>"
-- Missing columns: "Missing required columns: <column_list>"
-- Invalid data types: "Invalid data type in row X, column Y: expected <type>, got <value>"
-- Hall mismatch (active players): Stops processing, requires data correction
-- Hall mismatch (inactive players): Interactive resolution with options
-
+- Duplicate players: "Duplicate player found: (name)"
+- Missing columns: "Missing required columns: (column_list)"
+- Invalid data types: "Invalid data type in row X, column Y: expected (type), got (value)"
 ---
 
 #### 2. cappedlist.csv
-List of capped players (players who have reached maximum rating cap).
+List of capped players (released from previous year's IHRG).
 
 **Format:**
 ```csv
 name,hall
-John Doe,Hall4
-Jane Smith,Binjai
+Hank Schrader,1
+Kim Wexler,1
+Jon Snow,3
 ```
 
 **Columns:**
-- `name`: Player full name
+- `name`: Player's stored name
 - `hall`: Player's hall affiliation
 
 **Error Handling:**
-- File not found: "cappedlist.csv file not found at: <path>"
+- File not found: "cappedlist.csv file not found at: (path)"
 - Invalid format: "Invalid CSV format: Header must have exactly 2 columns (name,hall)"
 - Incorrect headers: "Invalid CSV format: Header must be 'name,hall' (case insensitive)"
-- CSV validation failed: "CSV validation failed: <error_message>"
-- Database update failed: "Database update failed: <error_message>"
+- CSV validation failed: "CSV validation failed: (error_message)"
+- Database update failed: "Database update failed: (error_message)"
 - Empty file: "No capped players found in file"
-
-**Success Confirmation:**
-```
-CSV validated successfully. X capped players found.
-- X capped players added to database
-- Y players already in database
-- Z players updated in A1_PlayerStats
-```
 
 ---
 
-#### 3. round_N.csv
+#### 3. round_{n}.csv
 Round results file containing match outcomes for a specific round.
+n = {1, 2, 3, 4, 5, 6, t16, t8, t4, t2}
 
 **Format:**
 ```csv
-name,score,oppscore,oppHall,hall
-John Doe,5,0,Hall1,Hall4
-Jane Smith,3,2,Binjai,Hall4
+name1,hall1,winby1,name2,hall2,winby2
+Hank Schrader,1,59.5,Princess Bubblegum,2,
+Jesse Pinkman,1,,Jake the Dog,2,191
+Kim Wexler,1,draw,Flame Princess,2,draw
 ```
 
 **Columns:**
-- `name`: Player full name
-- `score`: Player's score (0-5)
-- `oppscore`: Opponent's score (0-5)
-- `oppHall`: Opponent's hall (or empty/whitespace for WALKOVER)
-- `hall`: Player's hall
+- `name1`, `name2`: Player names. Use "WALKOVER" for walkover opponents (only one per row).
+- `hall1`, `hall2`: Hall names (numeric or short name, e.g., "4", "Binjai"). Remove the word "Hall" (e.g., "Hall 4" → "4"). For walkovers, hall can be empty.
+- `winby1`, `winby2`: How much a player won by (numeric, "draw", or 1/0 for win/loss). Only the winner's column needs to be filled, except for draws (both must be "draw").
+
+**Rules & Validation:**
+- The header must be exactly: `name1,hall1,winby1,name2,hall2,winby2` (case-insensitive, no extra spaces).
+- Each row represents a match between two players. If a player is absent (walkover), use "WALKOVER" for their name and leave their hall/score blank.
+- Only one "WALKOVER" per row is allowed.
+- Hall names must match those in the database (case-insensitive, whitespace trimmed). For walkovers, hall can be empty.
+- For win/loss, use either a numeric value (e.g., 204.5), "draw" for draws (both columns), or 1/0 for win/loss (one column must be 1, the other 0).
+- If both winby columns are filled, they must both be "draw" or one must be 1 and the other 0.
+- Player names must not be empty. Both players cannot be "WALKOVER" in the same row.
+- All matches must be valid and not duplicated.
 
 **Valid Round Names:**
-- `round_1`, `round_2`, `round_3`, `round_4`, `round_5`, `round_6`
-- `round_t16`, `round_t8`, `round_t4`, `round_t2` (tournament rounds)
+- `round_1`, `round_2`, `round_3`, `round_4`, `round_5`, `round_6` (Swiss)
+- `round_t16`, `round_t8`, `round_t4`, `round_t2` (Bracket)
 
 **Error Handling:**
-- Invalid filename: "Invalid round filename format: <filename>"
-- Invalid round name: "Invalid round name. Must be: round_1 through round_6, or round_t16, round_t8, round_t4, round_t2"
-- File not found: "Failed to download file from Telegram"
-- Invalid format: "Invalid CSV format: Header must have exactly 5 columns (name,score,oppscore,oppHall,hall)"
-- Incorrect headers: "Invalid CSV format: Header must be 'name,score,oppscore,oppHall,hall'"
-- Duplicate matches: "Duplicate match found for player: <name>"
-- Invalid scores: "Invalid score value: must be 0-5"
-- Score mismatch: "Total scores don't add up to 5: <player_score> + <opp_score> = <total>"
-- Missing player: "Player '<name>' not found in database. Upload playerExport file first."
+- Invalid filename: "Invalid round filename format: (filename)"
+- Invalid round name: "Invalid round name: (name). Valid rounds: 1, 2, 3, 4, 5, 6, t16, t8, t4, t2"
+- File not found: "round_{n}.csv file not found at: (path)"
+- Invalid format: "Invalid CSV format: Header must have exactly 6 columns (name1,hall1,winby1,name2,hall2,winby2)"
+- Incorrect headers: "Invalid CSV header: Expected '(col)' at column (n), found '(col)'"
+- Duplicate matches: "Duplicate match found for player: (name)"
+- Invalid values: "Invalid CSV format at line (n): ..."
+- Player not found: "Player '(name)' not found in database. Upload playerExport file first."
 - Hall mismatch (active players): Stops processing with error message
-- Hall mismatch (inactive players): Interactive resolution dialog
-- WALKOVER detection: Automatically normalizes empty/whitespace oppHall to "WALKOVER"
+- Hall mismatch (inactive players): Interactive resolution dialog (see below)
+- WALKOVER detection: Only one walkover per row; both cannot be walkover.
 
 **Interactive Resolution (Hall Mismatches):**
 When a player's hall in the CSV doesn't match the database and the player is inactive:
@@ -694,17 +483,9 @@ When a player's hall in the CSV doesn't match the database and the player is ina
 - Button selection for multi-choice options (timeout: 120 seconds)
 - Timeout message: "Button selection timeout - processing cancelled"
 
-**Success Confirmation:**
-```
-Round X processed successfully!
-- Y matches processed
-- Z ELO ratings updated
-- W victory records added
-```
-
 ---
 
-### Upload Workflow Best Practices
+### Recommended Upload Workflow
 
 1. **Start with playerExport.csv** - Establishes baseline player data
 2. **Upload cappedlist.csv** - Updates capping status for players
@@ -712,7 +493,6 @@ Round X processed successfully!
 4. **Monitor confirmation messages** - Check for warnings or validation errors
 5. **Resolve conflicts promptly** - Handle hall mismatch dialogs immediately
 6. **Backup regularly** - Use `/exportdatabase` before major uploads
-7. **Test with samples** - Verify CSV format with small test files first (see SAMPLE FILES folder)
 
 ### File Upload Permissions
 
@@ -761,7 +541,6 @@ By default, commands only work in designated channels/threads. This can be chang
 - WALKOVER normalization (empty/whitespace → "WALKOVER")
 - Whitespace trimming from player names and hall names
 - Case-insensitive command parsing
-- Flexible round name formats (accepts "3", "round_3", "round_t4")
 
 **Confirmation Dialogs:**
 - Admin actions require explicit confirmation
@@ -771,11 +550,10 @@ By default, commands only work in designated channels/threads. This can be chang
 ### Logging & Monitoring
 
 **Dual Logging System:**
-- Discord logging channel for administrator monitoring
-- Telegram logging channel for status updates
+- Discord & Telegram logging channel for administrator monitoring
 - Batch logging prevents spam during file processing
 - Error, warning, and info level messages
-- Timestamps on all log entries
+- Timestamps + Source file + User (If Applicable) on all log entries
 
 **What Gets Logged:**
 - All file uploads and processing results
@@ -789,117 +567,13 @@ By default, commands only work in designated channels/threads. This can be chang
 
 **Transaction-Based Processing:**
 - All database operations use transactions
-- Rollback on error ensures no partial updates
-- ACID compliance guarantees data integrity
+- Does not write/modify any data until all checks passed
 
 **Backup Capabilities:**
 - `/exportdatabase` creates timestamped full backup
 - `/exportplayers` exports player data only
 - All exports include timestamps in filename
-- CSV format ensures portability
-
-**Data Validation:**
-- Foreign key constraints enforce referential integrity
-- NOT NULL constraints prevent missing data
-- PRIMARY KEY ensures unique records
-- Type checking on all fields
-
-## Visual Examples
-
-All commands that generate images create publication-quality PNG files with consistent formatting, hall icons, and timezone-aware timestamps.
-
-### Player Rankings
-
-![Player Rankings](Github%20Images/SAMPLE_RankPlayers.png)
-
-Dynamic leaderboards showing:
-- Rank position
-- Player name
-- Hall affiliation with icon
-- True ELO and/or Performance ELO
-- Customizable filtering and top N display
-
----
-
-### Player Information
-
-![Player Information](Github%20Images/SAMPLE_InfoPlayer.png)
-
-Comprehensive player profiles showing:
-- Current ELO ratings (True and Performance)
-- Hall affiliation
-- Match statistics
-- Victory records
-- Rating history
-- Capped status
-
----
-
-### Player Comparison
-
-![Player Comparison](Github%20Images/SAMPLE_ComparePlayers.png)
-
-Side-by-side player comparison with:
-- Split-screen blue/red layout
-- ELO ratings for both players
-- Win/loss statistics
-- Head-to-head record
-- Statistical advantages highlighted
-
----
-
-### Hall Rankings
-
-![Hall Rankings](Github%20Images/SAMPLE_RankHalls.png)
-
-Team performance leaderboards showing:
-- Hall rank position
-- Hall name with icon
-- Aggregate statistics
-- Average player ELO
-- Match results
-
----
-
-### Hall Information
-
-![Hall Information](Github%20Images/SAMPLE_InfoHall.png)
-
-Detailed hall statistics showing:
-- Member roster
-- Average ELO ratings
-- Win/loss records
-- Recent performance
-- Active player count
-
----
-
-### Hall Comparison
-
-![Hall Comparison](Github%20Images/SAMPLE_CompareHalls.png)
-
-Side-by-side hall comparison with:
-- Split-screen layout
-- Member statistics
-- Team strength indicators
-- Average ELO differences
-- Win rate comparisons
-
----
-
-### Match Information
-
-![Match Information](Github%20Images/SAMPLE_InfoMatch.png)
-
-Detailed match breakdowns showing:
-- All participating players
-- Individual scores
-- ELO changes
-- Hall matchups
-- WALKOVER indicators
-- Round summaries
-
----
+- CSV format ensures portability & readability
 
 ## Project Structure
 
@@ -908,24 +582,25 @@ ihrgstats/
 ├── src/
 │   ├── main/
 │   │   ├── java/com/calplus/ihrgstats/
-│   │   │   ├── Main.java                    # Application entry point
+│   │   │   ├── Main.java                          # Application entry point
 │   │   │   ├── calculations/
-│   │   │   │   └── EloCalculator.java       # ELO rating calculations
+│   │   │   │   └── EloCalculator.java             # ELO rating calculations
 │   │   │   ├── databasemanager/
-│   │   │   │   ├── DatabaseSchema.java      # Database initialization
-│   │   │   │   ├── A1_PlayerStats.java      # Player statistics manager
-│   │   │   │   └── A2_CappedPlayers.java    # Capped players manager
+│   │   │   │   ├── DatabaseSchema.java            # Database initialization/Scheme
+│   │   │   │   ├── A1_PlayerStats.java            # Player statistics manager
+│   │   │   │   └── A2_CappedPlayers.java          # Capped players manager
 │   │   │   ├── discordbot/
-│   │   │   │   └── logs/DiscordLog.java     # Discord logging
+│   │   │   │   └── logs/DiscordLog.java           # Discord logging
 │   │   │   ├── telegrambot/
 │   │   │   │   ├── listener/
-│   │   │   │   │   └── TelegramListener.java    # Main Telegram handler
-│   │   │   │   ├── commands/                    # All command handlers
+│   │   │   │   │   └── TelegramListener.java      # Main Telegram handler
+│   │   │   │   ├── commands/                      # All command handlers
 │   │   │   │   │   ├── CommandRankPlayers.java
 │   │   │   │   │   ├── CommandRankHalls.java
 │   │   │   │   │   ├── CommandInfoPlayer.java
 │   │   │   │   │   ├── CommandInfoHall.java
 │   │   │   │   │   ├── CommandInfoMatch.java
+│   │   │   │   │   ├── CommandInfoMatchHall.java
 │   │   │   │   │   ├── CommandComparePlayers.java
 │   │   │   │   │   ├── CommandCompareHalls.java
 │   │   │   │   │   ├── CommandExportPlayers.java
@@ -933,35 +608,30 @@ ihrgstats/
 │   │   │   │   │   ├── CommandSettings.java
 │   │   │   │   │   ├── CommandHelp.java
 │   │   │   │   │   └── CommandAbout.java
-│   │   │   │   └── logs/TelegramLog.java    # Telegram logging
-│   │   │   └── utils/                       # Utility classes
-│   │   │       ├── ComparisonImageGenerator.java
-│   │   │       ├── InfoImageGenerator.java
-│   │   │       ├── TableImageGenerator.java
-│   │   │       ├── DatabaseHelper.java
-│   │   │       ├── LogHelper.java
-│   │   │       ├── PropertyManager.java
-│   │   │       ├── TimezoneHelper.java
+│   │   │   │   └── logs/TelegramLog.java          # Telegram logging
+│   │   │   └── utils/                             # Utility classes
 │   │   │       └── ...
 │   │   └── resources/
-│   │       ├── application.properties        # Configuration
-│   │       └── halls/                        # Hall icons (PNG files)
+│   │       ├── application.properties             # Configuration
+│   │       └── halls/                             # Hall icons (PNG files)
 │   └── test/
-│       └── java/com/calplus/ihrgstats/      # Test files
+│       └── java/com/calplus/ihrgstats/            # Test files
 ├── database/
 │   └── core/
-│       └── default.db                        # SQLite database (auto-created)
-├── temp/                                     # Temporary files (auto-created)
-├── Github Images/                            # Sample images for README
-├── SAMPLE FILES/                             # Sample CSV files for testing
-├── .env.properties                           # Environment variables (create this)
-├── pom.xml                                   # Maven configuration
-└── README.md                                 # This file
+│       └── default.db                             # SQLite database (auto-created)
+├── temp/                                          # Temporary files (auto-created)
+├── Github Images/                                 # Sample images for README
+├── SAMPLE FILES/                                  # Sample CSV files for testing/reference
+├── .env.properties                                # Environment variables (SENSITIVE)
+├── pom.xml                                        # Maven configuration
+└── README.md                                      # This file (lol)
 ```
 
 ## Support
 
 ### Getting Help
+
+Try googling before contacting me :)
 
 For support, questions, or feature requests:
 - Open an issue on [GitHub](https://github.com/Calplus/ihrgstats)
