@@ -2,7 +2,7 @@
 
 # IHRG Statistics Bot
 
-![IHRG Stats Icon](Github%20Images/Icon_IHRGStats.png)
+<img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 ![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2004,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
@@ -57,6 +57,8 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **7. Admin-Friendly**: Granular permission controls, interactive settings management, and detailed activity logging ensure secure administration without technical complexity.
 
+**8. Rounds Adaptability across games**: Supports up to 6 swiss rounds and 4 bracket rounds (Max. top 16). 
+
 ## Commands
 
 ### Player Analytics
@@ -66,20 +68,24 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 Get comprehensive statistics for any player. View their Elo, Past seating, Victory records, Hall affiliation, and performance trends over time.
 
 <div align = "center">
-<img src="Github%20Images/SAMPLE_InfoPlayer.png.png">
+<img src="Github%20Images/SAMPLE_InfoPlayer.png">
 </div>
 
 **2. Player Rankings (/rankplayers)**
 
 Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played. Players part of the hall you selected will be highlighted!
 
-![Rank Players Example](Github%20Images/SAMPLE_RankPlayers.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_RankPlayers.png">
+</div>
 
 **3. Player Comparisons (/compareplayers)**
 
 Compare two players side-by-side with visual split-screen layouts. See Round Stats, Past Seating and Victory Records at a glance.
 
-![Compare Players Example](Github%20Images/SAMPLE_ComparePlayers.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_ComparePlayers.png">
+</div>
 
 
 
@@ -89,19 +95,25 @@ Compare two players side-by-side with visual split-screen layouts. See Round Sta
 
 View detailed statistics for individual halls including member rosters, win/loss records, average ELO ratings, and recent performance trends.
 
-![Info Hall Example](Github%20Images/SAMPLE_InfoHall.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_InfoHall.png">
+</div>
 
 **5. Hall Rankings (/rankhalls)**
 
 See which halls dominate the competition based on aggregate player performance and match results! Easily view each hall's total Cap Points and Average Elo, taken from the top 5 players of the team. The hall you selected in the settings will be highlighted!
 
-![Rank Halls Example](Github%20Images/SAMPLE_RankHalls.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_RankHalls.png">
+</div>
 
 **6. Hall Comparisons (/comparehalls)**
 
 Compare two halls side-by-side to analyze team strength differences, member statistics, and competitive advantages!
 
-![Compare Halls Example](Github%20Images/SAMPLE_CompareHalls.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_CompareHalls.png">
+</div>
 
 
 
@@ -111,13 +123,17 @@ Compare two halls side-by-side to analyze team strength differences, member stat
 
 Retrieve a high-level breakdown of any match by round number. See all participating teams, scores and match outcomes including proper WALKOVER handling.
 
-![Info Match Example](Github%20Images/SAMPLE_InfoMatch.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_InfoMatch.png">
+</div>
 
 **8. Hall Match Details (/infomatchhall)**
 
 View comprehensive match information for a specific hall in a specific round. 
 
-![Info Match Hall Example](Github%20Images/SAMPLE_InfoMatchHall.png)
+<div align = "center">
+<img src="Github%20Images/SAMPLE_InfoMatchHall.png">
+</div>
 
 
 
@@ -127,21 +143,31 @@ View comprehensive match information for a specific hall in a specific round.
 
 Exports a high-level overview of player data into a .csv, containing detailed information about each player. This .csv file can be reuploaded to the bot to instantiate data for a blank database (particularly trueElo and lastHall). Capped status does not carry over.
 
-![Export Players Example](Github%20Images/SCREENSHOT_playerExport.png)
+<div align = "center">
+<img src="Github%20Images/SCREENSHOT_playerExport.png">
+</div>
 
 **10. Help (/help)**
 
 You ask it for help. Or it asks you for help. Either way, you get to choose whether you need help for commands, or file upload format. You can also ask it for specifics of a file, if you so choose.
 
-<img src="Github%20Images/TELEGRAM_help.png" height="255"><img src="Github%20Images/TELEGRAM_helpfiles.png" height="255">
+<p align="center">
+  <img src="Github%20Images/TELEGRAM_help.png" width="45%" />
+  <img src="Github%20Images/TELEGRAM_helpfiles.png" width="45%" />
+</p>
 
-<img src="Github%20Images/TELEGRAM_helpcommands.png" height="720"><img src="Github%20Images/TELEGRAM_helpfilesround.png" height="720">
+<p align="center">
+  <img src="Github%20Images/TELEGRAM_helpcommands.png" width="45%" />
+  <img src="Github%20Images/TELEGRAM_helpfilesround.png" width="45%" />
+</p>
 
 **11. About (/about)**
 
 about.
 
-![About](Github%20Images/TELEGRAM_about.png)
+<div align = "center">
+<img src="Github%20Images/TELEGRAM_about.png">
+</div>
 
 
 
@@ -151,19 +177,25 @@ about.
 
 Fine-tune specific settings for your bot, from your home hall to allowing file processing in all channels!
 
-![Settings](Github%20Images/TELEGRAM_settings.png)
+<div align = "center">
+<img src="Github%20Images/TELEGRAM_settings.png">
+</div>
 
 **13. (ADMIN) Export Database (/exportdatabase)**
 
 Need to bug-test your database? Run your own data analytics? Migrating servers? Backing up your database? You need your database easily. Fetch your database easily at any time! Sent to your DM for additional privacy!
 
-![Settings](Github%20Images/TELEGRAM_settings.png)
+<div align = "center">
+<img src="Github%20Images/TELEGRAM_exportdatabase.png">
+</div>
 
 
 
 ## File Uploads & Data Handling
 
-![Name Mismatch](Github%20Images/TELEGRAM_roundnamemismatch.png)
+<div align = "center">
+<img src="Github%20Images/TELEGRAM_roundnamemismatch.png">
+</div>
 
 ### Intelligent Data Processing
 

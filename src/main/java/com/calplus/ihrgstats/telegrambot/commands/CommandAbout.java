@@ -118,7 +118,7 @@ public class CommandAbout {
             StringBuilder message = new StringBuilder();
             message.append("ℹ️ **About IHRG Stats Bot**\n\n");
             
-            message.append("**Author:** ").append(author).append("\n");
+            message.append("**Developer:** ").append(author).append("\n");
             message.append("**Version:** ").append(version).append("\n");
             message.append("**Timezone:** ").append(TimezoneHelper.getFormattedTimezone()).append("\n");
             message.append("**GitHub:** https://github.com/Calplus/ihrgstats\n\n");
