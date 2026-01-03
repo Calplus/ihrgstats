@@ -413,7 +413,7 @@ public class CommandComparePlayers {
         String textOutput = generateTextOutput(data1, data2, roundsToInclude);
         
         // Generate image
-        Path imagePath = generateImage(data1, data2, roundsToInclude);
+        Path imagePath = generateImage(data1, data2, roundsToInclude, selectedRound);
         
         logHelper.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
             player1Name, player1Hall, player2Name, player2Hall, selectedRound));
@@ -772,36 +772,6 @@ public class CommandComparePlayers {
     }
     
     /**
-     * Formats hall name for display (used in text output)
-     */
-    private String formatHallName(String hallName) {
-        if (hallName.equalsIgnoreCase("WALKOVER")) {
-            return "WALKOVER";
-        }
-        try {
-            int num = Integer.parseInt(hallName);
-            return "Hall " + num;
-        } catch (NumberFormatException e) {
-            return hallName + " Hall";
-        }
-    }
-    
-    /**
-     * Formats hall name for image (no "Hall" prefix for numbers)
-     */
-    private String formatHallNameForImage(String hallName) {
-        if (hallName.equalsIgnoreCase("WALKOVER")) {
-            return "WALKOVER";
-        }
-        try {
-            int num = Integer.parseInt(hallName);
-            return String.valueOf(num);  // Just the number
-        } catch (NumberFormatException e) {
-            return hallName;  // Just the name without " Hall"
-        }
-    }
-    
-    /**
      * Creates subtitle for image header (follows hall naming convention)
      */
     private String createSubtitle(String name, String hall) {
@@ -816,16 +786,24 @@ public class CommandComparePlayers {
     /**
      * Generates comparison image
      */
-    private Path generateImage(PlayerData player1, PlayerData player2, List<String> roundsToInclude) throws Exception {
-        // Prepare metadata
-        String lastRound1 = player1.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(player1.lastRound) : "N/A";
-        String lastRound2 = player2.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(player2.lastRound) : "N/A";
-        String lastRound = lastRound1.equals(lastRound2) ? lastRound1 : lastRound1 + " / " + lastRound2;
+    private Path generateImage(PlayerData player1, PlayerData player2, List<String> roundsToInclude, String selectedRound) throws Exception {
+        // Prepare metadata - use selected round or find max round from data
+        String lastRoundForMetadata;
+        if (selectedRound.equals("all")) {
+            // Find the highest round between both players
+            String maxRound = player1.lastRound;
+            if (player2.lastRound != null && (maxRound == null || Constants.ROUND_SEQUENCE.indexOf(player2.lastRound) > Constants.ROUND_SEQUENCE.indexOf(maxRound))) {
+                maxRound = player2.lastRound;
+            }
+            lastRoundForMetadata = maxRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
+        }
         
         String description = String.format("%s (%s) vs %s (%s)", 
             player1.name, player1.hall, player2.name, player2.hall);
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata(
-            "Player Comparison", description, lastRound);
+            "Player Comparison", description, lastRoundForMetadata != null ? VictoryRecordCalculator.getRoundDisplayName(lastRoundForMetadata) : null);
         
         // Prepare left side data (player 1)
         List<ComparisonImageGenerator.Section> sections1 = new ArrayList<>();
@@ -1133,7 +1111,8 @@ public class CommandComparePlayers {
         ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(
             player2.name, subtitle2, sections2);
         
-        return ComparisonImageGenerator.generateComparisonImage("Player Comparison", data1, data2, metadata);
+        return ComparisonImageGenerator.generateComparisonImage("Player Comparison", data1, data2, metadata, 
+            "ComparePlayers", player1.name, player2.name);
     }
     
     /**

@@ -458,24 +458,29 @@ public class CommandSettings {
         if ("settings.maxSeeds".equals(settingKey)) {
             String inputValue = text.trim();
             
-            // Validate positive integer
+            // Validate positive number (supports both integers and decimals)
             try {
                 double maxSeedsValue = Double.parseDouble(inputValue);
                 if (maxSeedsValue <= 0) {
-                    return "❌ Invalid input: Max seeds must be a positive integer.";
+                    return "❌ Invalid input: Max seeds must be a positive number.";
                 }
                 
-                discordLog.logInfo(String.format("Admin %s setting maxSeeds to: %d", userId, maxSeedsValue));
-                telegramLog.logInfo(String.format("Admin %s setting maxSeeds to: %d", userId, maxSeedsValue));
+                // Format value, removing unnecessary decimals for whole numbers
+                String formattedValue = maxSeedsValue == (long) maxSeedsValue ? 
+                    String.format("%d", (long) maxSeedsValue) : 
+                    String.valueOf(maxSeedsValue);
+                
+                discordLog.logInfo(String.format("Admin %s setting maxSeeds to: %s", userId, formattedValue));
+                telegramLog.logInfo(String.format("Admin %s setting maxSeeds to: %s", userId, formattedValue));
                 
                 // Update property
-                boolean success = PropertyManager.updateProperty("settings.maxSeeds", String.valueOf(maxSeedsValue));
+                boolean success = PropertyManager.updateProperty("settings.maxSeeds", formattedValue);
                 
                 if (success) {
-                    String successMsg = String.format("🎯 Successfully set maxSeeds to **%d**\n\nUse /settings to see updated configuration.", maxSeedsValue);
+                    String successMsg = String.format("🎯 Successfully set maxSeeds to **%s**\n\nUse /settings to see updated configuration.", formattedValue);
                     
-                    discordLog.logSuccess(String.format("MaxSeeds set to %d", maxSeedsValue));
-                    telegramLog.logSuccess(String.format("MaxSeeds set to %d", maxSeedsValue));
+                    discordLog.logSuccess(String.format("MaxSeeds set to %s", formattedValue));
+                    telegramLog.logSuccess(String.format("MaxSeeds set to %s", formattedValue));
                     
                     return successMsg;
                 } else {
@@ -485,7 +490,7 @@ public class CommandSettings {
                     return errorMsg;
                 }
             } catch (NumberFormatException e) {
-                return "❌ Invalid input: Max seeds must be a valid positive integer.";
+                return "❌ Invalid input: Max seeds must be a valid positive number.";
             }
         }
         
@@ -540,7 +545,7 @@ public class CommandSettings {
         userSelectionStates.put(userId, state);
 
         String currentMaxSeeds = PropertyResolver.getProperty("settings.maxSeeds", "361");
-        String message = String.format("Please enter the new maxSeeds value (positive integer).\n\nCurrent value: **%s**", currentMaxSeeds);
+        String message = String.format("Please enter the new maxSeeds value (positive number, can be a decimal).\n\nCurrent value: **%s**", currentMaxSeeds);
 
         return new SettingsResponse(message, null);
     }

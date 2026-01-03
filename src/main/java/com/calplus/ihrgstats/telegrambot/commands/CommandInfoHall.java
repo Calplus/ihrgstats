@@ -833,14 +833,19 @@ public class CommandInfoHall {
      * Generates hall information image using InfoImageGenerator
      */
     private Path generateImage(HallData hall, String selectedRound) throws Exception {
-        // Prepare metadata
-        String lastRound = hall.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(hall.lastRound) : "N/A";
+        // Prepare metadata - use selected round or find max round from data
+        String lastRoundForMetadata;
+        if (selectedRound.equals("all")) {
+            lastRoundForMetadata = hall.lastRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
+        }
         
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Hall Information";
         metadata.subtitle = String.format("Hall %s", hall.hallName);
         metadata.description = "Hall statistics and performance";
-        metadata.lastRound = lastRound;
+        metadata.lastRound = lastRoundForMetadata != null ? VictoryRecordCalculator.getRoundDisplayName(lastRoundForMetadata) : null;
         
         // Prepare sections
         List<InfoImageGenerator.Section> sections = new ArrayList<>();
@@ -1034,6 +1039,6 @@ public class CommandInfoHall {
         }
         
         // Generate image
-        return InfoImageGenerator.generateInfoImage(metadata, sections, hallIdentifier);
+        return InfoImageGenerator.generateInfoImage(metadata, sections, hallIdentifier, "InfoHall", hall.hallName);
     }
 }

@@ -221,9 +221,9 @@ public class CommandInfoMatch {
                     int outcome = rs.getInt("outcome" + roundSuffix);
                     String oppHall = rs.getString("oppHall" + roundSuffix);
                     
-                    // Include WALKOVER opponents
-                    if (oppHall == null) {
-                        continue; // Skip if no opponent at all
+                    // Normalize NULL, empty, or whitespace-only oppHall to "WALKOVER"
+                    if (oppHall == null || oppHall.trim().isEmpty()) {
+                        oppHall = "WALKOVER";
                     }
                     
                     double points = VictoryRecordCalculator.outcomeToPoints(outcome);
@@ -323,6 +323,7 @@ public class CommandInfoMatch {
                             " FROM A1_PlayerStats WHERE outcome" + roundSuffix + " IS NOT NULL AND active = 1";
                 
                 Map<String, Map<String, Double>> roundHallScores = new HashMap<>(); // hall -> opponent hall -> score
+                Map<String, Integer> walkoverCountPerHall = new HashMap<>(); // Track number of players who faced WALKOVER
                 
                 try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                     ResultSet rs = pstmt.executeQuery();
@@ -332,18 +333,41 @@ public class CommandInfoMatch {
                         int outcome = rs.getInt("outcome" + roundSuffix);
                         String oppHall = rs.getString("oppHall" + roundSuffix);
                         
+                        // Normalize NULL, empty, or whitespace-only oppHall to "WALKOVER"
+                        if (oppHall == null || oppHall.trim().isEmpty()) {
+                            oppHall = "WALKOVER";
+                        }
+                        
                         double points = VictoryRecordCalculator.outcomeToPoints(outcome);
                         
                         // Add to board wins (player-level score)
                         hallScores.putIfAbsent(hall, new HallScoreData(hall, 0, 0));
                         hallScores.get(hall).boardWins += points;
                         
-                        // Track opponent for match wins
-                        if (oppHall != null && !"WALKOVER".equalsIgnoreCase(oppHall)) {
+                        // Track WALKOVER players count for later adjustment
+                        if ("WALKOVER".equalsIgnoreCase(oppHall)) {
+                            walkoverCountPerHall.put(hall, walkoverCountPerHall.getOrDefault(hall, 0) + 1);
+                        }
+                        
+                        // Track opponent for match wins (exclude WALKOVER from match-level calculations)
+                        if (!"WALKOVER".equalsIgnoreCase(oppHall)) {
                             roundHallScores.putIfAbsent(hall, new HashMap<>());
                             roundHallScores.get(hall).put(oppHall, 
                                 roundHallScores.get(hall).getOrDefault(oppHall, 0.0) + points);
                         }
+                    }
+                }
+                
+                // Adjust board wins for WALKOVER opponents: if all 5 players faced WALKOVER, reduce from 5.0 to 3.0
+                for (Map.Entry<String, Integer> entry : walkoverCountPerHall.entrySet()) {
+                    String hall = entry.getKey();
+                    int walkoverCount = entry.getValue();
+                    
+                    // If all players faced WALKOVER (typically 5), adjust board wins to 3.0
+                    if (walkoverCount >= 5) {
+                        hallScores.get(hall).boardWins -= (walkoverCount - 3.0);
+                        // Award +1 match win to hall that played WALKOVER (they won the match)
+                        hallScores.get(hall).matchWins += 1.0;
                     }
                 }
                 
@@ -433,11 +457,25 @@ public class CommandInfoMatch {
                 String hall2Display = "WALKOVER".equalsIgnoreCase(m.hall2) ? "WALKOVER" : m.hall2;
                 
                 // Format score - show as int if not 0.5 increments
+                // For WALKOVER opponents, display as 3-2 instead of actual score (e.g., 5-0)
                 String scoreStr;
-                if (m.hall1Score == Math.floor(m.hall1Score) && m.hall2Score == Math.floor(m.hall2Score)) {
-                    scoreStr = String.format("%.0f-%.0f", m.hall1Score, m.hall2Score);
+                double displayScore1 = m.hall1Score;
+                double displayScore2 = m.hall2Score;
+                
+                if ("WALKOVER".equalsIgnoreCase(m.hall2)) {
+                    // hall2 is WALKOVER, show 3-2 instead of actual score
+                    displayScore1 = 3.0;
+                    displayScore2 = 2.0;
+                } else if ("WALKOVER".equalsIgnoreCase(m.hall1)) {
+                    // hall1 is WALKOVER, show 2-3 instead of actual score
+                    displayScore1 = 2.0;
+                    displayScore2 = 3.0;
+                }
+                
+                if (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2)) {
+                    scoreStr = String.format("%.0f-%.0f", displayScore1, displayScore2);
                 } else {
-                    scoreStr = String.format("%.1f-%.1f", m.hall1Score, m.hall2Score);
+                    scoreStr = String.format("%.1f-%.1f", displayScore1, displayScore2);
                 }
                 
                 // Build line with monospaced format matching image generation
@@ -503,11 +541,25 @@ public class CommandInfoMatch {
             String hall2Display = formatHallNameForMatch(m.hall2);
             
             // Format score - show as int if not 0.5 increments
+            // For WALKOVER opponents, display as 3-2 instead of actual score (e.g., 5-0)
             String scoreStr;
-            if (m.hall1Score == Math.floor(m.hall1Score) && m.hall2Score == Math.floor(m.hall2Score)) {
-                scoreStr = String.format("%.0f-%.0f", m.hall1Score, m.hall2Score);
+            double displayScore1 = m.hall1Score;
+            double displayScore2 = m.hall2Score;
+            
+            if ("WALKOVER".equalsIgnoreCase(m.hall2)) {
+                // hall2 is WALKOVER, show 3-2 instead of actual score
+                displayScore1 = 3.0;
+                displayScore2 = 2.0;
+            } else if ("WALKOVER".equalsIgnoreCase(m.hall1)) {
+                // hall1 is WALKOVER, show 2-3 instead of actual score
+                displayScore1 = 2.0;
+                displayScore2 = 3.0;
+            }
+            
+            if (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2)) {
+                scoreStr = String.format("%.0f-%.0f", displayScore1, displayScore2);
             } else {
-                scoreStr = String.format("%.1f-%.1f", m.hall1Score, m.hall2Score);
+                scoreStr = String.format("%.1f-%.1f", displayScore1, displayScore2);
             }
             
             // Create VictoryEntry for sophisticated layout:
@@ -550,7 +602,7 @@ public class CommandInfoMatch {
         sections.add(scoresSection);
         
         // Generate image (no hall identifier needed for match info)
-        return InfoImageGenerator.generateInfoImage(metadata, sections, null);
+        return InfoImageGenerator.generateInfoImage(metadata, sections, null, "InfoMatch", round);
     }
     
     /**
@@ -569,7 +621,10 @@ public class CommandInfoMatch {
             int num = Integer.parseInt(hallName);
             return "Hall " + num;
         } catch (NumberFormatException e) {
-            // If it's not a number, format as "n hall"
+            // If it's not a number, format as "n hall" (only if not WALKOVER)
+            if ("WALKOVER".equalsIgnoreCase(hallName)) {
+                return "WALKOVER";
+            }
             return hallName + " Hall";
         }
     }

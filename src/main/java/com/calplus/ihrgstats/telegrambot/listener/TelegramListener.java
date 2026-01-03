@@ -699,6 +699,31 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle max seeds selection request callback
+            if (data.equals("setting_maxSeeds_select")) {
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
+                
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse maxSeedsSelectionResponse = 
+                    settingsCommand.handleMaxSeedsSelection(userId);
+                
+                // Get original message info to send response to same chat
+                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+                
+                if (message != null) {
+                    JsonObject chat = message.getAsJsonObject("chat");
+                    String chatId = chat.get("id").getAsString();
+                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+                    
+                    // Remove buttons from original message
+                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
+                    
+                    // Send response (no buttons for manual input)
+                    sendMessageToChat(chatId, maxSeedsSelectionResponse.message, threadId);
+                }
+                return;
+            }
+            
             // Handle timezone selection callbacks
             if (data.startsWith("setting_timezone_")) {
                 com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
@@ -1523,8 +1548,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -1615,6 +1644,15 @@ public class TelegramListener {
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
             
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
+            
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
                 try {
@@ -1676,10 +1714,12 @@ public class TelegramListener {
                 }
             }
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            // Note: Markdown in button text itself is not supported, but message text can use it
-            // Don't use Markdown parse mode with underscores or other special chars that can break parsing
-            if ((message.contains("```") || message.contains("**") || message.contains("__")) 
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if ((message.contains("```") || message.contains("**") || message.contains("__")) 
                 && !message.contains("_") && !message.contains("[") && !message.contains("]")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
@@ -1749,8 +1789,12 @@ public class TelegramListener {
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -1807,9 +1851,9 @@ public class TelegramListener {
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
+            // Add parse_mode for HTML if message contains formatting tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
             }
             
             // Add thread ID if provided
@@ -1857,6 +1901,15 @@ public class TelegramListener {
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
+            
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
+                payload.addProperty("parse_mode", "Markdown");
+            }
             
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
@@ -3002,8 +3055,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3076,8 +3133,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3144,8 +3205,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__") || message.contains("*")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__") || message.contains("*")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3244,8 +3309,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3327,8 +3396,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3400,8 +3473,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             
@@ -3474,8 +3551,12 @@ public class TelegramListener {
             
             payload.addProperty("text", message);
             
-            // Add parse_mode for markdown if message contains code blocks or formatting
-            if (message.contains("```") || message.contains("**") || message.contains("__")) {
+            // Add parse_mode for HTML if message contains HTML tags
+            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
+                payload.addProperty("parse_mode", "HTML");
+            }
+            // Otherwise check for markdown
+            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
                 payload.addProperty("parse_mode", "Markdown");
             }
             

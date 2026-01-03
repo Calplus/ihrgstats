@@ -24,7 +24,7 @@ hs_err_pid*
 replay_pid*
 
 # sesesion files (contain sensitive data)
-*.properties
+.env*
 *.db
 
 # Other files

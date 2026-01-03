@@ -100,6 +100,10 @@ public class PropertyManager {
      */
     public static String getSettingDescription(String key) {
         switch (key) {
+            case "settings.timezone":
+                return "Set your preferred timezone for displaying timestamps";
+            case "settings.maxSeeds":
+                return "Sets maximum score for the game for score calculation (e.g: 64 for Othello, 368.5 for Weiqi)";
             case "settings.perfElo.enabled":
                 return "Enable Performance ELO calculations (considers point margins)";
             case "settings.allowNonAdminUploads":

@@ -149,7 +149,7 @@ public class CommandRankPlayers {
                 }
             }
             
-            imagePath = generatePlayersImage(players, highlightRows);
+            imagePath = generatePlayersImage(players, highlightRows, selectedRound);
         } catch (Exception e) {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
@@ -354,7 +354,7 @@ public class CommandRankPlayers {
     /**
      * Generates an image of the players table
      */
-    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows) throws Exception {
+    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound) throws Exception {
         String[] headers = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
         Alignment[] alignments = {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
         int[] columnWidths = {4, 4, 4, 3, 3, 20};
@@ -374,8 +374,23 @@ public class CommandRankPlayers {
             rank++;
         }
 
-        // Extract last round from player data for metadata
-        String lastRoundForMetadata = !players.isEmpty() ? players.get(0).lastRound : null;
+        // Use the selected round for metadata (not the individual player's last round)
+        // If "all" was selected, find the actual latest round from the player data
+        String lastRoundForMetadata;
+        if (selectedRound.equalsIgnoreCase("all")) {
+            // Find the highest round from all players
+            String maxRound = null;
+            for (PlayerRankData player : players) {
+                if (player.lastRound != null) {
+                    if (maxRound == null || Constants.ROUND_SEQUENCE.indexOf(player.lastRound) > Constants.ROUND_SEQUENCE.indexOf(maxRound)) {
+                        maxRound = player.lastRound;
+                    }
+                }
+            }
+            lastRoundForMetadata = maxRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
+        }
         
         // Create metadata with title, description, and last round
         TableImageGenerator.ImageMetadata metadata = new TableImageGenerator.ImageMetadata(
@@ -384,7 +399,9 @@ public class CommandRankPlayers {
             lastRoundForMetadata
         );
 
-        return TableImageGenerator.generatePlayerTable(headers, rows, alignments, columnWidths, metadata, highlightRows);
+        // Use actual last round for filename (not "all")
+        String entityName = lastRoundForMetadata != null ? lastRoundForMetadata : "unknown";
+        return TableImageGenerator.generatePlayerTable(headers, rows, alignments, columnWidths, metadata, highlightRows, "RankPlayers", entityName);
     }
     
     /**

@@ -1060,12 +1060,22 @@ public class CommandCompareHalls {
      * Generates comparison image
      */
     private Path generateImage(HallData hall1, HallData hall2, double winProbability, String selectedRound) throws Exception {
-        // Prepare metadata
-        String lastRound = hall1.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(hall1.lastRound) : 
-                          (hall2.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(hall2.lastRound) : "N/A");
+        // Prepare metadata - use selected round or find max round from data
+        String lastRoundForMetadata;
+        if (selectedRound.equals("all")) {
+            // Find the highest round between both halls
+            String maxRound = hall1.lastRound;
+            if (hall2.lastRound != null && (maxRound == null || Constants.ROUND_SEQUENCE.indexOf(hall2.lastRound) > Constants.ROUND_SEQUENCE.indexOf(maxRound))) {
+                maxRound = hall2.lastRound;
+            }
+            lastRoundForMetadata = maxRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
+        }
+        
         String description = String.format("%s vs %s", hall1.hallName, hall2.hallName);
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata(
-            "Hall Comparison", description, lastRound);
+            "Hall Comparison", description, lastRoundForMetadata != null ? VictoryRecordCalculator.getRoundDisplayName(lastRoundForMetadata) : null);
         
         // Prepare left side data
         List<ComparisonImageGenerator.Section> sections1 = new ArrayList<>();
@@ -1427,7 +1437,8 @@ public class CommandCompareHalls {
         ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(
             hall2.hallName, hall2.hallName, sections2);
         
-        return ComparisonImageGenerator.generateComparisonImage("Hall Comparison", data1, data2, metadata);
+        return ComparisonImageGenerator.generateComparisonImage("Hall Comparison", data1, data2, metadata, 
+            "CompareHalls", hall1.hallName, hall2.hallName);
     }
     
     /**

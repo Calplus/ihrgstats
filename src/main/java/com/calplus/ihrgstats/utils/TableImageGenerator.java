@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -299,7 +300,7 @@ public class TableImageGenerator {
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
         
         // Save to temp file
-        Path tempFile = Files.createTempFile(filename.replace(".png", "_"), ".png");
+        Path tempFile = Paths.get(System.getProperty("java.io.tmpdir"), filename);
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
         
         return tempFile;
@@ -431,7 +432,7 @@ public class TableImageGenerator {
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
         
         // Save to temp file
-        Path tempFile = Files.createTempFile(filename.replace(".png", "_"), ".png");
+        Path tempFile = Paths.get(System.getProperty("java.io.tmpdir"), filename);
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
         
         return tempFile;

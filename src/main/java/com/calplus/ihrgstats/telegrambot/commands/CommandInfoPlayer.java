@@ -301,7 +301,7 @@ public class CommandInfoPlayer {
         String textOutput = generateTextOutput(player, roundsToInclude);
         
         // Generate image using InfoImageGenerator for single entity
-        Path imagePath = generateImage(player, roundsToInclude);
+        Path imagePath = generateImage(player, roundsToInclude, selectedRound);
         
         logHelper.logSuccess(String.format("Generated player info: %s (%s) (rounds: %s)", 
             playerName, hall, selectedRound));
@@ -659,15 +659,20 @@ public class CommandInfoPlayer {
     /**
      * Generates player information image using InfoImageGenerator
      */
-    private Path generateImage(PlayerData player, List<String> roundsToInclude) throws Exception {
-        // Prepare metadata
-        String lastRound = player.lastRound != null ? VictoryRecordCalculator.getRoundDisplayName(player.lastRound) : "N/A";
+    private Path generateImage(PlayerData player, List<String> roundsToInclude, String selectedRound) throws Exception {
+        // Prepare metadata - use selected round or find max round from data
+        String lastRoundForMetadata;
+        if (selectedRound.equals("all")) {
+            lastRoundForMetadata = player.lastRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
+        }
         
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Player Information";
         metadata.subtitle = String.format("%s (Hall %s)", player.name, player.hall);
         metadata.description = "Player statistics and performance";
-        metadata.lastRound = lastRound;
+        metadata.lastRound = lastRoundForMetadata != null ? VictoryRecordCalculator.getRoundDisplayName(lastRoundForMetadata) : null;
         
         // Prepare sections
         List<InfoImageGenerator.Section> sections = new ArrayList<>();
@@ -814,6 +819,6 @@ public class CommandInfoPlayer {
         sections.add(victorySection);
         
         // Generate image
-        return InfoImageGenerator.generateInfoImage(metadata, sections, player.hall);
+        return InfoImageGenerator.generateInfoImage(metadata, sections, player.hall, "InfoPlayer", player.name);
     }
 }

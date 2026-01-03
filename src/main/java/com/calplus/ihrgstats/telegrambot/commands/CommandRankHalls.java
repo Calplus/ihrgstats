@@ -191,7 +191,7 @@ public class CommandRankHalls {
                 }
             }
             
-            imagePath = generateHallsImage(halls, players, highlightRows);
+            imagePath = generateHallsImage(halls, players, highlightRows, selectedRound);
         } catch (Exception e) {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
@@ -398,7 +398,7 @@ public class CommandRankHalls {
     /**
      * Generates an image of the halls table
      */
-    private Path generateHallsImage(List<HallRankData> halls, List<PlayerEloData> players, Set<Integer> highlightRows) throws Exception {
+    private Path generateHallsImage(List<HallRankData> halls, List<PlayerEloData> players, Set<Integer> highlightRows, String selectedRound) throws Exception {
         String[] headers = {"Rank", "Hall", "Cap", "Avg Elo"};
         Alignment[] alignments = {Alignment.RIGHT, Alignment.LEFT, Alignment.RIGHT, Alignment.RIGHT};
         int[] columnWidths = {4, 10, 3, 7};
@@ -418,12 +418,35 @@ public class CommandRankHalls {
             rank++;
         }
 
-        // Extract last round from player data for metadata
-        // Find the most recent round from all players
-        String lastRoundForMetadata = null;
-        if (!players.isEmpty()) {
-            // Get the first player's last round (all should be same or very close)
-            lastRoundForMetadata = players.get(0).lastRound;
+        // Use the selected round for metadata
+        // If "all" was selected, find the actual latest round from the data
+        String lastRoundForMetadata;
+        if (selectedRound.equalsIgnoreCase("all")) {
+            // Find the highest round that has data by checking rounds in reverse order
+            String maxRound = null;
+            try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
+                // Check rounds in reverse order to find the latest one with data
+                for (int i = Constants.ROUND_SEQUENCE.size() - 1; i >= 0; i--) {
+                    String checkRound = Constants.ROUND_SEQUENCE.get(i);
+                    String oppNameCol = RoundUtils.getRoundColumnName("oppName", checkRound);
+                    
+                    String sql = String.format(
+                        "SELECT COUNT(*) as count FROM A1_PlayerStats WHERE active = 1 AND %s IS NOT NULL AND %s != ''",
+                        oppNameCol, oppNameCol
+                    );
+                    
+                    try (PreparedStatement pstmt = conn.prepareStatement(sql);
+                         ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next() && rs.getInt("count") > 0) {
+                            maxRound = checkRound;
+                            break;  // Found the latest round with data
+                        }
+                    }
+                }
+            }
+            lastRoundForMetadata = maxRound;
+        } else {
+            lastRoundForMetadata = selectedRound;
         }
         
         // Create metadata with title, description, and last round
@@ -433,7 +456,9 @@ public class CommandRankHalls {
             lastRoundForMetadata
         );
 
-        return TableImageGenerator.generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, highlightRows);
+        // Use actual last round for filename (not "all")
+        String entityName = lastRoundForMetadata != null ? lastRoundForMetadata : "unknown";
+        return TableImageGenerator.generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, highlightRows, "RankHalls", entityName);
     }
     
     /**
