@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
@@ -47,7 +48,8 @@ public class CommandCompareHalls {
      * Handles the /comparehalls command (initial call)
      */
     public CompareResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /comparehalls command", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested /comparehalls command", userInfo));
         
         // Clear any existing state
         userSelectionStates.put(userId, new HallCompareSelectionState());
@@ -91,7 +93,8 @@ public class CommandCompareHalls {
      * Handles first hall selection
      */
     public CompareResponse handleFirstHallSelection(String userId, String firstHall) {
-        logHelper.logInfo(String.format("User %s selected first hall: %s", userId, firstHall));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected first hall: %s", userInfo, firstHall));
         
         // Store state
         HallCompareSelectionState state = (HallCompareSelectionState) userSelectionStates.get(userId);
@@ -142,8 +145,8 @@ public class CommandCompareHalls {
         }
         
         state.secondHall = secondHall;
-        
-        logHelper.logInfo(String.format("User %s selected second hall: %s", userId, secondHall));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected second hall: %s", userInfo, secondHall));
         
         // Get available rounds
         List<String> availableRounds = getAvailableRounds();
@@ -196,9 +199,9 @@ public class CommandCompareHalls {
         String firstHall = state.firstHall;
         String secondHall = state.secondHall;
         userSelectionStates.remove(userId);
-        
-        logHelper.logInfo(String.format("User %s comparing halls: %s vs %s (rounds: %s)", 
-            userId, firstHall, secondHall, selectedRound));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s comparing halls: %s vs %s (rounds: %s)", 
+            userInfo, firstHall, secondHall, selectedRound));
         
         try {
             // Generate comparison

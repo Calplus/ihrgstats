@@ -136,7 +136,7 @@ public class CommandInfoMatchHall {
         }
         
         state.selectedRound = round;
-        logHelper.logInfo(String.format("User %s selected round: %s for hall: %s", userId, round, state.selectedHall));
+        logHelper.logInfo(String.format("%s selected round: %s for hall: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), round, state.selectedHall));
         
         try {
             InfoResponse response = generateMatchHallInfo(state.selectedHall, state.selectedRound);

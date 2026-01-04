@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
+import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
@@ -47,8 +48,9 @@ public class CommandExportDatabase {
      * @return ExportResponse containing the confirmation message and buttons
      */
     public ExportResponse requestConfirmation(String userId) {
-        discordLog.logInfo(String.format("User %s requested /exportdatabase command", userId));
-        telegramLog.logInfo(String.format("User %s requested /exportdatabase command", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        discordLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
+        telegramLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
 
         // Check admin authorization
         if (!isAdmin(userId)) {

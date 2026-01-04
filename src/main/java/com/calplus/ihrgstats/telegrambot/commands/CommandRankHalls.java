@@ -135,7 +135,7 @@ public class CommandRankHalls {
      * @return Response with rankings for selected round
      */
     public RankResponse handleRoundSelection(String userId, String selectedRound) {
-        logHelper.logInfo("User " + userId + " selected round: " + selectedRound);
+        logHelper.logInfo(com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId) + " selected round: " + selectedRound);
 
         // Store selection state
         HallRankSelectionState state = new HallRankSelectionState();

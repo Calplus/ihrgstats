@@ -54,14 +54,15 @@ public class CommandSettings {
      * @return SettingsResponse containing the message and button options
      */
     public SettingsResponse handleCommand(String userId) {
-        discordLog.logInfo(String.format("User %s requested /settings command", userId));
-        telegramLog.logInfo(String.format("User %s requested /settings command", userId));
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
+        discordLog.logInfo(String.format("%s requested /settings command", userInfo));
+        telegramLog.logInfo(String.format("%s requested /settings command", userInfo));
 
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can use the /settings command.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to use /settings", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to use /settings", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to use /settings", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to use /settings", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
@@ -145,8 +146,8 @@ public class CommandSettings {
         buttonLabels.add("❌ Cancel");
         buttonCallbacks.add("settings_cancel");
 
-        discordLog.logSuccess(String.format("Sent settings list to admin user %s", userId));
-        telegramLog.logSuccess(String.format("Sent settings list to admin user %s", userId));
+        discordLog.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
+        telegramLog.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
 
         return new SettingsResponse(message.toString(), 
             new ButtonConfig(buttonLabels.toArray(new String[0]), 
@@ -159,8 +160,9 @@ public class CommandSettings {
      * @return Response message
      */
     public String handleCancel(String userId) {
-        discordLog.logInfo(String.format("User %s cancelled settings", userId));
-        telegramLog.logInfo(String.format("User %s cancelled settings", userId));
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
+        discordLog.logInfo(String.format("%s cancelled settings", userInfo));
+        telegramLog.logInfo(String.format("%s cancelled settings", userInfo));
         return "ℹ️ Settings menu closed.";
     }
 
@@ -171,11 +173,12 @@ public class CommandSettings {
      * @return Response message after toggling the setting
      */
     public String handleToggle(String callbackData, String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to toggle setting", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to toggle setting", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to toggle setting", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to toggle setting", userInfo));
             return errorMsg;
         }
 
@@ -186,8 +189,8 @@ public class CommandSettings {
 
         String settingKey = callbackData.substring("setting_toggle_".length());
         
-        discordLog.logInfo(String.format("Admin %s toggling setting: %s", userId, settingKey));
-        telegramLog.logInfo(String.format("Admin %s toggling setting: %s", userId, settingKey));
+        discordLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
+        telegramLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
 
         // Get current value
         String currentValue = PropertyResolver.getProperty(settingKey);
@@ -231,16 +234,17 @@ public class CommandSettings {
      * @return Response containing hall selection buttons
      */
     public SettingsResponse handleHomeHallSelection(String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to change home hall", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to change home hall", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to change home hall", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to change home hall", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested home hall selection", userId));
-        telegramLog.logInfo(String.format("Admin %s requested home hall selection", userId));
+        discordLog.logInfo(String.format("Admin %s requested home hall selection", userInfo));
+        telegramLog.logInfo(String.format("Admin %s requested home hall selection", userInfo));
 
         try {
             // Query database for all distinct halls
@@ -334,11 +338,12 @@ public class CommandSettings {
      * @return Response message after setting the home hall
      */
     public String handleHomeHallCallback(String callbackData, String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to set home hall", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to set home hall", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to set home hall", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to set home hall", userInfo));
             return errorMsg;
         }
 
@@ -527,16 +532,17 @@ public class CommandSettings {
      * @return Response prompting for manual input
      */
     public SettingsResponse handleMaxSeedsSelection(String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to change maxSeeds", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to change maxSeeds", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to change maxSeeds", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to change maxSeeds", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested maxSeeds change", userId));
-        telegramLog.logInfo(String.format("Admin %s requested maxSeeds change", userId));
+        discordLog.logInfo(String.format("Admin %s requested maxSeeds change", userInfo));
+        telegramLog.logInfo(String.format("Admin %s requested maxSeeds change", userInfo));
 
         // Set manual input mode
         SettingsSelectionState state = new SettingsSelectionState();
@@ -555,11 +561,12 @@ public class CommandSettings {
      * This is only for cancel operation as selection goes directly to manual input
      */
     public String handleMaxSeedsCallback(String callbackData, String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted unauthorized maxSeeds callback", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted unauthorized maxSeeds callback", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted unauthorized maxSeeds callback", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted unauthorized maxSeeds callback", userInfo));
             return errorMsg;
         }
 
@@ -578,16 +585,17 @@ public class CommandSettings {
      * @return Response containing timezone selection buttons
      */
     public SettingsResponse handleTimezoneSelection(String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to change timezone", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to change timezone", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to change timezone", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to change timezone", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested timezone selection", userId));
-        telegramLog.logInfo(String.format("Admin %s requested timezone selection", userId));
+        discordLog.logInfo(String.format("Admin %s requested timezone selection", userInfo));
+        telegramLog.logInfo(String.format("Admin %s requested timezone selection", userInfo));
 
         // Get current timezone
         String currentTimezone = PropertyResolver.getProperty("settings.timezone", "");
@@ -657,11 +665,12 @@ public class CommandSettings {
      * @return Response message after setting the timezone
      */
     public String handleTimezoneCallback(String callbackData, String userId) {
+        String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to set timezone", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to set timezone", userId));
+            discordLog.logWarning(String.format("Non-admin %s attempted to set timezone", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to set timezone", userInfo));
             return errorMsg;
         }
 

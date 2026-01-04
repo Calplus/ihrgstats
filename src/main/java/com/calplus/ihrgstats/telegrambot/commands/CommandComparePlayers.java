@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
@@ -49,7 +50,8 @@ public class CommandComparePlayers {
      * Handles the /compareplayers command (initial call)
      */
     public CompareResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /compareplayers command", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested /compareplayers command", userInfo));
         
         // Clear any existing state
         userSelectionStates.put(userId, new PlayerCompareSelectionState());
@@ -87,7 +89,8 @@ public class CommandComparePlayers {
      * Handles first player's hall selection
      */
     public CompareResponse handleFirstHallSelection(String userId, String firstHall) {
-        logHelper.logInfo(String.format("User %s selected first player's hall: %s", userId, firstHall));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected first player's hall: %s", userInfo, firstHall));
         
         // Store state
         PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
@@ -136,9 +139,9 @@ public class CommandComparePlayers {
         }
         
         state.firstPlayerName = firstPlayer;
-        
-        logHelper.logInfo(String.format("User %s selected first player: %s from %s", 
-            userId, firstPlayer, state.firstPlayerHall));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected first player: %s from %s", 
+            userInfo, firstPlayer, state.firstPlayerHall));
         
         // Fetch available halls for second player
         List<String> halls = HallUtils.fetchAndSortAvailableHalls(dbPath);
@@ -182,8 +185,8 @@ public class CommandComparePlayers {
         }
         
         state.secondPlayerHall = secondHall;
-        
-        logHelper.logInfo(String.format("User %s selected second player's hall: %s", userId, secondHall));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected second player's hall: %s", userInfo, secondHall));
         
         // Fetch players from the hall
         List<String> players = fetchPlayersFromHall(secondHall);
@@ -233,8 +236,8 @@ public class CommandComparePlayers {
         }
         
         state.secondPlayerName = secondPlayer;
-        
-        logHelper.logInfo(String.format("User %s selected second player: %s", userId, secondPlayer));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected second player: %s", userInfo, secondPlayer));
         
         // Get available rounds
         List<String> availableRounds = getAvailableRounds();
@@ -289,9 +292,9 @@ public class CommandComparePlayers {
         String secondPlayer = state.secondPlayerName;
         String secondHall = state.secondPlayerHall;
         userSelectionStates.remove(userId);
-        
-        logHelper.logInfo(String.format("User %s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
-            userId, firstPlayer, firstHall, secondPlayer, secondHall, selectedRound));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
+            userInfo, firstPlayer, firstHall, secondPlayer, secondHall, selectedRound));
         
         try {
             // Generate comparison

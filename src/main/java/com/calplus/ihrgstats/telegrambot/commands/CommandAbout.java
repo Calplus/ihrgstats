@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.Main;
+import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.PropertyResolver;
@@ -24,7 +25,7 @@ import java.time.format.DateTimeFormatter;
  */
 public class CommandAbout {
     private final LogHelper logHelper;
-    private final String version = "1.1.2";
+    private final String version = "1.1.4";
     private final String author = "Calplus";
     private final String lastUpdated = "04 Jan 2026";
     private final String botToken;
@@ -107,7 +108,8 @@ public class CommandAbout {
      * Handles the /about command
      */
     public CommandResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /about", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested /about", userInfo));
         
         try {
             String adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
@@ -141,12 +143,13 @@ public class CommandAbout {
             }
             
             message.append("_For help with commands, use_ `/help`");
-            
-            logHelper.logSuccess(String.format("User %s received about information", userId));
+            String userInfo2 = TelegramListener.formatUserInfo(userId);
+            logHelper.logSuccess(String.format("%s received about information", userInfo2));
             return new CommandResponse(message.toString(), (java.nio.file.Path) null);
             
         } catch (Exception e) {
-            logHelper.logError(String.format("Error generating about info for user %s: %s", userId, e.getMessage()));
+            String userInfo3 = TelegramListener.formatUserInfo(userId);
+            logHelper.logError(String.format("Error generating about info for %s: %s", userInfo3, e.getMessage()));
             return new CommandResponse("❌ Error generating about information. Please try again later.", (java.nio.file.Path) null);
         }
     }

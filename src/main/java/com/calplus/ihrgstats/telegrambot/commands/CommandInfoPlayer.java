@@ -46,7 +46,7 @@ public class CommandInfoPlayer {
      * Handles the /infoplayer command (initial call)
      */
     public InfoResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /infoplayer command", userId));
+        logHelper.logInfo(String.format("%s requested /infoplayer command", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
         
         // Clear existing state and cleanup old states
         TelegramCommandUtils.cleanupOldStates(userSelectionStates);
@@ -85,7 +85,7 @@ public class CommandInfoPlayer {
      * Handles hall selection
      */
     public InfoResponse handleHallSelection(String userId, String hall) {
-        logHelper.logInfo(String.format("User %s selected hall: %s", userId, hall));
+        logHelper.logInfo(String.format("%s selected hall: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), hall));
         
         // Store state
         PlayerInfoSelectionState state = userSelectionStates.get(userId);
@@ -135,7 +135,7 @@ public class CommandInfoPlayer {
         
         state.playerName = player;
         
-        logHelper.logInfo(String.format("User %s selected player: %s", userId, player));
+        logHelper.logInfo(String.format("%s selected player: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), player));
         
         // Get available rounds
         List<String> availableRounds = getAvailableRounds();
@@ -188,8 +188,8 @@ public class CommandInfoPlayer {
         String hall = state.playerHall;
         userSelectionStates.remove(userId);
         
-        logHelper.logInfo(String.format("User %s requesting info for player: %s (%s) (rounds: %s)", 
-            userId, playerName, hall, selectedRound));
+        logHelper.logInfo(String.format("%s requesting info for player: %s (%s) (rounds: %s)", 
+            com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), playerName, hall, selectedRound));
         
         try {
             // Generate player info

@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils;
@@ -33,7 +34,8 @@ public class CommandHelp {
      * Handles the /help command (initial call)
      */
     public CommandResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /help", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested /help", userInfo));
         
         // Clean up old states
         TelegramCommandUtils.cleanupOldStates(userSelectionStates);
@@ -55,7 +57,8 @@ public class CommandHelp {
      * Handles category selection (commands or file uploads)
      */
     public CommandResponse handleCategorySelection(String userId, String category) {
-        logHelper.logInfo(String.format("User %s selected help category: %s", userId, category));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s selected help category: %s", userInfo, category));
         
         HelpSelectionState state = userSelectionStates.get(userId);
         if (state == null) {
@@ -78,7 +81,8 @@ public class CommandHelp {
      * Handles file type selection
      */
     public CommandResponse handleFileTypeSelection(String userId, String fileType) {
-        logHelper.logInfo(String.format("User %s requested file upload help for: %s", userId, fileType));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested file upload help for: %s", userInfo, fileType));
         
         userSelectionStates.remove(userId);
         
@@ -89,7 +93,8 @@ public class CommandHelp {
      * Handles back button - returns to main help menu
      */
     public CommandResponse handleBack(String userId) {
-        logHelper.logInfo(String.format("User %s requested back to help menu", userId));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested back to help menu", userInfo));
         return handleCommand(userId);
     }
     
@@ -129,7 +134,7 @@ public class CommandHelp {
         message.append("• /help - i think you need help\n\n");
         
         message.append("<b>Administrator Commands:</b>\n");
-        message.append("• /settings - (ADMIN) Change bot's settings\n\n");
+        message.append("• /settings - (ADMIN) Change bot's settings\n");
         message.append("• /exportdatabase - (ADMIN) Exports database for debugging/storing data.\n\n");
         
         message.append("Click on any command below for detailed information:\n");
@@ -270,7 +275,8 @@ public class CommandHelp {
      * Handles command detail selection
      */
     public CommandResponse handleCommandDetail(String userId, String command) {
-        logHelper.logInfo(String.format("User %s requested detailed help for: %s", userId, command));
+        String userInfo = TelegramListener.formatUserInfo(userId);
+        logHelper.logInfo(String.format("%s requested detailed help for: %s", userInfo, command));
         
         userSelectionStates.remove(userId);
         

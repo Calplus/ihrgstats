@@ -50,7 +50,7 @@ public class CommandInfoMatch {
      * Handles the /infomatch command (initial call)
      */
     public MatchResponse handleCommand(String userId) {
-        logHelper.logInfo(String.format("User %s requested /infomatch command", userId));
+        logHelper.logInfo(String.format("%s requested /infomatch command", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
         
         // Clear any existing state
         userSelectionStates.put(userId, new MatchInfoSelectionState());
@@ -98,7 +98,7 @@ public class CommandInfoMatch {
      * Handles round selection and generates match info
      */
     public MatchResponse handleRoundSelection(String userId, String selectedRound) {
-        logHelper.logInfo(String.format("User %s selected round: %s", userId, selectedRound));
+        logHelper.logInfo(String.format("%s selected round: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), selectedRound));
         
         MatchInfoSelectionState state = (MatchInfoSelectionState) userSelectionStates.get(userId);
         if (state == null) state = new MatchInfoSelectionState();

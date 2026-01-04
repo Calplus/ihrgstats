@@ -62,6 +62,9 @@ public class TelegramListener {
     private static final String FILE_PROCESSING_CONFIRMATION_KEY = "file_processing";
     private static final String FILE_PROCESSING_MULTI_CHOICE_KEY = "file_processing_multi";
     
+    // User name cache: maps userId -> userName for logging purposes
+    private static final Map<String, String> userNameCache = new ConcurrentHashMap<>();
+    
     private static class ConfirmationRequest {
         String message;
         CompletableFuture<Boolean> future;
@@ -112,6 +115,22 @@ public class TelegramListener {
         this.isRunning = false;
         
         loadConfig();
+    }
+
+    /**
+     * Formats user information for logging purposes.
+     * Returns "@username (ID: <id>)" if username is available, otherwise "User (ID: <id>)"
+     * This method can be called from Command classes to get formatted user info for logs.
+     * 
+     * @param userId The user's Telegram ID
+     * @return Formatted user info string
+     */
+    public static String formatUserInfo(String userId) {
+        String userName = userNameCache.get(userId);
+        if (userName != null && !userName.isEmpty()) {
+            return String.format("@%s (ID: %s)", userName, userId);
+        }
+        return String.format("User (ID: %s)", userId);
     }
 
     /**
@@ -566,6 +585,13 @@ public class TelegramListener {
                 String text = message.get("text").getAsString();
                 JsonObject from = message.getAsJsonObject("from");
                 String userId = from.get("id").getAsString();
+                String userName = from.has("username") ? from.get("username").getAsString() : null;
+                
+                // Store userName in cache for later use by commands
+                if (userName != null && !userName.isEmpty()) {
+                    userNameCache.put(userId, userName);
+                }
+                
                 String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : "none";
                 System.out.println("[TEXT MESSAGE] Received from chat " + chatId + ", thread " + msgThreadId + ", user " + userId + ": '" + text + "'");
                 handleTextMessage(userId, text.trim(), message);
@@ -594,6 +620,12 @@ public class TelegramListener {
             JsonObject from = callbackQuery.getAsJsonObject("from");
             String userId = from.get("id").getAsString();
             String userName = from.has("username") ? from.get("username").getAsString() : null;
+            
+            // Store userName in cache for later use by commands
+            if (userName != null && !userName.isEmpty()) {
+                userNameCache.put(userId, userName);
+            }
+            
             String userInfo = userName != null ? String.format("@%s (ID: %s)", userName, userId) : String.format("User (ID: %s)", userId);
             
             discordLog.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
@@ -1003,7 +1035,9 @@ public class TelegramListener {
                 String userId = from.has("id") ? from.get("id").getAsString() : "unknown";
                 String username = from.has("username") ? from.get("username").getAsString() : null;
                 
+                // Store userName in cache for later use by commands
                 if (username != null && !username.isEmpty()) {
+                    userNameCache.put(userId, username);
                     return String.format("@%s (ID: %s)", username, userId);
                 } else {
                     return String.format("User (ID: %s)", userId);
@@ -1073,15 +1107,15 @@ public class TelegramListener {
             
             if (!isAdmin) {
                 if (!allowNonAdminUploads) {
-                    String errorMsg = String.format("User %s is not an admin. File upload rejected.", username);
+                    String errorMsg = String.format("%s is not an admin. File upload rejected.", userInfo);
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
                     return;
                 }
                 
                 // Request confirmation for non-admin upload
-                String confirmMsg = String.format("⚠️ User %s is not an admin. Do you want to process their file '%s'? Reply with 'yes' or 'no'.", 
-                    username, fileName);
+                String confirmMsg = String.format("⚠️ %s is not an admin. Do you want to process their file '%s'? Reply with 'yes' or 'no'.", 
+                    userInfo, fileName);
                 boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg, message);
                 
                 if (!confirmed) {
@@ -1445,8 +1479,8 @@ public class TelegramListener {
      */
     private void handleExportPlayersCommand(JsonObject message) {
         String userInfo = getUserInfoFromMessage(message);
-        discordLog.logInfo(String.format("User %s: Processing /exportplayers command", userInfo));
-        telegramLog.logInfo(String.format("User %s: Processing /exportplayers command", userInfo));
+        discordLog.logInfo(String.format("%s: Processing /exportplayers command", userInfo));
+        telegramLog.logInfo(String.format("%s: Processing /exportplayers command", userInfo));
 
         try {
             com.calplus.ihrgstats.telegrambot.commands.CommandExportPlayers exporter = 

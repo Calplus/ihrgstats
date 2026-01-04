@@ -139,7 +139,7 @@ public class CommandInfoHall {
      * Handles round selection and generates hall info
      */
     public InfoResponse handleRoundSelection(String userId, String selectedRound) {
-        logHelper.logInfo(String.format("User %s selected round: %s", userId, selectedRound));
+        logHelper.logInfo(String.format("%s selected round: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), selectedRound));
         
         HallInfoSelectionState state = (HallInfoSelectionState) userSelectionStates.get(userId);
         if (state == null || state.hall == null) {
