@@ -66,11 +66,17 @@ public class TelegramListener {
         String message;
         CompletableFuture<Boolean> future;
         long timestamp;
+        JsonObject originalMessage;  // Store original message for channel routing
         
         ConfirmationRequest(String message, CompletableFuture<Boolean> future) {
+            this(message, future, null);
+        }
+        
+        ConfirmationRequest(String message, CompletableFuture<Boolean> future, JsonObject originalMessage) {
             this.message = message;
             this.future = future;
             this.timestamp = System.currentTimeMillis();
+            this.originalMessage = originalMessage;
         }
     }
     
@@ -79,12 +85,18 @@ public class TelegramListener {
         String[] options;
         CompletableFuture<Integer> future;
         long timestamp;
+        JsonObject originalMessage;  // Store original message for channel routing
         
         MultiChoiceConfirmationRequest(String message, String[] options, CompletableFuture<Integer> future) {
+            this(message, options, future, null);
+        }
+        
+        MultiChoiceConfirmationRequest(String message, String[] options, CompletableFuture<Integer> future, JsonObject originalMessage) {
             this.message = message;
             this.options = options;
             this.future = future;
             this.timestamp = System.currentTimeMillis();
+            this.originalMessage = originalMessage;
         }
     }
 
@@ -894,17 +906,17 @@ public class TelegramListener {
                             discordLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
                             telegramLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
                             
-                            // Send confirmation message to chat
+                            // Send confirmation message to chat (use stored original message for routing)
                             String confirmMsg = String.format("✅ Selected: %s", selectedOption);
-                            sendMessageToUploadChat(confirmMsg);
+                            sendMessageToUploadChat(confirmMsg, request.originalMessage);
                             
                             request.future.complete(choice);
                             pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
                         } else {
-                            sendMessageToUploadChat("❌ Invalid choice index");
+                            sendMessageToUploadChat("❌ Invalid choice index", request.originalMessage);
                         }
                     } catch (NumberFormatException e) {
-                        sendMessageToUploadChat("❌ Invalid callback data format");
+                        sendMessageToUploadChat("❌ Invalid callback data format", request.originalMessage);
                     }
                 }
             }
@@ -1070,7 +1082,7 @@ public class TelegramListener {
                 // Request confirmation for non-admin upload
                 String confirmMsg = String.format("⚠️ User %s is not an admin. Do you want to process their file '%s'? Reply with 'yes' or 'no'.", 
                     username, fileName);
-                boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg);
+                boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg, message);
                 
                 if (!confirmed) {
                     String cancelMsg = "File processing cancelled - user did not confirm.";
@@ -1100,9 +1112,9 @@ public class TelegramListener {
     /**
      * Requests user confirmation via Telegram chat
      */
-    private boolean requestUserConfirmationViaChat(String userId, String message) {
+    private boolean requestUserConfirmationViaChat(String userId, String message, JsonObject originalMessage) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
-        pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(message, future));
+        pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(message, future, originalMessage));
         
         // Send confirmation request message
         telegramLog.logInfo(message);
@@ -1113,7 +1125,7 @@ public class TelegramListener {
         } catch (TimeoutException e) {
             pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
             telegramLog.logWarning("Confirmation timeout - no response received within 60 seconds.");
-            sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.");
+            sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.", originalMessage);
             return false;
         } catch (Exception e) {
             pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
@@ -1203,17 +1215,17 @@ public class TelegramListener {
                 processor.setConfirmationCallback((msg) -> {
                     // Send confirmation request to upload chat (only once)
                     String formattedMsg = formatStatusMessage("⚠️", "CONFIRMATION", msg + "\n\nPlease reply 'yes' or 'no'.");
-                    sendMessageToUploadChat(formattedMsg);
+                    sendMessageToUploadChat(formattedMsg, originalMessage);
                     
                     // Wait for user response via Telegram (don't log again in requestUserConfirmationViaChat)
                     CompletableFuture<Boolean> future = new CompletableFuture<>();
-                    pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(msg, future));
+                    pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(msg, future, originalMessage));
                     
                     try {
                         return future.get(60, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
                         pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
-                        sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.");
+                        sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.", originalMessage);
                         return false;
                     } catch (Exception e) {
                         pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
@@ -1225,18 +1237,18 @@ public class TelegramListener {
                 // Set up multi-choice callback for Telegram with buttons
                 processor.setMultiChoiceCallback((msg, options) -> {
                     // Send message with inline keyboard buttons
-                    sendMessageWithButtons(msg, options);
+                    sendMessageWithButtons(msg, options, originalMessage);
                     
                     // Wait for button click response
                     CompletableFuture<Integer> future = new CompletableFuture<>();
                     pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
-                        new MultiChoiceConfirmationRequest(msg, options, future));
+                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage));
                     
                     try {
                         return future.get(120, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
                         pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
-                        sendMessageToUploadChat("⏱️ Button selection timeout - processing cancelled.");
+                        sendMessageToUploadChat("⏱️ Button selection timeout - processing cancelled.", originalMessage);
                         return -1;
                     } catch (Exception e) {
                         pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
@@ -1270,12 +1282,12 @@ public class TelegramListener {
                 // Set up multi-choice callback for Telegram with buttons
                 processor.setMultiChoiceCallback((msg, options) -> {
                     // Send message with inline keyboard buttons
-                    sendMessageWithButtons(msg, options);
+                    sendMessageWithButtons(msg, options, originalMessage);
                     
                     // Wait for button click response
                     CompletableFuture<Integer> future = new CompletableFuture<>();
                     pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
-                        new MultiChoiceConfirmationRequest(msg, options, future));
+                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage));
                     
                     try {
                         return future.get(120, TimeUnit.SECONDS);
@@ -1722,18 +1734,41 @@ public class TelegramListener {
 
     /**
      * Sends a message with inline keyboard buttons to the upload chat
-     * Intelligently routes to subchannel if exists, otherwise main channel
+     * Intelligently routes based on allowAllChannelsProcessing and original message
      */
     private void sendMessageWithButtons(String message, String[] options) {
+        sendMessageWithButtons(message, options, null);
+    }
+
+    /**
+     * Sends a message with inline keyboard buttons
+     * Intelligently routes based on allowAllChannelsProcessing and original message
+     */
+    private void sendMessageWithButtons(String message, String[] options, JsonObject originalMessage) {
         try {
-            String[] chatAndThread = getUploadChatIdAndThread();
-            if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                System.err.println("Cannot send message with buttons: upload chat ID is not configured");
-                return;
-            }
+            String chatId;
+            String threadId;
             
-            String chatId = chatAndThread[0];
-            String threadId = chatAndThread[1];
+            // Determine where to send the message
+            if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
+                // Send to the same channel where the file was uploaded
+                JsonObject chat = originalMessage.getAsJsonObject("chat");
+                chatId = chat.get("id").getAsString();
+                
+                // Add thread ID if the original message was in a thread
+                threadId = originalMessage.has("message_thread_id") ? 
+                    originalMessage.get("message_thread_id").getAsString() : null;
+            } else {
+                // Use configured upload chat
+                String[] chatAndThread = getUploadChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                    System.err.println("Cannot send message with buttons: upload chat ID is not configured");
+                    return;
+                }
+                
+                chatId = chatAndThread[0];
+                threadId = chatAndThread[1];
+            }
             
             String url = String.format("https://api.telegram.org/bot%s/sendMessage", botToken);
             
@@ -1806,17 +1841,43 @@ public class TelegramListener {
      * Sends a message to the upload chat/thread
      * Intelligently routes to subchannel if exists, otherwise main channel
      */
+    /**
+     * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
+     */
     private void sendMessageToUploadChat(String message) {
+        sendMessageToUploadChat(message, null);
+    }
+
+    /**
+     * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
+     * Intelligently routes based on allowAllChannelsProcessing and original message
+     */
+    private void sendMessageToUploadChat(String message, JsonObject originalMessage) {
         try {
-            String[] chatAndThread = getUploadChatIdAndThread();
-            if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                System.err.println("Cannot send message: upload chat ID is not configured");
-                discordLog.logWarning("Cannot send message to Telegram: upload chat not configured");
-                return;
-            }
+            String chatId;
+            String threadId;
             
-            String chatId = chatAndThread[0];
-            String threadId = chatAndThread[1];
+            // Determine where to send the message
+            if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
+                // Send to the same channel where the file was uploaded
+                JsonObject chat = originalMessage.getAsJsonObject("chat");
+                chatId = chat.get("id").getAsString();
+                
+                // Add thread ID if the original message was in a thread
+                threadId = originalMessage.has("message_thread_id") ? 
+                    originalMessage.get("message_thread_id").getAsString() : null;
+            } else {
+                // Use configured upload chat
+                String[] chatAndThread = getUploadChatIdAndThread();
+                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+                    System.err.println("Cannot send message: upload chat ID is not configured");
+                    discordLog.logWarning("Cannot send message to Telegram: upload chat not configured");
+                    return;
+                }
+                
+                chatId = chatAndThread[0];
+                threadId = chatAndThread[1];
+            }
             
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             

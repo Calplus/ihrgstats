@@ -944,7 +944,9 @@ public class CommandComparePlayers {
                 oppName != null ? oppName : "?",
                 oppEloStr,
                 oppHallFormatted,
-                oppEmoji
+                oppEmoji,
+                outcome,
+                oppOutcome
             ));
         }
         sections1.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries1));
@@ -1094,7 +1096,9 @@ public class CommandComparePlayers {
                 oppName != null ? oppName : "?",
                 oppEloStr,
                 oppHallFormatted,
-                oppEmoji
+                oppEmoji,
+                outcome,
+                oppOutcome
             ));
         }
         sections2.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries2));

@@ -24,8 +24,9 @@ import java.time.format.DateTimeFormatter;
  */
 public class CommandAbout {
     private final LogHelper logHelper;
-    private final String version = "1.0.0";
+    private final String version = "1.1.2";
     private final String author = "Calplus";
+    private final String lastUpdated = "04 Jan 2026";
     private final String botToken;
     private final HttpClient httpClient;
     private final Gson gson;
@@ -127,7 +128,7 @@ public class CommandAbout {
             message.append("`").append(TimezoneHelper.toConfiguredZone(Main.LAUNCH_TIME).format(formatter)).append("`\n\n");
             
             message.append("**Last Updated:**\n");
-            message.append("`02 Jan 2026`\n\n");
+            message.append("`").append(lastUpdated).append("`\n\n");
             
             message.append("**Current Time:**\n");
             message.append("`").append(now.format(formatter)).append("`\n\n");

@@ -10,13 +10,54 @@ import java.util.*;
  */
 public class PropertyManager {
     private static final String PROPERTIES_FILE = "application.properties";
+    private static final String CONFIG_DIR = "config";
     
     /**
-     * Gets the path to the application.properties file in src/main/resources
+     * Gets the path to the application.properties file.
+     * For JAR execution, uses config/application.properties in working directory.
+     * For development, uses src/main/resources/application.properties.
      */
     private static Path getPropertiesPath() {
         String userDir = System.getProperty("user.dir");
-        return Paths.get(userDir, "src", "main", "resources", PROPERTIES_FILE);
+        
+        // Check if running from JAR or if config directory exists
+        Path configPath = Paths.get(userDir, CONFIG_DIR, PROPERTIES_FILE);
+        Path devPath = Paths.get(userDir, "src", "main", "resources", PROPERTIES_FILE);
+        
+        // If config directory exists or dev path doesn't exist, use config path
+        if (Files.exists(configPath) || !Files.exists(devPath)) {
+            // Ensure config directory exists
+            try {
+                Files.createDirectories(configPath.getParent());
+                
+                // If config file doesn't exist, copy from classpath
+                if (!Files.exists(configPath)) {
+                    copyPropertiesFromClasspath(configPath);
+                }
+            } catch (IOException e) {
+                System.err.println("Error creating config directory: " + e.getMessage());
+            }
+            return configPath;
+        }
+        
+        // Development mode - use src/main/resources
+        return devPath;
+    }
+    
+    /**
+     * Copies application.properties from classpath to external config directory
+     */
+    private static void copyPropertiesFromClasspath(Path targetPath) {
+        try (InputStream is = PropertyManager.class.getClassLoader().getResourceAsStream(PROPERTIES_FILE)) {
+            if (is != null) {
+                Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("Created external config file: " + targetPath);
+            } else {
+                System.err.println("Could not find " + PROPERTIES_FILE + " in classpath");
+            }
+        } catch (IOException e) {
+            System.err.println("Error copying properties from classpath: " + e.getMessage());
+        }
     }
     
     /**
@@ -42,13 +83,20 @@ public class PropertyManager {
     }
     
     /**
-     * Updates a property value in the application.properties file
-     * Preserves comments and formatting
-     * @param key The property key to update
+     * Updates a property value. For settings and internet properties that use environment variables,
+     * updates the .env.properties file. For other properties, updates application.properties directly.
+     * Preserves comments and formatting.
+     * @param key The property key to update (e.g., "settings.timezone")
      * @param value The new value
      * @return true if successful, false otherwise
      */
     public static boolean updateProperty(String key, String value) {
+        // Check if this is a settings or internet property that should go to .env.properties
+        if (key.startsWith("settings.") || key.startsWith("internet.")) {
+            return updateEnvironmentProperty(key, value);
+        }
+        
+        // For other properties, update application.properties directly
         Path propsPath = getPropertiesPath();
         
         if (!Files.exists(propsPath)) {
@@ -89,6 +137,33 @@ public class PropertyManager {
             
         } catch (IOException e) {
             System.err.println("Error updating property: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Updates a property in the .env.properties file by converting the property key
+     * to the corresponding environment variable name.
+     * @param propertyKey The property key (e.g., "settings.timezone")
+     * @param value The new value
+     * @return true if successful, false otherwise
+     */
+    private static boolean updateEnvironmentProperty(String propertyKey, String value) {
+        try {
+            // Convert property key to environment variable name
+            // settings.perfElo.enabled -> SETTINGS_PERFELO_ENABLED
+            // internet.webhook.url -> INTERNET_WEBHOOK_URL
+            String envKey = propertyKey.toUpperCase().replace(".", "_");
+            
+            // Use EnvironmentManager to update the .env.properties file
+            EnvironmentManager envManager = new EnvironmentManager();
+            envManager.setProperty(envKey, value);
+            
+            System.out.println("Updated environment property: " + envKey + " = " + value);
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("Error updating environment property: " + e.getMessage());
             return false;
         }
     }

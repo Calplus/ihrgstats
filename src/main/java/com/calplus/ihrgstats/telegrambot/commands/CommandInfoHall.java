@@ -1007,6 +1007,7 @@ public class CommandInfoHall {
                 InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
                 entry.round = VictoryRecordCalculator.getRoundDisplayName(round);
                 entry.hallEmoji = hallEmoji;
+                entry.hallOutcome = record.outcome;
                 entry.playerHall = hallFormatted;  // For halls, we use the hall name in the playerHall field
                 entry.playerElo = hallEloStr;
                 entry.playerName = "";  // Halls don't have player names
@@ -1015,6 +1016,7 @@ public class CommandInfoHall {
                 entry.opponentElo = oppEloStr;
                 entry.opponentHall = oppHallFormatted;
                 entry.oppEmoji = oppEmoji;
+                entry.oppOutcome = oppOutcome;
                 entry.isNA = false;
                 victorySection.addVictoryEntry(entry);
             } else {

@@ -35,10 +35,10 @@ public class InfoImageGenerator {
     private static final Color TABLE_HIGHLIGHT = new Color(144, 238, 144);  // Light green for highlighting
     
     private static final Color TEXT_COLOR = Color.BLACK;
-    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
-    private static final Font HEADER_FONT = new Font("SansSerif", Font.BOLD, 32);
-    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 48);
-    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 20);
+    private static final Font TABLE_FONT = FontManager.getMonoFont(24);
+    private static final Font HEADER_FONT = FontManager.getSansBoldFont(32);
+    private static final Font TITLE_FONT = FontManager.getSansBoldFont(48);
+    private static final Font METADATA_FONT = FontManager.getSansFont(20);
     
     /**
      * Image metadata
@@ -129,6 +129,8 @@ public class InfoImageGenerator {
         public boolean isNA;            // True if this round is N/A
         public boolean highlightPlayer; // True if player/left side should be highlighted green
         public boolean highlightOpponent; // True if opponent/right side should be highlighted green
+        public Integer hallOutcome;     // Outcome value for images (1=win, 0=draw, -1=loss, null=unknown)
+        public Integer oppOutcome;      // Outcome value for images (opponent's outcome)
         
         // Legacy fields for backward compatibility
         public String result;           // Deprecated: use hallEmoji instead
@@ -621,16 +623,16 @@ public class InfoImageGenerator {
             g2d.drawString(entry.round, leftX, textY);
             leftX += roundColWidth;
             
-            g2d.drawString(entry.hallEmoji, leftX, textY);
-            leftX += fm.stringWidth(entry.hallEmoji) + 3;
+            OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.hallOutcome, leftX, textY, TABLE_FONT);
+            leftX += OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.hallOutcome, TABLE_FONT) + 3;
             
             g2d.drawString(entry.playerElo, leftX, textY);
             leftX += fm.stringWidth(entry.playerElo) + 8;
             
             // Draw right flush: oppElo, oppEmoji
             int rightX = x + width;
-            rightX -= fm.stringWidth(entry.oppEmoji);
-            g2d.drawString(entry.oppEmoji, rightX, textY);
+            rightX -= OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.oppOutcome, TABLE_FONT);
+            OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.oppOutcome, rightX, textY, TABLE_FONT);
             rightX -= 3;
             
             rightX -= fm.stringWidth(entry.opponentElo);
@@ -665,8 +667,8 @@ public class InfoImageGenerator {
             g2d.drawString(entry.round, leftX, textY);
             leftX += roundColWidth;
             
-            g2d.drawString(entry.hallEmoji, leftX, textY);
-            leftX += fm.stringWidth(entry.hallEmoji) + 6;
+            OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.hallOutcome, leftX, textY, TABLE_FONT);
+            leftX += OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.hallOutcome, TABLE_FONT) + 6;
             
             g2d.drawString(entry.playerHall, leftX, textY);
             leftX += fm.stringWidth(entry.playerHall) + 6;
@@ -678,8 +680,8 @@ public class InfoImageGenerator {
             String paddedOppHall = String.format("%3s", entry.opponentHall);
             int rightX = x + width;
             
-            rightX -= fm.stringWidth(entry.oppEmoji);
-            g2d.drawString(entry.oppEmoji, rightX, textY);
+            rightX -= OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.oppOutcome, TABLE_FONT);
+            OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.oppOutcome, rightX, textY, TABLE_FONT);
             rightX -= 6;
             
             rightX -= fm.stringWidth(paddedOppHall);

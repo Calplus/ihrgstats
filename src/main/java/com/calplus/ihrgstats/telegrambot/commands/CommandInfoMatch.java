@@ -568,6 +568,7 @@ public class CommandInfoMatch {
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = "";  // No round column for match info
             entry.hallEmoji = emoji1;
+            entry.hallOutcome = m.outcome;
             entry.playerElo = elo1;
             entry.playerName = hall1Display;  // Hall name left of score
             entry.playerHall = "";  // No hall abbreviation needed
@@ -576,6 +577,7 @@ public class CommandInfoMatch {
             entry.opponentElo = elo2;
             entry.opponentHall = "";  // No hall abbreviation needed
             entry.oppEmoji = emoji2;
+            entry.oppOutcome = m.outcome == 0 ? 0 : -m.outcome;
             
             // Set highlighting for home hall
             entry.highlightPlayer = !homeHall.isEmpty() && m.hall1.equals(homeHall);

@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2004,%202026-red)
+![Version](https://img.shields.io/badge/version-1.1.2-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2004,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -253,6 +253,19 @@ mvn package
 Create a file named `.env.properties` in the project root directory:
 
 ```properties
+# Settings
+SETTINGS_PERFELO_ENABLED=true
+SETTINGS_ALLOWNONADMINUPLOADS=false
+SETTINGS_ALLOWALLCHANNELSPROCESSING=true
+SETTINGS_HOMEHALL=
+SETTINGS_MAXSEEDS=368.5
+SETTINGS_TIMEZONE=0
+
+# Internet Connectivity
+INTERNET_WEBHOOK_URL=
+INTERNET_WEBHOOK_PORT=
+INTERNET_WEBHOOK_TIMEOUTMS=5000
+
 # Discord Bot Configuration
 DISCORD_BOT_TOKEN=
 DISCORD_LOG_CHANNELID=
@@ -269,9 +282,24 @@ TELEGRAM_PUBLIC_CHATID_FILEUPLOAD=
 TELEGRAM_PUBLIC_CHATID_COMMANDS=
 ```
 
+**Settings Explained:**
+- `SETTINGS_PERFELO_ENABLED`: Enable Performance ELO calculations (considers point margins). NOTE: As of v1.1.1, this setting does nothing.
+- `SETTINGS_ALLOWNONADMINUPLOADS`: Allow non-admin users to upload files for processing
+- `SETTINGS_ALLOWALLCHANNELSPROCESSING`: Allow file processing from any channel (not just configured ones)
+- `SETTINGS_HOMEHALL`: Your home hall number for highlighting in image exports
+- `SETTINGS_MAXSEEDS`: Maximum score for the game (e.g., 64 for Othello, 368.5 for Weiqi)
+- `SETTINGS_TIMEZONE`: Timezone offset for displaying timestamps (e.g., 8 for UTC+8)
+
+**Internet Connectivity Settings:**
+- `INTERNET_WEBHOOK_URL`: Webhook URL if using webhook mode (leave empty for polling)
+- `INTERNET_WEBHOOK_PORT`: Port number for webhook server
+- `INTERNET_WEBHOOK_TIMEOUTMS`: Webhook timeout in milliseconds
+
 *Note: ChatID subsettings only apply if you are using a telegram groups with multiple channels/threads. Populate it with the channel/thread ID. Else, leave it blank.*
 
 *Discord settings are optional and not required for core functionality.*
+
+*You can also modify these settings at runtime using the `/settings` command (admin only).*
 
 **How to Get These Values:**
 

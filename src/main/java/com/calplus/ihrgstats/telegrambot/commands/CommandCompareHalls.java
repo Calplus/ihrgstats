@@ -1238,7 +1238,9 @@ public class CommandCompareHalls {
                     score,
                     oppHallFormatted,
                     oppEloStr,
-                    oppEmoji
+                    oppEmoji,
+                    record.outcome,
+                    oppOutcome
                 ));
             } else {
                 victoryEntries1.add(new ComparisonImageGenerator.HallVictoryEntry(
@@ -1414,7 +1416,9 @@ public class CommandCompareHalls {
                     score,
                     oppHallFormatted,
                     oppEloStr,
-                    oppEmoji
+                    oppEmoji,
+                    record.outcome,
+                    oppOutcome
                 ));
             } else {
                 victoryEntries2.add(new ComparisonImageGenerator.HallVictoryEntry(

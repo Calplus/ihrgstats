@@ -25,7 +25,6 @@ public class ComparisonImageGenerator {
     private static final int SECTION_SPACING = 30;
     private static final int HEADER_TO_TABLE_SPACING = 50;  // Extra spacing between header and tables
     private static final int DIVIDER_WIDTH = 4;
-    private static final int HALL_NAME_FONT_SIZE = 28;
     
     // Background colors
     private static final Color BLUE_BACKGROUND = new Color(230, 245, 255);  // Super light blue
@@ -39,11 +38,11 @@ public class ComparisonImageGenerator {
     
     private static final Color TEXT_COLOR = Color.BLACK;
     private static final Color DIVIDER_COLOR = new Color(100, 100, 100);
-    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
-    private static final Font HEADER_FONT = new Font("SansSerif", Font.BOLD, 32);
-    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 48);
-    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 20);
-    private static final Font HALL_NAME_FONT = new Font("SansSerif", Font.BOLD, HALL_NAME_FONT_SIZE);
+    private static final Font TABLE_FONT = FontManager.getMonoFont(24);
+    private static final Font HEADER_FONT = FontManager.getSansBoldFont(32);
+    private static final Font TITLE_FONT = FontManager.getSansBoldFont(48);
+    private static final Font METADATA_FONT = FontManager.getSansFont(20);
+    private static final Font HALL_NAME_FONT = FontManager.getSansBoldFont(28);
     
     /**
      * Image metadata
@@ -127,9 +126,12 @@ public class ComparisonImageGenerator {
         public String oppElo;
         public String oppEmoji;
         public boolean isNA;
+        public Integer hallOutcome;  // For image rendering (1=win, 0=draw, -1=loss, null=unknown)
+        public Integer oppOutcome;   // For image rendering
         
         public HallVictoryEntry(String round, String hallEmoji, String hallElo, String hallName,
-                               String score, String oppName, String oppElo, String oppEmoji) {
+                                String score, String oppName, String oppElo, String oppEmoji, 
+                                Integer hallOutcome, Integer oppOutcome) {
             this.round = round;
             this.hallEmoji = hallEmoji;
             this.hallElo = hallElo;
@@ -138,7 +140,8 @@ public class ComparisonImageGenerator {
             this.oppName = oppName;
             this.oppElo = oppElo;
             this.oppEmoji = oppEmoji;
-            this.isNA = false;
+            this.hallOutcome = hallOutcome;
+            this.oppOutcome = oppOutcome;
         }
         
         public HallVictoryEntry(String round, boolean isNA) {
@@ -170,10 +173,12 @@ public class ComparisonImageGenerator {
         public String oppHall;
         public String oppEmoji;
         public boolean isNA;
+        public Integer hallOutcome;  // For image rendering (1=win, 0=draw, -1=loss, null=unknown)
+        public Integer oppOutcome;   // For image rendering
         
         public PlayerVictoryEntry(String round, String hallEmoji, String playerHall, String playerElo,
                                  String playerName, String score, String oppName, String oppElo,
-                                 String oppHall, String oppEmoji) {
+                                 String oppHall, String oppEmoji, Integer hallOutcome, Integer oppOutcome) {
             this.round = round;
             this.hallEmoji = hallEmoji;
             this.playerHall = playerHall;
@@ -184,6 +189,8 @@ public class ComparisonImageGenerator {
             this.oppElo = oppElo;
             this.oppHall = oppHall;
             this.oppEmoji = oppEmoji;
+            this.hallOutcome = hallOutcome;
+            this.oppOutcome = oppOutcome;
             this.isNA = false;
         }
         
@@ -645,16 +652,16 @@ public class ComparisonImageGenerator {
         g2d.drawString(entry.round, leftX, y);
         leftX += roundColWidth;
         
-        g2d.drawString(entry.hallEmoji, leftX, y);
-        leftX += fm.stringWidth(entry.hallEmoji) + 3;
+        OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.hallOutcome, leftX, y, TABLE_FONT);
+        leftX += OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.hallOutcome, TABLE_FONT) + 3;
         
         g2d.drawString(entry.hallElo, leftX, y);
         leftX += fm.stringWidth(entry.hallElo) + 8;
         
         // Draw right flush: oppElo, oppEmoji
         int rightX = x + width - 5;
-        rightX -= fm.stringWidth(entry.oppEmoji);
-        g2d.drawString(entry.oppEmoji, rightX, y);
+        rightX -= OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.oppOutcome, TABLE_FONT);
+        OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.oppOutcome, rightX, y, TABLE_FONT);
         rightX -= 3;
         
         rightX -= fm.stringWidth(entry.oppElo);
@@ -724,8 +731,8 @@ public class ComparisonImageGenerator {
         g2d.drawString(entry.round, leftX, y);
         leftX += roundColWidth;
         
-        g2d.drawString(entry.hallEmoji, leftX, y);
-        leftX += fm.stringWidth(entry.hallEmoji) + 6;  // Increased from 3 to 6
+        OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.hallOutcome, leftX, y, TABLE_FONT);
+        leftX += OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.hallOutcome, TABLE_FONT) + 6;  // Increased from 3 to 6
         
         g2d.drawString(entry.playerHall, leftX, y);
         leftX += fm.stringWidth(entry.playerHall) + 6;  // Increased from 3 to 6
@@ -737,8 +744,8 @@ public class ComparisonImageGenerator {
         String paddedOppHall = String.format("%3s", entry.oppHall);
         int rightX = x + width - 5;
         
-        rightX -= fm.stringWidth(entry.oppEmoji);
-        g2d.drawString(entry.oppEmoji, rightX, y);
+        rightX -= OutcomeIconRenderer.getOutcomeIconWidth(g2d, entry.oppOutcome, TABLE_FONT);
+        OutcomeIconRenderer.drawOutcomeIcon(g2d, entry.oppOutcome, rightX, y, TABLE_FONT);
         rightX -= 6;  // Increased from 3 to 6
         
         rightX -= fm.stringWidth(paddedOppHall);

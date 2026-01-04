@@ -31,9 +31,9 @@ public class TableImageGenerator {
     private static final Color RED_LIGHTER = new Color(255, 228, 225);  // MistyRose
     
     private static final Color TEXT_COLOR = Color.BLACK;
-    private static final Font TABLE_FONT = new Font("Monospaced", Font.PLAIN, 24);
-    private static final Font TITLE_FONT = new Font("SansSerif", Font.BOLD, 48);
-    private static final Font METADATA_FONT = new Font("SansSerif", Font.PLAIN, 24);
+    private static final Font TABLE_FONT = FontManager.getMonoFont(24);
+    private static final Font TITLE_FONT = FontManager.getSansBoldFont(48);
+    private static final Font METADATA_FONT = FontManager.getSansFont(24);
     
     /**
      * Image metadata for headers

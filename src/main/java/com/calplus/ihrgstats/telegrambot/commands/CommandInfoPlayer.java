@@ -805,6 +805,7 @@ public class CommandInfoPlayer {
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = VictoryRecordCalculator.getRoundDisplayName(round);
             entry.hallEmoji = hallEmoji;
+            entry.hallOutcome = outcome;
             entry.playerHall = playerHallFormatted;
             entry.playerElo = playerEloStr;
             entry.playerName = player.name;
@@ -813,6 +814,7 @@ public class CommandInfoPlayer {
             entry.opponentElo = oppEloStr;
             entry.opponentHall = oppHallFormatted;
             entry.oppEmoji = oppEmoji;
+            entry.oppOutcome = oppOutcome;
             entry.isNA = false;
             victorySection.addVictoryEntry(entry);
         }

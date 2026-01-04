@@ -705,6 +705,7 @@ public class CommandInfoMatchHall {
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = player.seat != null ? String.valueOf(player.seat) : "?";
             entry.hallEmoji = hallEmoji;
+            entry.hallOutcome = player.outcome;
             entry.playerHall = playerHallFormatted;
             entry.playerElo = playerEloStr;
             entry.playerName = player.name;
@@ -713,6 +714,7 @@ public class CommandInfoMatchHall {
             entry.opponentElo = oppEloStr;
             entry.opponentHall = oppHallFormatted;
             entry.oppEmoji = oppEmoji;
+            entry.oppOutcome = oppOutcome;
             entry.isNA = false;
             matchSection.addVictoryEntry(entry);
         }
