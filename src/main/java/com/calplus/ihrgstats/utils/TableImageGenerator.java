@@ -517,7 +517,8 @@ public class TableImageGenerator {
                                 int[] columnWidths, int leftOffset, int topOffset) {
         FontMetrics fm = g2d.getFontMetrics();
         int columnSpacing = fm.charWidth('M'); // Space between columns
-        int yPos = topOffset + rowIndex * ROW_HEIGHT + (ROW_HEIGHT + fm.getAscent()) / 2 - 2;
+        // Center text vertically within the row
+        int yPos = topOffset + rowIndex * ROW_HEIGHT + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
         
         int xPos = leftOffset + 5; // Start position with padding
         

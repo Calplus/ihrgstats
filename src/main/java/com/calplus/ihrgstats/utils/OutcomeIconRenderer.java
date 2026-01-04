@@ -15,7 +15,7 @@ import java.util.Map;
 public class OutcomeIconRenderer {
     
     private static final String ICON_PATH = "/icons/";
-    private static final int DEFAULT_ICON_SIZE = 20; // Default size for outcome icons
+    private static final int DEFAULT_ICON_SIZE = 24; // Default size for outcome icons
     
     // Cache for loaded icons at different sizes
     private static final Map<String, BufferedImage> iconCache = new HashMap<>();
@@ -109,9 +109,12 @@ public class OutcomeIconRenderer {
         // Try to load and draw icon
         BufferedImage icon = loadOutcomeIcon(outcome, DEFAULT_ICON_SIZE);
         if (icon != null) {
-            // Adjust y to align icon with text baseline
+            // Center icon vertically with text baseline
+            // Text center is at baseline - (ascent - descent) / 2
+            // Icon top should be at text center - icon height / 2
             FontMetrics fm = g2d.getFontMetrics(font);
-            int iconY = y - fm.getAscent() + (fm.getAscent() - DEFAULT_ICON_SIZE) / 2;
+            int textCenter = y - (fm.getAscent() - fm.getDescent()) / 2;
+            int iconY = textCenter - DEFAULT_ICON_SIZE / 2;
             g2d.drawImage(icon, x, iconY, null);
             return DEFAULT_ICON_SIZE;
         } else {

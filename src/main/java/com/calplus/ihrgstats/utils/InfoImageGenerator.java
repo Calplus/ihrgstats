@@ -272,7 +272,7 @@ public class InfoImageGenerator {
         if (hallIdentifier != null) {
             // Draw generated date
             g2d.setFont(METADATA_FONT);
-            g2d.setColor(Color.GRAY);
+            g2d.setColor(Color.BLACK);
             FontMetrics metaFm = g2d.getFontMetrics();
             String dateText = "Generated: " + metadata.generatedDate;
             int dateWidth = metaFm.stringWidth(dateText);
@@ -367,7 +367,7 @@ public class InfoImageGenerator {
         } else {
             // For match info: draw metadata after subtitle
             g2d.setFont(METADATA_FONT);
-            g2d.setColor(Color.GRAY);
+            g2d.setColor(Color.BLACK);
             FontMetrics metaFm = g2d.getFontMetrics();
             String dateText = "Generated: " + metadata.generatedDate;
             int dateWidth = metaFm.stringWidth(dateText);
@@ -494,7 +494,8 @@ public class InfoImageGenerator {
             
             // Draw text
             g2d.setColor(TEXT_COLOR);
-            int textY = yOffset + (ROW_HEIGHT + fm.getAscent()) / 2;
+            // Center text vertically within the row
+            int textY = yOffset + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
             
             // Determine how to draw the row
             if (row.leftAlign) {
@@ -606,7 +607,8 @@ public class InfoImageGenerator {
         
         // Draw text
         g2d.setColor(TEXT_COLOR);
-        int textY = y + (ROW_HEIGHT + fm.getAscent()) / 2;
+        // Center text vertically within the row
+        int textY = y + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
         
         // Handle N/A entries
         if (entry.isNA) {

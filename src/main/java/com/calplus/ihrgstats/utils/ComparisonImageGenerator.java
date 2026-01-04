@@ -554,7 +554,8 @@ public class ComparisonImageGenerator {
                     }
                     
                     g2d.setColor(TEXT_COLOR);
-                    drawHallVictoryEntry(g2d, entry, x, currentY + fm.getAscent() + 5, width, fm);
+                    int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
+                    drawHallVictoryEntry(g2d, entry, x, textY, width, fm);
                     currentY += ROW_HEIGHT;
                 }
             } else if (section.playerVictoryEntries != null) {
@@ -570,7 +571,8 @@ public class ComparisonImageGenerator {
                     }
                     
                     g2d.setColor(TEXT_COLOR);
-                    drawPlayerVictoryEntry(g2d, entry, x, currentY + fm.getAscent() + 5, width, fm);
+                    int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
+                    drawPlayerVictoryEntry(g2d, entry, x, textY, width, fm);
                     currentY += ROW_HEIGHT;
                 }
             } else if (section.lines != null) {
@@ -593,14 +595,17 @@ public class ComparisonImageGenerator {
                     } else if (line.trim().equals("-NA-")) {
                         // Center standalone -NA-
                         int lineWidth = fm.stringWidth(line);
-                        g2d.drawString(line, x + (width - lineWidth) / 2, currentY + fm.getAscent() + 5);
+                        int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
+                        g2d.drawString(line, x + (width - lineWidth) / 2, textY);
                     } else if (section.centered) {
                         // Centered line
                         int lineWidth = fm.stringWidth(line);
-                        g2d.drawString(line, x + (width - lineWidth) / 2, currentY + fm.getAscent() + 5);
+                        int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
+                        g2d.drawString(line, x + (width - lineWidth) / 2, textY);
                     } else {
                         // Left-aligned
-                        g2d.drawString(line, x + 5, currentY + fm.getAscent() + 5);
+                        int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
+                        g2d.drawString(line, x + 5, textY);
                     }
                     
                     currentY += ROW_HEIGHT;
