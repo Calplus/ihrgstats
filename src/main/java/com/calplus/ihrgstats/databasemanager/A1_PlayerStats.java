@@ -1443,6 +1443,46 @@ public class A1_PlayerStats {
                         // active == 0: Requires user confirmation for hall update
                         inactiveHallMismatches.add(new InactiveHallMismatch(csvPlayer, dbPlayer));
                     }
+                } else {
+                    // Exact key AND hall match - link CSV player to DB player
+                    // This is the normal case for existing players appearing in a new round
+                    discordLog.logInfo(String.format("[ACTIVE DEBUG] Exact match found for '%s' (hall '%s'). DB active=%s, CSV active=%s", 
+                        csvPlayer.name, csvPlayer.hall, dbPlayer.active, csvPlayer.active));
+                    telegramLog.logInfo(String.format("[ACTIVE DEBUG] Exact match found for '%s' (hall '%s'). DB active=%s, CSV active=%s", 
+                        csvPlayer.name, csvPlayer.hall, dbPlayer.active, csvPlayer.active));
+                    
+                    csvPlayer.existsInDb = true;
+                    csvPlayer.dbId = dbPlayer.dbId;
+                    
+                    discordLog.logInfo(String.format("[ACTIVE DEBUG] Linking '%s' to DB ID %d. CSV active=%s (should be true)", 
+                        csvPlayer.name, dbPlayer.dbId, csvPlayer.active));
+                    telegramLog.logInfo(String.format("[ACTIVE DEBUG] Linking '%s' to DB ID %d. CSV active=%s (should be true)", 
+                        csvPlayer.name, dbPlayer.dbId, csvPlayer.active));
+                    
+                    // Copy base ELO values from DB player
+                    csvPlayer.baseTrueElo = dbPlayer.baseTrueElo;
+                    csvPlayer.basePerfElo = dbPlayer.basePerfElo;
+                    csvPlayer.baseRdTrueElo = dbPlayer.baseRdTrueElo;
+                    csvPlayer.baseVolTrueElo = dbPlayer.baseVolTrueElo;
+                    csvPlayer.baseRdPerfElo = dbPlayer.baseRdPerfElo;
+                    csvPlayer.baseVolPerfElo = dbPlayer.baseVolPerfElo;
+                    
+                    // Copy all historical round data from DB player
+                    csvPlayer.trueEloByRound.putAll(dbPlayer.trueEloByRound);
+                    csvPlayer.perfEloByRound.putAll(dbPlayer.perfEloByRound);
+                    csvPlayer.rdTrueEloByRound.putAll(dbPlayer.rdTrueEloByRound);
+                    csvPlayer.volTrueEloByRound.putAll(dbPlayer.volTrueEloByRound);
+                    csvPlayer.rdPerfEloByRound.putAll(dbPlayer.rdPerfEloByRound);
+                    csvPlayer.volPerfEloByRound.putAll(dbPlayer.volPerfEloByRound);
+                    csvPlayer.seatByRound.putAll(dbPlayer.seatByRound);
+                    csvPlayer.oppHallByRound.putAll(dbPlayer.oppHallByRound);
+                    csvPlayer.oppNameByRound.putAll(dbPlayer.oppNameByRound);
+                    csvPlayer.oppTrueEloByRound.putAll(dbPlayer.oppTrueEloByRound);
+                    csvPlayer.oppPerfEloByRound.putAll(dbPlayer.oppPerfEloByRound);
+                    
+                    // CRITICAL: Preserve CSV player's active=true status (they're in round.csv)
+                    // csvPlayer.active is already true from extractPlayersFromGames
+                    // This ensures active status transitions from 0 -> 1 when inactive players appear in rounds
                 }
             } else {
                 // Player not found with exact key - check if they exist in other halls
@@ -1567,7 +1607,7 @@ public class A1_PlayerStats {
 
         // Handle name mismatches (both partial and spelling) with single dialog
         if (!nameMismatches.isEmpty()) {
-            if (!handleNameMismatches(nameMismatches)) {
+            if (!handleNameMismatches(nameMismatches, csvPlayers)) {
                 return false;
             }
         }
@@ -1734,6 +1774,31 @@ public class A1_PlayerStats {
             mismatch.csvPlayer.existsInDb = true;
             mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
             
+            // Copy base ELO values from DB player
+            mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
+            mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
+            mismatch.csvPlayer.baseRdTrueElo = mismatch.dbPlayer.baseRdTrueElo;
+            mismatch.csvPlayer.baseVolTrueElo = mismatch.dbPlayer.baseVolTrueElo;
+            mismatch.csvPlayer.baseRdPerfElo = mismatch.dbPlayer.baseRdPerfElo;
+            mismatch.csvPlayer.baseVolPerfElo = mismatch.dbPlayer.baseVolPerfElo;
+            
+            // Copy all historical round data from DB player
+            mismatch.csvPlayer.trueEloByRound.putAll(mismatch.dbPlayer.trueEloByRound);
+            mismatch.csvPlayer.perfEloByRound.putAll(mismatch.dbPlayer.perfEloByRound);
+            mismatch.csvPlayer.rdTrueEloByRound.putAll(mismatch.dbPlayer.rdTrueEloByRound);
+            mismatch.csvPlayer.volTrueEloByRound.putAll(mismatch.dbPlayer.volTrueEloByRound);
+            mismatch.csvPlayer.rdPerfEloByRound.putAll(mismatch.dbPlayer.rdPerfEloByRound);
+            mismatch.csvPlayer.volPerfEloByRound.putAll(mismatch.dbPlayer.volPerfEloByRound);
+            mismatch.csvPlayer.seatByRound.putAll(mismatch.dbPlayer.seatByRound);
+            mismatch.csvPlayer.oppHallByRound.putAll(mismatch.dbPlayer.oppHallByRound);
+            mismatch.csvPlayer.oppNameByRound.putAll(mismatch.dbPlayer.oppNameByRound);
+            mismatch.csvPlayer.oppTrueEloByRound.putAll(mismatch.dbPlayer.oppTrueEloByRound);
+            mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
+            
+            // CRITICAL: Preserve CSV player's active=true status (they're in round.csv)
+            // Note: csvPlayer.active is already true from extractPlayersFromGames, but explicitly preserve it
+            // In case any future code might overwrite it
+            
             discordLog.logInfo(String.format("Hall resolved (keep old): '%s' changed from '%s' to '%s' (using DB hall)", 
                 mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
             telegramLog.logInfo(String.format("Hall resolved (keep old): '%s' changed from '%s' to '%s' (using DB hall)", 
@@ -1749,6 +1814,30 @@ public class A1_PlayerStats {
             mismatch.csvPlayer.existsInDb = true;
             mismatch.csvPlayer.dbId = mismatch.dbPlayer.dbId;
             
+            // Copy base ELO values from DB player
+            mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
+            mismatch.csvPlayer.basePerfElo = mismatch.dbPlayer.basePerfElo;
+            mismatch.csvPlayer.baseRdTrueElo = mismatch.dbPlayer.baseRdTrueElo;
+            mismatch.csvPlayer.baseVolTrueElo = mismatch.dbPlayer.baseVolTrueElo;
+            mismatch.csvPlayer.baseRdPerfElo = mismatch.dbPlayer.baseRdPerfElo;
+            mismatch.csvPlayer.baseVolPerfElo = mismatch.dbPlayer.baseVolPerfElo;
+            
+            // Copy all historical round data from DB player
+            mismatch.csvPlayer.trueEloByRound.putAll(mismatch.dbPlayer.trueEloByRound);
+            mismatch.csvPlayer.perfEloByRound.putAll(mismatch.dbPlayer.perfEloByRound);
+            mismatch.csvPlayer.rdTrueEloByRound.putAll(mismatch.dbPlayer.rdTrueEloByRound);
+            mismatch.csvPlayer.volTrueEloByRound.putAll(mismatch.dbPlayer.volTrueEloByRound);
+            mismatch.csvPlayer.rdPerfEloByRound.putAll(mismatch.dbPlayer.rdPerfEloByRound);
+            mismatch.csvPlayer.volPerfEloByRound.putAll(mismatch.dbPlayer.volPerfEloByRound);
+            mismatch.csvPlayer.seatByRound.putAll(mismatch.dbPlayer.seatByRound);
+            mismatch.csvPlayer.oppHallByRound.putAll(mismatch.dbPlayer.oppHallByRound);
+            mismatch.csvPlayer.oppNameByRound.putAll(mismatch.dbPlayer.oppNameByRound);
+            mismatch.csvPlayer.oppTrueEloByRound.putAll(mismatch.dbPlayer.oppTrueEloByRound);
+            mismatch.csvPlayer.oppPerfEloByRound.putAll(mismatch.dbPlayer.oppPerfEloByRound);
+            
+            // CRITICAL: Preserve CSV player's active=true status (they're in round.csv)
+            // Note: csvPlayer.active is already true from extractPlayersFromGames, but explicitly preserve it
+            
             discordLog.logInfo(String.format("Hall resolved (update same): '%s' hall updated from '%s' to '%s' in database", 
                 mismatch.csvPlayer.name, oldHall, mismatch.csvPlayer.hall));
             telegramLog.logInfo(String.format("Hall resolved (update same): '%s' hall updated from '%s' to '%s' in database", 
@@ -1760,6 +1849,10 @@ public class A1_PlayerStats {
             mismatch.csvPlayer.existsInDb = false;
             mismatch.csvPlayer.dbId = -1;
             
+            // CRITICAL: Preserve CSV player's active=true status (they're in round.csv)
+            // Note: csvPlayer.active is already true from extractPlayersFromGames
+            // This player will be inserted as a NEW active player
+            
             discordLog.logInfo(String.format("Hall resolved (create new): '%s' in hall '%s' will be treated as new player (separate from DB hall '%s')", 
                 mismatch.csvPlayer.name, mismatch.csvPlayer.hall, mismatch.dbPlayer.hall));
             telegramLog.logInfo(String.format("Hall resolved (create new): '%s' in hall '%s' will be treated as new player (separate from DB hall '%s')", 
@@ -1770,7 +1863,7 @@ public class A1_PlayerStats {
     /**
      * Handles name mismatches with interactive resolution
      */
-    private boolean handleNameMismatches(List<NameMismatch> nameMismatches) {
+    private boolean handleNameMismatches(List<NameMismatch> nameMismatches, Map<String, PlayerStats> csvPlayers) {
         StringBuilder message = new StringBuilder("⚠️ Name Mismatch Detected\n\n");
         message.append("The following potential name mismatches were found:\n\n");
         
@@ -1804,6 +1897,21 @@ public class A1_PlayerStats {
                 // Update CSV player name to match DB name
                 String oldCsvName = mismatch.csvPlayer.name;
                 mismatch.csvPlayer.name = mismatch.dbPlayer.name;
+                
+                // CRITICAL FIX: Remove old key from csvPlayers map and add with new key
+                // This prevents duplicate entries that would cause the same player to be updated twice
+                String oldKey = (oldCsvName + "|" + mismatch.csvPlayer.hall).toLowerCase();
+                String newKey = (mismatch.dbPlayer.name + "|" + mismatch.csvPlayer.hall).toLowerCase();
+                
+                // Remove the old CSV entry with the mismatched name
+                csvPlayers.remove(oldKey);
+                
+                // Add the updated player with the correct DB name
+                // Note: If this key already exists (player appeared earlier with correct name),
+                // we keep the earlier entry which has active=true from the games
+                if (!csvPlayers.containsKey(newKey)) {
+                    csvPlayers.put(newKey, mismatch.csvPlayer);
+                }
                 
                 // Copy base ELO values from DB player
                 mismatch.csvPlayer.baseTrueElo = mismatch.dbPlayer.baseTrueElo;
@@ -2629,6 +2737,10 @@ public class A1_PlayerStats {
                         }
                         
                         if (dbPlayer != null) {
+                            discordLog.batchInfo(String.format("[ACTIVE DEBUG] updateDatabase: '%s' existsInDb=true, CSV active=%s, DB active=%s", 
+                                csvPlayer.name, csvPlayer.active, dbPlayer.active));
+                            telegramLog.batchInfo(String.format("[ACTIVE DEBUG] updateDatabase: '%s' existsInDb=true, CSV active=%s, DB active=%s", 
+                                csvPlayer.name, csvPlayer.active, dbPlayer.active));
                             // Update existing player
                             updatePlayerInDatabase(conn, csvPlayer, dbPlayer, roundName);
                             updatedPlayers++;
@@ -2647,6 +2759,10 @@ public class A1_PlayerStats {
                         PlayerStats dbPlayer = dbPlayers.get(playerKey);
                         
                         if (dbPlayer != null) {
+                            discordLog.batchInfo(String.format("[ACTIVE DEBUG] updateDatabase: '%s' existsInDb=false but found by key, CSV active=%s, DB active=%s", 
+                                csvPlayer.name, csvPlayer.active, dbPlayer.active));
+                            telegramLog.batchInfo(String.format("[ACTIVE DEBUG] updateDatabase: '%s' existsInDb=false but found by key, CSV active=%s, DB active=%s", 
+                                csvPlayer.name, csvPlayer.active, dbPlayer.active));
                             // Player exists - update
                             updatePlayerInDatabase(conn, csvPlayer, dbPlayer, roundName);
                             updatedPlayers++;
@@ -2689,6 +2805,12 @@ public class A1_PlayerStats {
         // Note: active status can only go from false->true, never true->false
         // If player was already active (1) in DB, keep them active even if current round shows false
         boolean finalActive = player.active || dbPlayer.active; // Once active, always active
+        
+        discordLog.batchInfo(String.format("[ACTIVE DEBUG] updatePlayerInDatabase: '%s' (ID %d) - CSV active=%s, DB active=%s, finalActive=%s", 
+            player.name, dbPlayer.dbId, player.active, dbPlayer.active, finalActive));
+        telegramLog.batchInfo(String.format("[ACTIVE DEBUG] updatePlayerInDatabase: '%s' (ID %d) - CSV active=%s, DB active=%s, finalActive=%s", 
+            player.name, dbPlayer.dbId, player.active, dbPlayer.active, finalActive));
+        
         sql.append("hall = ?, capped = ?, active = ?, dateLogged = ?, ");
         params.add(player.hall);
         params.add(player.capped ? 1 : 0); // SQLite boolean as 0/1
@@ -2778,7 +2900,11 @@ public class A1_PlayerStats {
             for (int i = 0; i < params.size(); i++) {
                 pstmt.setObject(i + 1, params.get(i));
             }
-            pstmt.executeUpdate();
+            int rowsUpdated = pstmt.executeUpdate();
+            discordLog.batchInfo(String.format("[ACTIVE DEBUG] SQL UPDATE executed for '%s' (ID %d). Rows updated: %d", 
+                player.name, dbPlayer.dbId, rowsUpdated));
+            telegramLog.batchInfo(String.format("[ACTIVE DEBUG] SQL UPDATE executed for '%s' (ID %d). Rows updated: %d", 
+                player.name, dbPlayer.dbId, rowsUpdated));
         }
     }
 
