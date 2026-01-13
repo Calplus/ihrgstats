@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
+
+<svg
+   width="800px"
+   height="800px"
+   viewBox="0 0 32 32"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="cross-circle-svgrepo-com.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:sketch="http://www.bohemiancoding.com/sketch/ns">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.60625"
+     inkscape:cx="367.31518"
+     inkscape:cy="355.79767"
+     inkscape:window-width="2560"
+     inkscape:window-height="1529"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1" />
+  <title
+     id="title1">cross-circle</title>
+  <desc
+     id="desc1">Created with Sketch Beta.</desc>
+  <defs
+     id="defs1" />
+  <ellipse
+     style="fill:#ffffff;stroke:#000000;stroke-width:0.0331151;fill-opacity:1"
+     id="path1"
+     cx="16.224125"
+     cy="16.074707"
+     rx="12.915504"
+     ry="13.040017" />
+  <g
+     id="Page-1"
+     stroke="none"
+     stroke-width="1"
+     fill="none"
+     fill-rule="evenodd"
+     sketch:type="MSPage">
+    <g
+       id="Icon-Set-Filled"
+       sketch:type="MSLayerGroup"
+       transform="translate(-570.000000, -1089.000000)"
+       fill="#000000"
+       style="fill:#c00000;fill-opacity:1"
+       inkscape:export-filename="cross.png"
+       inkscape:export-xdpi="30.719999"
+       inkscape:export-ydpi="30.719999">
+      <path
+         d="m 591.817,1109.08 c 0.391,0.39 0.231,1.19 -0.16,1.58 -0.39,0.39 -1.264,0.63 -1.655,0.24 l -3.996,-4.08 -4.106,4.03 c -0.394,0.39 -1.272,0.15 -1.666,-0.24 -0.393,-0.4 -0.553,-1.2 -0.16,-1.59 l 4.106,-4.03 -3.996,-4.07 c -0.391,-0.39 -0.231,-1.19 0.16,-1.58 0.389,-0.39 1.263,-0.63 1.654,-0.24 l 3.996,4.08 4.298,-3.9 c 0.394,-0.39 1.191,-0.31 1.585,0.08 0.393,0.4 0.473,1.19 0.08,1.59 l -4.137,4.06 z M 586,1089 c -8.837,0 -16,7.16 -16,16 0,8.84 7.163,16 16,16 8.837,0 16,-7.16 16,-16 0,-8.84 -7.163,-16 -16,-16 z"
+         id="cross-circle"
+         sketch:type="MSShapeGroup"
+         sodipodi:nodetypes="cccccccccccccccccsssss"
+         style="fill:#c00000;fill-opacity:1"
+         inkscape:export-filename="lose.png"
+         inkscape:export-xdpi="30.719999"
+         inkscape:export-ydpi="30.719999" />
+    </g>
+  </g>
+</svg>
