@@ -10,12 +10,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Database schema creation and management for SQLite database.
- * Handles table creation, column updates, and indexing.
+ * Creates the normalized IHRGStats 2.0 relational schema (rounds, players,
+ * match_participants, player_ratings, etc.), replacing the legacy
+ * A1_PlayerStats/A2_CappedPlayers wide-table design.
  */
 public class DatabaseSchema {
     private final DiscordLog discordLog;
@@ -31,110 +31,15 @@ public class DatabaseSchema {
     }
 
     /**
-     * Column definition for table creation
+     * Executes a single CREATE TABLE IF NOT EXISTS statement and logs the result.
      */
-    private static class ColumnDefinition {
-        String name;
-        String type;
-
-        ColumnDefinition(String name, String type) {
-            this.name = name;
-            this.type = type;
-        }
-    }
-
-    /**
-     * Ensures a column exists in the specified table, adding it if necessary
-     */
-    private void ensureColumn(Connection conn, String tableName, String columnName, String columnType) {
-        try {
-            // Get all columns for the table
-            DatabaseMetaData metaData = conn.getMetaData();
-            ResultSet columns = metaData.getColumns(null, null, tableName, null);
-            
-            boolean columnExists = false;
-            while (columns.next()) {
-                String existingColumn = columns.getString("COLUMN_NAME");
-                if (existingColumn.equalsIgnoreCase(columnName)) {
-                    columnExists = true;
-                    break;
-                }
-            }
-            columns.close();
-
-            if (!columnExists) {
-                String sql = String.format("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnType);
-                try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(sql);
-                    String successMsg = String.format("Column '%s' added to table '%s'.", columnName, tableName);
-                    System.out.println(successMsg);
-                    discordLog.batchSuccess(successMsg);
-                    telegramLog.batchSuccess(successMsg);
-                }
-            }
-        } catch (SQLException e) {
-            discordLog.flushBatch(); // Flush batch before error
-            telegramLog.flushBatch();
-            String errorMsg = String.format("Error checking/adding column %s to %s: %s", columnName, tableName, e.getMessage());
-            System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-        }
-    }
-
-    /**
-     * Creates or updates a table with the specified columns and indexes
-     */
-    private void createOrUpdateTable(Connection conn, String tableName, List<ColumnDefinition> columns, List<String> indexColumns) {
-        if (columns == null || columns.isEmpty()) {
-            String errorMsg = String.format("No columns specified for table %s.", tableName);
-            System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-            return;
-        }
-
-        try {
-            // Build CREATE TABLE SQL
-            StringBuilder columnsDef = new StringBuilder();
-            for (int i = 0; i < columns.size(); i++) {
-                ColumnDefinition col = columns.get(i);
-                columnsDef.append(col.name).append(" ").append(col.type);
-                if (i < columns.size() - 1) {
-                    columnsDef.append(",\n    ");
-                }
-            }
-
-            String createSQL = String.format("CREATE TABLE IF NOT EXISTS %s (\n    %s\n)", tableName, columnsDef);
-
-            try (Statement stmt = conn.createStatement()) {
-                stmt.execute(createSQL);
-                String successMsg = String.format("Table '%s' ensured.", tableName);
-                System.out.println(successMsg);
-                discordLog.batchInfo(successMsg);
-                telegramLog.batchInfo(successMsg);
-            }
-
-            // Ensure all columns exist (for table updates)
-            for (ColumnDefinition col : columns) {
-                ensureColumn(conn, tableName, col.name, col.type);
-            }
-
-            // Create indexes on specified columns
-            if (indexColumns != null && !indexColumns.isEmpty()) {
-                for (String col : indexColumns) {
-                    String indexName = String.format("idx_%s_%s", tableName, col);
-                    String indexSQL = String.format("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", indexName, tableName, col);
-                    
-                    try (Statement stmt = conn.createStatement()) {
-                        stmt.execute(indexSQL);
-                        String successMsg = String.format("Index '%s' created on '%s(%s)'.", indexName, tableName, col);
-                        System.out.println(successMsg);
-                        discordLog.batchInfo(successMsg);
-                        telegramLog.batchInfo(successMsg);
-                    }
-                }
-            }
+    private void createTable(Connection conn, String tableName, String createSQL) {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(createSQL);
+            String successMsg = String.format("Table '%s' ensured.", tableName);
+            System.out.println(successMsg);
+            discordLog.batchInfo(successMsg);
+            telegramLog.batchInfo(successMsg);
         } catch (SQLException e) {
             discordLog.flushBatch(); // Flush batch before error
             telegramLog.flushBatch();
@@ -146,204 +51,252 @@ public class DatabaseSchema {
     }
 
     /**
-     * Defines all tables and their structures
+     * Executes a single CREATE INDEX IF NOT EXISTS statement and logs the result.
+     */
+    private void createIndex(Connection conn, String indexName, String tableName, String columns) {
+        String indexSQL = String.format("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", indexName, tableName, columns);
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(indexSQL);
+            String successMsg = String.format("Index '%s' created on '%s(%s)'.", indexName, tableName, columns);
+            System.out.println(successMsg);
+            discordLog.batchInfo(successMsg);
+            telegramLog.batchInfo(successMsg);
+        } catch (SQLException e) {
+            discordLog.flushBatch(); // Flush batch before error
+            telegramLog.flushBatch();
+            String errorMsg = String.format("Error creating index %s on %s: %s", indexName, tableName, e.getMessage());
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+        }
+    }
+
+    /**
+     * Defines all tables and their structures for the IHRGStats 2.0 normalized
+     * relational schema (replaces the legacy A1_PlayerStats/A2_CappedPlayers
+     * wide-table design).
+     *
+     * NOTE: Seed data (halls, the WLKOVR sentinel player, rating_types lookup
+     * rows) is intentionally NOT created here - it is the responsibility of a
+     * separate seed/bootstrap step invoked after table creation.
      */
     private void defineTableStructures(Connection conn) {
-        // Table 1: Player Stats
-        List<ColumnDefinition> playerStatsColumns = new ArrayList<>();
-        playerStatsColumns.add(new ColumnDefinition("id", "INTEGER PRIMARY KEY AUTOINCREMENT"));
-        playerStatsColumns.add(new ColumnDefinition("dateLogged", "TEXT"));
+        // Enforce foreign key constraints for this connection (SQLite disables
+        // FK enforcement by default per-connection).
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA foreign_keys = ON");
+        } catch (SQLException e) {
+            String errorMsg = "Failed to enable foreign key enforcement: " + e.getMessage();
+            System.err.println(errorMsg);
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+        }
 
-        // Player info
-        playerStatsColumns.add(new ColumnDefinition("name", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("hall", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("capped", "BOOLEAN"));
-        playerStatsColumns.add(new ColumnDefinition("active", "BOOLEAN"));
+        // ====================================================================
+        // DOMAIN 1: STRUCTURAL CONFIGURATION
+        // ====================================================================
 
-        // Elo Rating - Base values
-        playerStatsColumns.add(new ColumnDefinition("baseTrueElo", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("basePerfElo", "INTEGER"));
-        
-        // Glicko-2 Base Parameters
-        playerStatsColumns.add(new ColumnDefinition("baseRdTrueElo", "REAL")); // Rating Deviation for TrueElo
-        playerStatsColumns.add(new ColumnDefinition("baseVolTrueElo", "REAL")); // Volatility for TrueElo
-        playerStatsColumns.add(new ColumnDefinition("baseRdPerfElo", "REAL")); // Rating Deviation for PerfElo
-        playerStatsColumns.add(new ColumnDefinition("baseVolPerfElo", "REAL")); // Volatility for PerfElo
+        createTable(conn, "rounds",
+            "CREATE TABLE IF NOT EXISTS rounds (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    year INTEGER NOT NULL,\n" +
+            "    round_order INTEGER NOT NULL,\n" +
+            "    round_label TEXT NOT NULL,\n" +
+            "    round_datetime TEXT,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    UNIQUE (year, round_order)\n" +
+            ")");
 
-        // True Elo
-        playerStatsColumns.add(new ColumnDefinition("trueEloR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("trueEloT2", "INTEGER"));
-        
-        // True Elo - Rating Deviation (RD)
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR1", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR2", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR3", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR5", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloR6", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT16", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT8", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdTrueEloT2", "REAL"));
-        
-        // True Elo - Volatility
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR1", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR2", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR3", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR5", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloR6", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloT16", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloT8", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloT4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volTrueEloT2", "REAL"));
+        createTable(conn, "match_types",
+            "CREATE TABLE IF NOT EXISTS match_types (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    type_name TEXT NOT NULL,\n" +
+            "    max_score REAL NOT NULL,\n" +
+            "    time_limit_minutes INTEGER,\n" +
+            "    description TEXT,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL\n" +
+            ")");
 
-        // Player Score
-        playerStatsColumns.add(new ColumnDefinition("scoreR1", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreR2", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreR3", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreR4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreR5", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreR6", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreT16", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreT8", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreT4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("scoreT2", "REAL"));
+        createTable(conn, "halls",
+            "CREATE TABLE IF NOT EXISTS halls (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    hall_code TEXT NOT NULL UNIQUE,\n" +
+            "    hall_name TEXT NOT NULL UNIQUE,\n" +
+            "    next_player_seq INTEGER NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL\n" +
+            ")");
 
-        // Performance Elo
-        playerStatsColumns.add(new ColumnDefinition("perfEloR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("perfEloT2", "INTEGER"));
-        
-        // Performance Elo - Rating Deviation (RD)
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR1", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR2", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR3", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR5", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloR6", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT16", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT8", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("rdPerfEloT2", "REAL"));
-        
-        // Performance Elo - Volatility
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR1", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR2", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR3", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR5", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloR6", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloT16", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloT8", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloT4", "REAL"));
-        playerStatsColumns.add(new ColumnDefinition("volPerfEloT2", "REAL"));
+        // ====================================================================
+        // DOMAIN 2: PLAYER IDENTITY & PER-YEAR STATUS
+        // ====================================================================
 
-        // Seating Arrangement
-        playerStatsColumns.add(new ColumnDefinition("seatR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("seatT2", "INTEGER"));
+        createTable(conn, "players",
+            "CREATE TABLE IF NOT EXISTS players (\n" +
+            "    player_id TEXT PRIMARY KEY,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL\n" +
+            ")");
 
-        // Match Outcomes
-        playerStatsColumns.add(new ColumnDefinition("outcomeR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("outcomeT2", "INTEGER"));
+        createTable(conn, "player_names",
+            "CREATE TABLE IF NOT EXISTS player_names (\n" +
+            "    player_id TEXT NOT NULL,\n" +
+            "    name TEXT NOT NULL,\n" +
+            "    first_seen_year INTEGER NOT NULL,\n" +
+            "    last_seen_year INTEGER NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    PRIMARY KEY (player_id, name),\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE\n" +
+            ")");
 
-        // Opponent: Hall
-        playerStatsColumns.add(new ColumnDefinition("oppHallR1", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallR2", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallR3", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallR4", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallR5", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallR6", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallT16", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallT8", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallT4", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppHallT2", "TEXT"));
+        createTable(conn, "player_year_status",
+            "CREATE TABLE IF NOT EXISTS player_year_status (\n" +
+            "    player_id TEXT NOT NULL,\n" +
+            "    year INTEGER NOT NULL,\n" +
+            "    hall_id INTEGER NOT NULL,\n" +
+            "    capped BOOLEAN NOT NULL,\n" +
+            "    active BOOLEAN NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    PRIMARY KEY (player_id, year),\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (hall_id) REFERENCES halls(id)\n" +
+            ")");
 
-        // Opponent: Name
-        playerStatsColumns.add(new ColumnDefinition("oppNameR1", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameR2", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameR3", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameR4", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameR5", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameR6", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameT16", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameT8", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameT4", "TEXT"));
-        playerStatsColumns.add(new ColumnDefinition("oppNameT2", "TEXT"));
+        createTable(conn, "capped_imports",
+            "CREATE TABLE IF NOT EXISTS capped_imports (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    year INTEGER NOT NULL,\n" +
+            "    name TEXT NOT NULL,\n" +
+            "    prev_hall TEXT NOT NULL,\n" +
+            "    player_id TEXT,\n" +
+            "    mapped BOOLEAN NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id)\n" +
+            ")");
 
-        // Opponent: True Elo
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppTrueEloT2", "INTEGER"));
+        // ====================================================================
+        // DOMAIN 3: MATCH RECORDS
+        // ====================================================================
 
-        // Opponent: Perf Elo
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR1", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR2", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR3", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR5", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloR6", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT16", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT8", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT4", "INTEGER"));
-        playerStatsColumns.add(new ColumnDefinition("oppPerfEloT2", "INTEGER"));
+        createTable(conn, "matches",
+            "CREATE TABLE IF NOT EXISTS matches (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    round_id INTEGER NOT NULL,\n" +
+            "    match_type_id INTEGER,\n" +
+            "    table_number INTEGER,\n" +
+            "    match_timestamp TEXT,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    FOREIGN KEY (round_id) REFERENCES rounds(id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (match_type_id) REFERENCES match_types(id)\n" +
+            ")");
 
-        List<String> playerStatsIndexes = new ArrayList<>();
-        playerStatsIndexes.add("name");
-        playerStatsIndexes.add("hall");
+        createTable(conn, "match_participants",
+            "CREATE TABLE IF NOT EXISTS match_participants (\n" +
+            "    match_id INTEGER NOT NULL,\n" +
+            "    player_id TEXT NOT NULL,\n" +
+            "    hall_id INTEGER NOT NULL,\n" +
+            "    hall_seat_number INTEGER,\n" +
+            "    participation_type TEXT NOT NULL,\n" +
+            "    score REAL NOT NULL,\n" +
+            "    outcome REAL NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    PRIMARY KEY (match_id, player_id),\n" +
+            "    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id),\n" +
+            "    FOREIGN KEY (hall_id) REFERENCES halls(id)\n" +
+            ")");
 
-        createOrUpdateTable(conn, "A1_PlayerStats", playerStatsColumns, playerStatsIndexes);
+        // ====================================================================
+        // DOMAIN 4: RATING ENGINE
+        // ====================================================================
 
-        // Table 2: Capped Players
-        List<ColumnDefinition> cappedPlayersColumns = new ArrayList<>();
-        cappedPlayersColumns.add(new ColumnDefinition("id", "INTEGER PRIMARY KEY AUTOINCREMENT"));
-        cappedPlayersColumns.add(new ColumnDefinition("name", "TEXT"));
-        cappedPlayersColumns.add(new ColumnDefinition("prevHall", "TEXT"));
-        cappedPlayersColumns.add(new ColumnDefinition("mapped", "BOOLEAN"));
+        createTable(conn, "rating_types",
+            "CREATE TABLE IF NOT EXISTS rating_types (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    rating_name TEXT NOT NULL UNIQUE,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL\n" +
+            ")");
 
-        List<String> cappedPlayersIndexes = new ArrayList<>();
-        cappedPlayersIndexes.add("name");
-        cappedPlayersIndexes.add("mapped");
+        createTable(conn, "player_ratings",
+            "CREATE TABLE IF NOT EXISTS player_ratings (\n" +
+            "    player_id TEXT NOT NULL,\n" +
+            "    round_id INTEGER NOT NULL,\n" +
+            "    rating_type_id INTEGER NOT NULL,\n" +
+            "    rating_value REAL NOT NULL,\n" +
+            "    rating_deviation REAL NOT NULL,\n" +
+            "    volatility REAL NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    PRIMARY KEY (player_id, round_id, rating_type_id),\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (round_id) REFERENCES rounds(id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (rating_type_id) REFERENCES rating_types(id)\n" +
+            ")");
 
-        createOrUpdateTable(conn, "A2_CappedPlayers", cappedPlayersColumns, cappedPlayersIndexes);
+        // ====================================================================
+        // DOMAIN 5: AI HYBRID FEATURES
+        // ====================================================================
+
+        createTable(conn, "player_profiles",
+            "CREATE TABLE IF NOT EXISTS player_profiles (\n" +
+            "    player_id TEXT PRIMARY KEY,\n" +
+            "    playstyle_vector TEXT NOT NULL,\n" +
+            "    last_calculated_year INTEGER NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE\n" +
+            ")");
+
+        createTable(conn, "player_rolling_cache",
+            "CREATE TABLE IF NOT EXISTS player_rolling_cache (\n" +
+            "    player_id TEXT PRIMARY KEY,\n" +
+            "    current_streak INTEGER NOT NULL,\n" +
+            "    avg_margin_last_5_matches REAL NOT NULL,\n" +
+            "    matches_played_today INTEGER NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE\n" +
+            ")");
+
+        createTable(conn, "ai_predictions",
+            "CREATE TABLE IF NOT EXISTS ai_predictions (\n" +
+            "    match_id INTEGER PRIMARY KEY,\n" +
+            "    predicted_winner_player_id TEXT,\n" +
+            "    predicted_win_probability REAL NOT NULL,\n" +
+            "    model_version TEXT NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (predicted_winner_player_id) REFERENCES players(player_id)\n" +
+            ")");
+
+        // ====================================================================
+        // STRATEGIC INDEXES
+        // ====================================================================
+
+        createIndex(conn, "idx_rounds_year", "rounds", "year");
+        createIndex(conn, "idx_matches_round_id", "matches", "round_id");
+        createIndex(conn, "idx_matches_match_type_id", "matches", "match_type_id");
+        createIndex(conn, "idx_matches_match_timestamp", "matches", "match_timestamp");
+        createIndex(conn, "idx_match_participants_player_id", "match_participants", "player_id");
+        createIndex(conn, "idx_match_participants_player_outcome", "match_participants", "player_id, outcome");
+        createIndex(conn, "idx_match_participants_hall_id", "match_participants", "hall_id");
+        createIndex(conn, "idx_player_names_name", "player_names", "name");
+        createIndex(conn, "idx_player_year_status_year", "player_year_status", "year");
+        createIndex(conn, "idx_player_year_status_hall_id", "player_year_status", "hall_id");
+        createIndex(conn, "idx_player_year_status_compound", "player_year_status", "year, hall_id");
+        createIndex(conn, "idx_capped_imports_year_mapped", "capped_imports", "year, mapped");
+        createIndex(conn, "idx_player_ratings_round_type", "player_ratings", "round_id, rating_type_id");
+        createIndex(conn, "idx_player_ratings_value_search", "player_ratings", "rating_type_id, rating_value");
+        createIndex(conn, "idx_player_profiles_year", "player_profiles", "last_calculated_year");
+        createIndex(conn, "idx_ai_predictions_winner_id", "ai_predictions", "predicted_winner_player_id");
     }
 
     /**
