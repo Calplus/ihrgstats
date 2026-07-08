@@ -1,13 +1,15 @@
 package com.calplus.ihrgstats.telegrambot.listener;
 
-import com.calplus.ihrgstats.databasemanager.A1_PlayerStats;
-import com.calplus.ihrgstats.databasemanager.A2_CappedPlayers;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.telegrambot.commands.CommandSettings;
+import com.calplus.ihrgstats.telegrambot.utils.CappedListProcessor;
+import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramFileDownloader;
+import com.calplus.ihrgstats.utils.TimezoneHelper;
+import com.calplus.ihrgstats.utils.YearContext;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -744,13 +746,13 @@ public class TelegramListener {
                 return;
             }
             
-            // Handle max seeds selection request callback
-            if (data.equals("setting_maxSeeds_select")) {
+            // Handle current year selection request callback
+            if (data.equals("setting_currentYear_select")) {
                 com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
                     new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
                 
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse maxSeedsSelectionResponse = 
-                    settingsCommand.handleMaxSeedsSelection(userId);
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse currentYearSelectionResponse = 
+                    settingsCommand.handleCurrentYearSelection(userId);
                 
                 // Get original message info to send response to same chat
                 JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
@@ -764,7 +766,7 @@ public class TelegramListener {
                     removeInlineKeyboard(chatId, message.get("message_id").getAsString());
                     
                     // Send response (no buttons for manual input)
-                    sendMessageToChat(chatId, maxSeedsSelectionResponse.message, threadId);
+                    sendMessageToChat(chatId, currentYearSelectionResponse.message, threadId);
                 }
                 return;
             }
@@ -926,6 +928,12 @@ public class TelegramListener {
                 return;
             }
             
+            // Handle match types callbacks
+            if (data.startsWith("matchtypes_")) {
+                handleMatchTypesCallback(callbackQuery, data, userId);
+                return;
+            }
+            
             // Handle multi-choice confirmation
             MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
             if (request != null) {
@@ -1000,6 +1008,18 @@ public class TelegramListener {
         if (settingsResponse != null) {
             sendMessageToCommandsChannel(settingsResponse, message);
             return;
+        }
+
+        // Check if user is mid-wizard on /matchtypes (create/edit text input)
+        com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
+            new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
+        if (matchTypesCommand.isAwaitingTextInput(userId)) {
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse matchTypesResponse =
+                matchTypesCommand.handleTextInput(userId, text);
+            if (matchTypesResponse != null) {
+                sendMessageToCommandsChannel(matchTypesResponse.message, message);
+                return;
+            }
         }
 
         // Check for any pending confirmation (file processing uses global key)
@@ -1205,19 +1225,27 @@ public class TelegramListener {
         
         try {
             if (fileName.equals("cappedlist.csv")) {
-                // Process with A2_CappedPlayers
+                Integer year = YearContext.getCurrentYear();
+                if (year == null) {
+                    String errorMsg = "Cannot process cappedlist.csv: no current year set. An admin must set settings.currentYear first.";
+                    discordLog.logError(errorMsg);
+                    telegramLog.logError(errorMsg);
+                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                    return;
+                }
+
                 discordLog.logInfo("Processing cappedlist.csv...");
                 telegramLog.logInfo("Processing cappedlist.csv...");
-                
-                A2_CappedPlayers processor = new A2_CappedPlayers();
-                
+
+                CappedListProcessor processor = new CappedListProcessor();
+
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
                     sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
                 });
-                
-                boolean success = processor.processCappedList(downloadedFile.toString());
-                
+
+                boolean success = processor.processCappedList(downloadedFile.toString(), year, nowTimestamp());
+
                 if (!success) {
                     String errorMsg = "Failed to process cappedlist.csv";
                     discordLog.logError(errorMsg);
@@ -1225,59 +1253,36 @@ public class TelegramListener {
                     // Send error to chat where file was uploaded
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
-                
-            } else if (fileName.matches("round_[1-6t1628]+(\\d+)?\\.csv")) {
-                // Extract round number
-                String roundName = extractRoundName(fileName);
-                
-                if (roundName == null) {
-                    String errorMsg = "Invalid round filename format: " + fileName;
+
+            } else if (RoundCsvProcessor.parseFilename(fileName).matched) {
+                RoundCsvProcessor.ParsedFilename parsed = RoundCsvProcessor.parseFilename(fileName);
+                Integer year = parsed.year != null ? parsed.year : YearContext.getCurrentYear();
+
+                if (year == null) {
+                    String errorMsg = String.format(
+                        "Cannot process %s: filename has no year prefix and no current year is set. " +
+                        "Either upload as {year}_round_%d.csv, or have an admin set settings.currentYear first.",
+                        fileName, parsed.roundOrder);
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
-                    // Send error to chat where file was uploaded
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
-                
-                // Process with A1_PlayerStats
-                discordLog.logInfo(String.format("Processing round_%s.csv...", roundName));
-                telegramLog.logInfo(String.format("Processing round_%s.csv...", roundName));
-                
-                A1_PlayerStats processor = new A1_PlayerStats();
-                
-                // Set up confirmation callback for Telegram
-                processor.setConfirmationCallback((msg) -> {
-                    // Send confirmation request to upload chat (only once)
-                    String formattedMsg = formatStatusMessage("⚠️", "CONFIRMATION", msg + "\n\nPlease reply 'yes' or 'no'.");
-                    sendMessageToUploadChat(formattedMsg, originalMessage);
-                    
-                    // Wait for user response via Telegram (don't log again in requestUserConfirmationViaChat)
-                    CompletableFuture<Boolean> future = new CompletableFuture<>();
-                    pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(msg, future, originalMessage));
-                    
-                    try {
-                        return future.get(60, TimeUnit.SECONDS);
-                    } catch (TimeoutException e) {
-                        pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
-                        sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.", originalMessage);
-                        return false;
-                    } catch (Exception e) {
-                        pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
-                        telegramLog.logError("Error waiting for confirmation: " + e.getMessage());
-                        return false;
-                    }
-                });
-                
-                // Set up multi-choice callback for Telegram with buttons
+
+                discordLog.logInfo(String.format("Processing round_%d.csv for %d...", parsed.roundOrder, year));
+                telegramLog.logInfo(String.format("Processing round_%d.csv for %d...", parsed.roundOrder, year));
+
+                RoundCsvProcessor processor = new RoundCsvProcessor();
+
+                // Set up multi-choice callback for Telegram with buttons (covers both
+                // reprocess confirmation and player-identity-resolution dialogs)
                 processor.setMultiChoiceCallback((msg, options) -> {
-                    // Send message with inline keyboard buttons
                     sendMessageWithButtons(msg, options, originalMessage);
-                    
-                    // Wait for button click response
+
                     CompletableFuture<Integer> future = new CompletableFuture<>();
-                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
+                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY,
                         new MultiChoiceConfirmationRequest(msg, options, future, originalMessage));
-                    
+
                     try {
                         return future.get(120, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
@@ -1290,69 +1295,24 @@ public class TelegramListener {
                         return -1;
                     }
                 });
-                
+
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
                     sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
                 });
-                
-                boolean success = processor.processRound(downloadedFile.toString(), roundName);
-                
+
+                boolean success = processor.processRound(downloadedFile.toString(), year, parsed.roundOrder, nowTimestamp());
+
                 if (!success) {
-                    String errorMsg = String.format("Failed to process round_%s.csv", roundName);
+                    String errorMsg = String.format("Failed to process round_%d.csv for %d", parsed.roundOrder, year);
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
                     // Send error to chat where file was uploaded
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
-                
-            } else if (fileName.matches("playerexport_\\d{8}_\\d{6}\\.csv")) {
-                // Process player import from export file
-                discordLog.logInfo("Processing player import file: " + fileName);
-                telegramLog.logInfo("Processing player import file: " + fileName);
-                
-                A1_PlayerStats processor = new A1_PlayerStats();
-                
-                // Set up multi-choice callback for Telegram with buttons
-                processor.setMultiChoiceCallback((msg, options) -> {
-                    // Send message with inline keyboard buttons
-                    sendMessageWithButtons(msg, options, originalMessage);
-                    
-                    // Wait for button click response
-                    CompletableFuture<Integer> future = new CompletableFuture<>();
-                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY, 
-                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage));
-                    
-                    try {
-                        return future.get(120, TimeUnit.SECONDS);
-                    } catch (TimeoutException e) {
-                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
-                        sendMessageToChatWithThread(responseChatId, "⏱️ Button selection timeout - processing cancelled.", responseThreadId);
-                        return -1;
-                    } catch (Exception e) {
-                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
-                        telegramLog.logError("Error waiting for button selection: " + e.getMessage());
-                        return -1;
-                    }
-                });
-                
-                // Set up callback to send success message to upload chat
-                processor.setUploadChatCallback((msg) -> {
-                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
-                });
-                
-                boolean success = processor.importPlayerExport(downloadedFile.toString());
-                
-                if (!success) {
-                    String errorMsg = "Failed to import player export file: " + fileName;
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
-                    // Send error to chat where file was uploaded
-                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
-                }
-                
+
             } else {
-                String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, round_[n].csv, playerExport_[datetime].csv", fileName);
+                String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, {year}_round_[n].csv, round_[n].csv", fileName);
                 discordLog.logError(errorMsg);
                 telegramLog.logError(errorMsg);
                 // Send error to chat where file was uploaded
@@ -1366,16 +1326,11 @@ public class TelegramListener {
     }
 
     /**
-     * Extracts round name from filename
+     * Returns the current timestamp in the standard storage format used
+     * across the app (matches Main.java's seeding timestamps).
      */
-    private String extractRoundName(String fileName) {
-        Pattern pattern = Pattern.compile("round_([1-6]|t16|t8|t4|t2)\\.csv");
-        Matcher matcher = pattern.matcher(fileName);
-        
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        return null;
+    private String nowTimestamp() {
+        return TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss.SSS");
     }
 
     /**
@@ -1469,6 +1424,8 @@ public class TelegramListener {
             handleInfoMatchCommand(message);
         } else if (command.equalsIgnoreCase("/infomatchhall")) {
             handleInfoMatchHallCommand(message);
+        } else if (command.equalsIgnoreCase("/matchtypes")) {
+            handleMatchTypesCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -2258,8 +2215,8 @@ public class TelegramListener {
                     response = compareCommand.handleCancel(userId);
                     sendMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("comparehalls_select1_")) {
-                    String hall = data.substring("comparehalls_select1_".length());
-                    response = compareCommand.handleFirstHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("comparehalls_select1_".length()));
+                    response = compareCommand.handleFirstHallSelection(userId, hallId);
                     
                     // Send message with buttons for second selection
                     if (response.buttonConfig != null) {
@@ -2268,8 +2225,8 @@ public class TelegramListener {
                         sendMessageToCommandsChannel(response.message, message);
                     }
                 } else if (data.startsWith("comparehalls_select2_")) {
-                    String hall = data.substring("comparehalls_select2_".length());
-                    response = compareCommand.handleSecondHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("comparehalls_select2_".length()));
+                    response = compareCommand.handleSecondHallSelection(userId, hallId);
                     
                     // Send message with buttons for round selection
                     if (response.buttonConfig != null) {
@@ -2439,8 +2396,8 @@ public class TelegramListener {
                     response = compareCommand.handleCancel(userId);
                     sendMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("compareplayers_selecthall1_")) {
-                    String hall = data.substring("compareplayers_selecthall1_".length());
-                    response = compareCommand.handleFirstHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("compareplayers_selecthall1_".length()));
+                    response = compareCommand.handleFirstHallSelection(userId, hallId);
                     
                     // Send message with buttons for player selection
                     if (response.buttonConfig != null) {
@@ -2459,8 +2416,8 @@ public class TelegramListener {
                         sendMessageToCommandsChannel(response.message, message);
                     }
                 } else if (data.startsWith("compareplayers_selecthall2_")) {
-                    String hall = data.substring("compareplayers_selecthall2_".length());
-                    response = compareCommand.handleSecondHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("compareplayers_selecthall2_".length()));
+                    response = compareCommand.handleSecondHallSelection(userId, hallId);
                     
                     // Send message with buttons for second player selection
                     if (response.buttonConfig != null) {
@@ -2792,6 +2749,85 @@ public class TelegramListener {
     }
 
     /**
+     * Handles /matchtypes command (admin-only)
+     */
+    private void handleMatchTypesCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+
+            com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                matchTypesCommand.handleCommand(userId);
+
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /matchtypes command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles match types callback queries (admin-only)
+     */
+    private void handleMatchTypesCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
+
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+
+                removeInlineKeyboard(chatId, messageId);
+
+                if (data.equals("matchtypes_cancel")) {
+                    response = matchTypesCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("matchtypes_create")) {
+                    response = matchTypesCommand.handleCreateNew(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("matchtypes_list")) {
+                    response = matchTypesCommand.handleList(userId);
+                    sendLongMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("matchtypes_editselect")) {
+                    response = matchTypesCommand.handleEditSelection(userId);
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("matchtypes_edit_")) {
+                    int matchTypeId = Integer.parseInt(data.substring("matchtypes_edit_".length()));
+                    response = matchTypesCommand.handleEditStart(userId, matchTypeId);
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing match types callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * Handles help callback queries
      */
     private void handleHelpCallback(JsonObject callbackQuery, String data, String userId) {
@@ -2868,8 +2904,8 @@ public class TelegramListener {
                     response = infoCommand.handleCancel(userId);
                     sendMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("infoplayer_hall_")) {
-                    String hall = data.substring("infoplayer_hall_".length());
-                    response = infoCommand.handleHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("infoplayer_hall_".length()));
+                    response = infoCommand.handleHallSelection(userId, hallId);
                     
                     if (response.buttonConfig != null) {
                         sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
@@ -2932,8 +2968,8 @@ public class TelegramListener {
                     response = infoCommand.handleCancel(userId);
                     sendMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("infohall_hall_")) {
-                    String hall = data.substring("infohall_hall_".length());
-                    response = infoCommand.handleHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("infohall_hall_".length()));
+                    response = infoCommand.handleHallSelection(userId, hallId);
                     
                     if (response.buttonConfig != null) {
                         sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
@@ -3033,8 +3069,8 @@ public class TelegramListener {
                     response = infoCommand.handleCancel(userId);
                     sendMessageToCommandsChannel(response.message, message);
                 } else if (data.startsWith("infomatchhall_hall_")) {
-                    String hall = data.substring("infomatchhall_hall_".length());
-                    response = infoCommand.handleHallSelection(userId, hall);
+                    int hallId = Integer.parseInt(data.substring("infomatchhall_hall_".length()));
+                    response = infoCommand.handleHallSelection(userId, hallId);
                     
                     if (response.buttonConfig != null) {
                         sendMessageWithGenericButtons(response.message, response.buttonConfig, message);

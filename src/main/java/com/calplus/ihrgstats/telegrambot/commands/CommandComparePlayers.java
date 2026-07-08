@@ -1,1174 +1,551 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.databasemanager.*;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
+import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.sql.*;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Command handler for /compareplayers command.
- * Allows comparison of two players with detailed statistics.
+ * Allows comparison of two players with detailed statistics, scoped to the
+ * current year (settings.currentYear).
  */
 public class CommandComparePlayers {
     private final LogHelper logHelper;
-    private final String dbPath;
-    
-    // State management for multi-step selection (static so it persists across instances)
+    private final A1_Rounds rounds = new A1_Rounds();
+    private final A3_Halls halls = new A3_Halls();
+    private final B5_PlayerNames playerNames = new B5_PlayerNames();
+    private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
+    private final C9_MatchParticipants participants = new C9_MatchParticipants();
+    private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
+    private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
+    private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
+
     private static final Map<String, PlayerCompareSelectionState> userSelectionStates = new HashMap<>();
-    
+
     private static class PlayerCompareSelectionState extends SelectionState {
-        String firstPlayerHall;
+        int firstHallId;
+        String firstHallName;
+        String firstPlayerId;
         String firstPlayerName;
-        String secondPlayerHall;
+        int secondHallId;
+        String secondHallName;
+        String secondPlayerId;
         String secondPlayerName;
-        String selectedRound;  // "all" or specific round
     }
-    
+
     public CommandComparePlayers() {
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
-        
         this.logHelper = new LogHelper();
-        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
     }
-    
-    /**
-     * Response class (alias for CommandResponse for backward compatibility)
-     */
+
     public static class CompareResponse extends CommandResponse {
         public CompareResponse(String message, Path imagePath, ButtonConfig buttonConfig) {
             super(message, imagePath, buttonConfig);
         }
     }
-    
-    /**
-     * Handles the /compareplayers command (initial call)
-     */
+
     public CompareResponse handleCommand(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
         logHelper.logInfo(String.format("%s requested /compareplayers command", userInfo));
-        
-        // Clear any existing state
+
         userSelectionStates.put(userId, new PlayerCompareSelectionState());
-        
-        // Fetch available halls
-        List<String> halls = HallUtils.fetchAndSortAvailableHalls(dbPath);
-        
-        if (halls.isEmpty()) {
-            String errorMsg = "ℹ️ No halls found in database. Please upload round data first.";
-            logHelper.logWarning("No halls available for player comparison");
-            return new CompareResponse(errorMsg, null, null);
+
+        Integer year = YearContext.getCurrentYear();
+        if (year == null) {
+            return new CompareResponse("\u26A0\uFE0F No current year set. An admin must set `settings.currentYear` first.", null, null);
         }
-        
-        // Create button layout (4 columns)
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        
-        for (String hall : halls) {
-            labels.add(hall);
-            callbacks.add("compareplayers_selecthall1_" + hall);
-        }
-        
-        // Add cancel button
-        labels.add("❌ Cancel");
-        callbacks.add("compareplayers_cancel");
-        
-        String message = "**👥 Player Comparison**\n\n" +
-                        "Select the **first player's hall**:";
-        
-        return new CompareResponse(message, null, 
-            new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
-    }
-    
-    /**
-     * Handles first player's hall selection
-     */
-    public CompareResponse handleFirstHallSelection(String userId, String firstHall) {
-        String userInfo = TelegramListener.formatUserInfo(userId);
-        logHelper.logInfo(String.format("%s selected first player's hall: %s", userInfo, firstHall));
-        
-        // Store state
-        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
-        if (state == null) state = new PlayerCompareSelectionState();
-        state.firstPlayerHall = firstHall;
-        userSelectionStates.put(userId, state);
-        
-        // Fetch players from the hall
-        List<String> players = fetchPlayersFromHall(firstHall);
-        
-        if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No players found in hall " + firstHall + ".";
-            userSelectionStates.remove(userId);
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        // Create button layout (1 per row)
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        
-        for (String player : players) {
-            labels.add(player);
-            callbacks.add("compareplayers_selectplayer1_" + player);
-        }
-        
-        // Add cancel button
-        labels.add("❌ Cancel");
-        callbacks.add("compareplayers_cancel");
-        
-        String message = String.format("**👥 Player Comparison**\n\n" +
-                                      "First player's hall: **%s**\n" +
-                                      "Select the **first player**:", firstHall);
-        
-        return new CompareResponse(message, null,
-            new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
-    }
-    
-    /**
-     * Handles first player selection
-     */
-    public CompareResponse handleFirstPlayerSelection(String userId, String firstPlayer) {
-        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
-        if (state == null || state.firstPlayerHall == null) {
-            String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        state.firstPlayerName = firstPlayer;
-        String userInfo = TelegramListener.formatUserInfo(userId);
-        logHelper.logInfo(String.format("%s selected first player: %s from %s", 
-            userInfo, firstPlayer, state.firstPlayerHall));
-        
-        // Fetch available halls for second player
-        List<String> halls = HallUtils.fetchAndSortAvailableHalls(dbPath);
-        
-        if (halls.isEmpty()) {
-            String errorMsg = "ℹ️ No halls available for second player selection.";
-            userSelectionStates.remove(userId);
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        // Create button layout (4 columns)
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        
-        for (String hall : halls) {
-            labels.add(hall);
-            callbacks.add("compareplayers_selecthall2_" + hall);
-        }
-        
-        // Add cancel button
-        labels.add("❌ Cancel");
-        callbacks.add("compareplayers_cancel");
-        
-        String message = String.format("**👥 Player Comparison**\n\n" +
-                                      "First player: **%s** (%s)\n" +
-                                      "Select the **second player's hall**:",
-                                      firstPlayer, state.firstPlayerHall);
-        
-        return new CompareResponse(message, null,
-            new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
-    }
-    
-    /**
-     * Handles second player's hall selection
-     */
-    public CompareResponse handleSecondHallSelection(String userId, String secondHall) {
-        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
-        if (state == null || state.firstPlayerName == null) {
-            String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        state.secondPlayerHall = secondHall;
-        String userInfo = TelegramListener.formatUserInfo(userId);
-        logHelper.logInfo(String.format("%s selected second player's hall: %s", userInfo, secondHall));
-        
-        // Fetch players from the hall
-        List<String> players = fetchPlayersFromHall(secondHall);
-        
-        // If same hall as first player, remove the first player's name
-        if (secondHall.equals(state.firstPlayerHall)) {
-            players.remove(state.firstPlayerName);
-        }
-        
-        if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No other players available in hall " + secondHall + ".";
-            userSelectionStates.remove(userId);
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        // Create button layout (1 per row)
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        
-        for (String player : players) {
-            labels.add(player);
-            callbacks.add("compareplayers_selectplayer2_" + player);
-        }
-        
-        // Add cancel button
-        labels.add("❌ Cancel");
-        callbacks.add("compareplayers_cancel");
-        
-        String message = String.format("**👥 Player Comparison**\n\n" +
-                                      "First player: **%s** (%s)\n" +
-                                      "Second player's hall: **%s**\n" +
-                                      "Select the **second player**:",
-                                      state.firstPlayerName, state.firstPlayerHall, secondHall);
-        
-        return new CompareResponse(message, null,
-            new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
-    }
-    
-    /**
-     * Handles second player selection
-     */
-    public CompareResponse handleSecondPlayerSelection(String userId, String secondPlayer) {
-        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
-        if (state == null || state.firstPlayerName == null || state.secondPlayerHall == null) {
-            String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        state.secondPlayerName = secondPlayer;
-        String userInfo = TelegramListener.formatUserInfo(userId);
-        logHelper.logInfo(String.format("%s selected second player: %s", userInfo, secondPlayer));
-        
-        // Get available rounds
-        List<String> availableRounds = getAvailableRounds();
-        
-        if (availableRounds.isEmpty()) {
-            String errorMsg = "ℹ️ No round data available.";
-            userSelectionStates.remove(userId);
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        // Create round selection buttons (4 columns)
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        
-        // Add "All" option first
-        labels.add("All Rounds");
-        callbacks.add("compareplayers_selectround_all");
-        
-        // Add individual rounds
-        for (String round : availableRounds) {
-            labels.add(VictoryRecordCalculator.getRoundDisplayName(round));
-            callbacks.add("compareplayers_selectround_" + round);
-        }
-        
-        // Add cancel button
-        labels.add("❌ Cancel");
-        callbacks.add("compareplayers_cancel");
-        
-        String message = String.format("**👥 Player Comparison**\n\n" +
-                                      "First player: **%s** (%s)\n" +
-                                      "Second player: **%s** (%s)\n\n" +
-                                      "Select rounds to compare:",
-                                      state.firstPlayerName, state.firstPlayerHall, secondPlayer, state.secondPlayerHall);
-        
-        return new CompareResponse(message, null,
-            new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
-    }
-    
-    /**
-     * Handles round selection and generates comparison
-     */
-    public CompareResponse handleRoundSelection(String userId, String selectedRound) {
-        PlayerCompareSelectionState state = (PlayerCompareSelectionState) userSelectionStates.get(userId);
-        if (state == null || state.firstPlayerName == null || state.secondPlayerName == null) {
-            String errorMsg = "❌ Session expired. Please use /compareplayers to start again.";
-            return new CompareResponse(errorMsg, null, null);
-        }
-        
-        state.selectedRound = selectedRound;
-        String firstPlayer = state.firstPlayerName;
-        String firstHall = state.firstPlayerHall;
-        String secondPlayer = state.secondPlayerName;
-        String secondHall = state.secondPlayerHall;
-        userSelectionStates.remove(userId);
-        String userInfo = TelegramListener.formatUserInfo(userId);
-        logHelper.logInfo(String.format("%s comparing players: %s (%s) vs %s (%s) (rounds: %s)", 
-            userInfo, firstPlayer, firstHall, secondPlayer, secondHall, selectedRound));
-        
+
+        List<A3_Halls.Hall> allHalls;
         try {
-            // Generate comparison
-            return generateComparison(firstPlayer, firstHall, secondPlayer, secondHall, selectedRound);
+            allHalls = halls.getAllHalls();
+        } catch (SQLException e) {
+            logHelper.logError("Database error fetching halls: " + e.getMessage());
+            return new CompareResponse("\u274C Database error fetching halls.", null, null);
+        }
+
+        List<String> labels = new ArrayList<>();
+        List<String> callbacks = new ArrayList<>();
+        for (A3_Halls.Hall hall : allHalls) {
+            if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
+            labels.add(hall.hallName);
+            callbacks.add("compareplayers_selecthall1_" + hall.id);
+        }
+        labels.add("\u274C Cancel");
+        callbacks.add("compareplayers_cancel");
+
+        String message = "**\uD83D\uDC65 Player Comparison**\n\nSelect the **first player's hall**:";
+        return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+    }
+
+    public CompareResponse handleFirstHallSelection(String userId, int firstHallId) {
+        PlayerCompareSelectionState state = userSelectionStates.getOrDefault(userId, new PlayerCompareSelectionState());
+        state.firstHallId = firstHallId;
+        userSelectionStates.put(userId, state);
+
+        Integer year = YearContext.getCurrentYear();
+        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        try {
+            A3_Halls.Hall hall = halls.getHallById(firstHallId);
+            state.firstHallName = hall != null ? hall.hallName : "?";
+
+            List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(firstHallId, year);
+            if (statuses.isEmpty()) {
+                userSelectionStates.remove(userId);
+                return new CompareResponse("\u2139\uFE0F No players found in hall " + state.firstHallName + ".", null, null);
+            }
+
+            List<String> labels = new ArrayList<>();
+            List<String> callbacks = new ArrayList<>();
+            for (B6_PlayerYearStatus.Status status : statuses) {
+                String name = playerNames.getNameForYear(status.playerId, year);
+                labels.add(name != null ? name : status.playerId);
+                callbacks.add("compareplayers_selectplayer1_" + status.playerId);
+            }
+            labels.add("\u274C Cancel");
+            callbacks.add("compareplayers_cancel");
+
+            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player's hall: **%s**\nSelect the **first player**:", state.firstHallName);
+            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+        } catch (SQLException e) {
+            logHelper.logError("Database error: " + e.getMessage());
+            return new CompareResponse("\u274C Database error.", null, null);
+        }
+    }
+
+    public CompareResponse handleFirstPlayerSelection(String userId, String firstPlayerId) {
+        PlayerCompareSelectionState state = userSelectionStates.get(userId);
+        if (state == null || state.firstHallName == null) {
+            return new CompareResponse("\u274C Session expired. Please use /compareplayers to start again.", null, null);
+        }
+        state.firstPlayerId = firstPlayerId;
+
+        Integer year = YearContext.getCurrentYear();
+        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        try {
+            state.firstPlayerName = playerNames.getNameForYear(firstPlayerId, year);
+
+            List<A3_Halls.Hall> allHalls = halls.getAllHalls();
+            List<String> labels = new ArrayList<>();
+            List<String> callbacks = new ArrayList<>();
+            for (A3_Halls.Hall hall : allHalls) {
+                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
+                labels.add(hall.hallName);
+                callbacks.add("compareplayers_selecthall2_" + hall.id);
+            }
+            labels.add("\u274C Cancel");
+            callbacks.add("compareplayers_cancel");
+
+            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSelect the **second player's hall**:",
+                    state.firstPlayerName, state.firstHallName);
+            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        } catch (SQLException e) {
+            logHelper.logError("Database error: " + e.getMessage());
+            return new CompareResponse("\u274C Database error.", null, null);
+        }
+    }
+
+    public CompareResponse handleSecondHallSelection(String userId, int secondHallId) {
+        PlayerCompareSelectionState state = userSelectionStates.get(userId);
+        if (state == null || state.firstPlayerId == null) {
+            return new CompareResponse("\u274C Session expired. Please use /compareplayers to start again.", null, null);
+        }
+        state.secondHallId = secondHallId;
+
+        Integer year = YearContext.getCurrentYear();
+        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        try {
+            A3_Halls.Hall hall = halls.getHallById(secondHallId);
+            state.secondHallName = hall != null ? hall.hallName : "?";
+
+            List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(secondHallId, year);
+            statuses.removeIf(s -> s.playerId.equals(state.firstPlayerId));
+
+            if (statuses.isEmpty()) {
+                userSelectionStates.remove(userId);
+                return new CompareResponse("\u2139\uFE0F No other players available in hall " + state.secondHallName + ".", null, null);
+            }
+
+            List<String> labels = new ArrayList<>();
+            List<String> callbacks = new ArrayList<>();
+            for (B6_PlayerYearStatus.Status status : statuses) {
+                String name = playerNames.getNameForYear(status.playerId, year);
+                labels.add(name != null ? name : status.playerId);
+                callbacks.add("compareplayers_selectplayer2_" + status.playerId);
+            }
+            labels.add("\u274C Cancel");
+            callbacks.add("compareplayers_cancel");
+
+            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player's hall: **%s**\nSelect the **second player**:",
+                    state.firstPlayerName, state.firstHallName, state.secondHallName);
+            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+        } catch (SQLException e) {
+            logHelper.logError("Database error: " + e.getMessage());
+            return new CompareResponse("\u274C Database error.", null, null);
+        }
+    }
+
+    public CompareResponse handleSecondPlayerSelection(String userId, String secondPlayerId) {
+        PlayerCompareSelectionState state = userSelectionStates.get(userId);
+        if (state == null || state.firstPlayerId == null || state.secondHallName == null) {
+            return new CompareResponse("\u274C Session expired. Please use /compareplayers to start again.", null, null);
+        }
+        state.secondPlayerId = secondPlayerId;
+
+        Integer year = YearContext.getCurrentYear();
+        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        try {
+            state.secondPlayerName = playerNames.getNameForYear(secondPlayerId, year);
+
+            List<A1_Rounds.Round> availableRounds = rounds.getRoundsForYear(year);
+            if (availableRounds.isEmpty()) {
+                userSelectionStates.remove(userId);
+                return new CompareResponse("\u2139\uFE0F No round data available for " + year + ".", null, null);
+            }
+
+            List<String> labels = new ArrayList<>();
+            List<String> callbacks = new ArrayList<>();
+            labels.add("All Rounds");
+            callbacks.add("compareplayers_selectround_all");
+            for (A1_Rounds.Round round : availableRounds) {
+                labels.add(round.roundLabel);
+                callbacks.add("compareplayers_selectround_" + round.roundOrder);
+            }
+            labels.add("\u274C Cancel");
+            callbacks.add("compareplayers_cancel");
+
+            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player: **%s** (%s)\n\nSelect rounds to compare:",
+                    state.firstPlayerName, state.firstHallName, state.secondPlayerName, state.secondHallName);
+            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        } catch (SQLException e) {
+            logHelper.logError("Database error: " + e.getMessage());
+            return new CompareResponse("\u274C Database error.", null, null);
+        }
+    }
+
+    public CompareResponse handleRoundSelection(String userId, String selectedRound) {
+        PlayerCompareSelectionState state = userSelectionStates.get(userId);
+        if (state == null || state.firstPlayerId == null || state.secondPlayerId == null) {
+            return new CompareResponse("\u274C Session expired. Please use /compareplayers to start again.", null, null);
+        }
+        Integer year = YearContext.getCurrentYear();
+        userSelectionStates.remove(userId);
+        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        try {
+            return generateComparison(state.firstPlayerId, state.firstPlayerName, state.firstHallName,
+                    state.secondPlayerId, state.secondPlayerName, state.secondHallName, year, selectedRound);
         } catch (Exception e) {
-            String errorMsg = "❌ Error generating comparison: " + e.getMessage();
             logHelper.logError("Player comparison error: " + e.getMessage());
             e.printStackTrace();
-            return new CompareResponse(errorMsg, null, null);
+            return new CompareResponse("\u274C Error generating comparison: " + e.getMessage(), null, null);
         }
     }
-    
-    /**
-     * Handles cancellation
-     */
+
     public CompareResponse handleCancel(String userId) {
         userSelectionStates.remove(userId);
-        return new CompareResponse("ℹ️ Player comparison cancelled.", null, null);
+        return new CompareResponse("\u2139\uFE0F Player comparison cancelled.", null, null);
     }
-    
-    /**
-     * Fetches available halls from database
-     */
-    /**
-     * Fetches players from a specific hall
-     */
-    private List<String> fetchPlayersFromHall(String hall) {
-        List<String> players = new ArrayList<>();
-        
-        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
-            String sql = "SELECT name FROM A1_PlayerStats WHERE hall = ? AND active = 1 ORDER BY name";
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setString(1, hall);
-                ResultSet rs = pstmt.executeQuery();
-                while (rs.next()) {
-                    players.add(rs.getString("name"));
-                }
-            }
-        } catch (SQLException e) {
-            logHelper.logError("Database error fetching players: " + e.getMessage());
-        }
-        
-        return players;
-    }
-    
-    /**
-     * Gets available rounds from database
-     */
-    private List<String> getAvailableRounds() {
-        // Use RoundDetector to get only rounds that have actually been played
-        // This filters out skipped rounds (e.g., round 6 when transitioning to T16)
-        return RoundDetector.getAvailableRounds(dbPath);
-    }
-    
-    /**
-     * Player data container
-     */
+
+    /** Per-round player data, keyed by round_order for display. */
     private static class PlayerData {
+        String playerId;
         String name;
         String hall;
-        boolean capped;
-        String lastRound;
-        Map<String, Integer> rankByRound;
-        Map<String, Integer> eloByRound;
-        Map<String, Integer> seatByRound;
-        Map<String, Integer> outcomeByRound;
-        Map<String, String> oppNameByRound;
-        Map<String, String> oppHallByRound;
-        Map<String, Integer> oppEloByRound;  // Opponent ELO for each round
-        Map<String, Double> scoreByRound;    // Player's board win score for each round
-        
-        PlayerData(String name, String hall, boolean capped) {
-            this.name = name;
-            this.hall = hall;
-            this.capped = capped;
-            this.rankByRound = new HashMap<>();
-            this.eloByRound = new HashMap<>();
-            this.seatByRound = new HashMap<>();
-            this.outcomeByRound = new HashMap<>();
-            this.oppNameByRound = new HashMap<>();
-            this.oppHallByRound = new HashMap<>();
-            this.oppEloByRound = new HashMap<>();
-            this.scoreByRound = new HashMap<>();
-        }
+        Map<Integer, String> roundLabelByOrder = new TreeMap<>();
+        Map<Integer, Integer> rankByRound = new TreeMap<>();
+        Map<Integer, Integer> eloByRound = new TreeMap<>();
+        Map<Integer, Integer> seatByRound = new TreeMap<>();
+        Map<Integer, Integer> outcomeByRound = new TreeMap<>();
+        Map<Integer, String> oppNameByRound = new TreeMap<>();
+        Map<Integer, String> oppHallByRound = new TreeMap<>();
+        Map<Integer, Integer> oppEloByRound = new TreeMap<>();
+        Map<Integer, Double> scoreByRound = new TreeMap<>();
+        Map<Integer, Double> oppScoreByRound = new TreeMap<>();
+        Integer lastRoundOrder;
     }
-    
-    /**
-     * Generates complete comparison data
-     */
-    private CompareResponse generateComparison(String player1Name, String player1Hall,
-                                              String player2Name, String player2Hall, String selectedRound) throws Exception {
-        // Get available rounds (excluding skipped rounds like round 6 when transitioning to T16)
-        List<String> availableRounds = RoundDetector.getAvailableRounds(dbPath);
-        
-        // Determine which rounds to include based on selected round
-        List<String> roundsToInclude;
-        if (selectedRound.equals("all")) {
-            roundsToInclude = availableRounds;
-        } else {
-            // Include only available rounds up to the selected round
-            int selectedIndex = Constants.ROUND_SEQUENCE.indexOf(selectedRound);
-            roundsToInclude = availableRounds.stream()
-                .filter(r -> Constants.ROUND_SEQUENCE.indexOf(r) <= selectedIndex)
+
+    private PlayerData fetchPlayerData(String playerId, String name, String hall, int year, List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
+        PlayerData player = new PlayerData();
+        player.playerId = playerId;
+        player.name = name != null ? name : playerId;
+        player.hall = hall;
+
+        for (A1_Rounds.Round round : roundsToInclude) {
+            D11_PlayerRatings.Rating rating = playerRatings.getRating(playerId, round.id, trueEloTypeId);
+            if (rating == null) continue;
+
+            int elo = (int) Math.round(rating.ratingValue);
+            player.eloByRound.put(round.roundOrder, elo);
+            player.roundLabelByOrder.put(round.roundOrder, round.roundLabel);
+            player.lastRoundOrder = round.roundOrder;
+
+            Map<String, D11_PlayerRatings.Rating> allRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId);
+            player.rankByRound.put(round.roundOrder, rankingQueryHelper.calculateRank(allRatings, rating.ratingValue));
+
+            C9_MatchParticipants.Participant me = participants.getParticipantForPlayerAndRound(playerId, round.id);
+            if (me != null) {
+                if (me.hallSeatNumber != null) player.seatByRound.put(round.roundOrder, me.hallSeatNumber);
+                player.outcomeByRound.put(round.roundOrder, VictoryRecordCalculator.toLegacyOutcome(me.outcome));
+                player.scoreByRound.put(round.roundOrder, me.score);
+
+                C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(me.matchId, playerId);
+                if (opp != null) {
+                    player.oppScoreByRound.put(round.roundOrder, opp.score);
+                    if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
+                        player.oppNameByRound.put(round.roundOrder, "WALKOVER");
+                    } else {
+                        String oppName = playerNames.getNameForYear(opp.playerId, year);
+                        player.oppNameByRound.put(round.roundOrder, oppName != null ? oppName : opp.playerId);
+                        D11_PlayerRatings.Rating oppRating = playerRatings.getRating(opp.playerId, round.id, trueEloTypeId);
+                        if (oppRating != null) {
+                            player.oppEloByRound.put(round.roundOrder, (int) Math.round(oppRating.ratingValue));
+                        }
+                    }
+                    A3_Halls.Hall oppHall = halls.getHallById(opp.hallId);
+                    if (oppHall != null && !oppHall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) {
+                        player.oppHallByRound.put(round.roundOrder, oppHall.hallName);
+                    }
+                }
+            }
+        }
+
+        return player;
+    }
+
+    private CompareResponse generateComparison(String player1Id, String player1Name, String player1Hall,
+                                                String player2Id, String player2Name, String player2Hall,
+                                                int year, String selectedRound) throws Exception {
+        List<A1_Rounds.Round> availableRounds = rounds.getRoundsForYear(year);
+        int selectedOrder = selectedRound.equalsIgnoreCase("all") ? Integer.MAX_VALUE : Integer.parseInt(selectedRound);
+        List<A1_Rounds.Round> roundsToInclude = availableRounds.stream()
+                .filter(r -> r.roundOrder <= selectedOrder)
                 .collect(Collectors.toList());
+
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
         }
-        
-        // Fetch player data
-        PlayerData data1 = fetchPlayerData(player1Name, player1Hall, roundsToInclude);
-        PlayerData data2 = fetchPlayerData(player2Name, player2Hall, roundsToInclude);
-        
-        if (data1 == null) {
-            throw new Exception("Player " + player1Name + " not found in hall " + player1Hall);
-        }
-        if (data2 == null) {
-            throw new Exception("Player " + player2Name + " not found in hall " + player2Hall);
-        }
-        
-        // Generate text output
-        String textOutput = generateTextOutput(data1, data2, roundsToInclude);
-        
-        // Generate image
-        Path imagePath = generateImage(data1, data2, roundsToInclude, selectedRound);
-        
-        logHelper.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)", 
-            player1Name, player1Hall, player2Name, player2Hall, selectedRound));
-        
+
+        PlayerData data1 = fetchPlayerData(player1Id, player1Name, player1Hall, year, roundsToInclude, trueEloTypeId);
+        PlayerData data2 = fetchPlayerData(player2Id, player2Name, player2Hall, year, roundsToInclude, trueEloTypeId);
+
+        if (data1.eloByRound.isEmpty()) throw new Exception("Player " + data1.name + " has no data for " + year);
+        if (data2.eloByRound.isEmpty()) throw new Exception("Player " + data2.name + " has no data for " + year);
+
+        List<Integer> orders1 = new ArrayList<>(data1.roundLabelByOrder.keySet());
+        List<Integer> orders2 = new ArrayList<>(data2.roundLabelByOrder.keySet());
+
+        String textOutput = generateTextOutput(data1, orders1, data2, orders2);
+        Path imagePath = generateImage(data1, orders1, data2, orders2);
+
+        logHelper.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (rounds: %s)",
+                data1.name, data1.hall, data2.name, data2.hall, selectedRound));
+
         return new CompareResponse(textOutput, imagePath, null);
     }
-    
-    /**
-     * Fetches complete player data from database
-     */
-    private PlayerData fetchPlayerData(String playerName, String hall, List<String> roundsToInclude) throws SQLException {
-        
-        try (Connection conn = DatabaseHelper.getConnection(dbPath)) {
-            // Build column list
-            List<String> columns = new ArrayList<>();
-            columns.add("name");
-            columns.add("hall");
-            columns.add("capped");
-            for (String round : roundsToInclude) {
-                String suffix = RoundUtils.getRoundColumnSuffix(round);
-                columns.add("trueElo" + suffix);
-                columns.add("seat" + suffix);
-                columns.add("outcome" + suffix);
-                columns.add("oppName" + suffix);
-                columns.add("oppHall" + suffix);
-                columns.add("score" + suffix);
-            }
-            
-            String sql = "SELECT " + String.join(", ", columns) + 
-                        " FROM A1_PlayerStats WHERE name = ? AND hall = ? AND active = 1";
-            
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setString(1, playerName);
-                pstmt.setString(2, hall);
-                ResultSet rs = pstmt.executeQuery();
-                
-                if (rs.next()) {
-                    boolean capped = rs.getBoolean("capped");
-                    PlayerData player = new PlayerData(playerName, hall, capped);
-                    
-                    // Find last round played
-                    for (int i = roundsToInclude.size() - 1; i >= 0; i--) {
-                        String round = roundsToInclude.get(i);
-                        String colName = "trueElo" + RoundUtils.getRoundColumnSuffix(round);
-                        Integer elo = (Integer) rs.getObject(colName);
-                        if (elo != null) {
-                            player.lastRound = round;
-                            break;
-                        }
-                    }
-                    
-                    // Load data for included rounds only
-                    for (String round : roundsToInclude) {
-                        String suffix = RoundUtils.getRoundColumnSuffix(round);
-                        Integer elo = (Integer) rs.getObject("trueElo" + suffix);
-                        Integer seat = (Integer) rs.getObject("seat" + suffix);
-                        Integer outcome = (Integer) rs.getObject("outcome" + suffix);
-                        String oppName = rs.getString("oppName" + suffix);
-                        String oppHall = rs.getString("oppHall" + suffix);
-                        Double score = (Double) rs.getObject("score" + suffix);
-                        
-                        if (elo != null) {
-                            player.eloByRound.put(round, elo);
-                            // Calculate rank for this round
-                            int rank = calculateRankForRound(conn, round, elo);
-                            player.rankByRound.put(round, rank);
-                        }
-                        if (seat != null) player.seatByRound.put(round, seat);
-                        if (outcome != null) player.outcomeByRound.put(round, outcome);
-                        if (oppName != null) player.oppNameByRound.put(round, oppName);
-                        if (oppHall != null) player.oppHallByRound.put(round, oppHall);
-                        if (score != null) player.scoreByRound.put(round, score);
-                        
-                        // Fetch opponent ELO for this round
-                        if (oppName != null && oppHall != null && !oppName.equalsIgnoreCase("WALKOVER")) {
-                            Integer oppElo = fetchOpponentElo(conn, oppName, oppHall, suffix);
-                            if (oppElo != null) {
-                                player.oppEloByRound.put(round, oppElo);
-                            }
-                        }
-                    }
-                    
-                    return player;
-                }
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Fetches the opponent's ELO for a specific round
-     */
-    private Integer fetchOpponentElo(Connection conn, String oppName, String oppHall, String roundSuffix) throws SQLException {
-        String sql = "SELECT trueElo" + roundSuffix + " FROM A1_PlayerStats WHERE Name = ? AND Hall = ?";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, oppName);
-            pstmt.setString(2, oppHall);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return (Integer) rs.getObject("trueElo" + roundSuffix);
-                }
-            }
-        }
-        return null;
-    }
-    
-    /**
-     * Calculates rank for a player in a specific round based on their LATEST ELO up to that round
-     * Ranks among ALL players who existed up to that round
-     */
-    private int calculateRankForRound(Connection conn, String round, int playerElo) throws SQLException {
-        // Get the index of current round
-        int currentRoundIndex = Constants.ROUND_SEQUENCE.indexOf(round);
-        if (currentRoundIndex == -1) {
-            return 0;
-        }
-        
-        // Build list of round suffixes up to current round
-        List<String> roundSuffixes = new ArrayList<>();
-        for (int i = 0; i <= currentRoundIndex; i++) {
-            String suffix = RoundUtils.getRoundColumnSuffix(Constants.ROUND_SEQUENCE.get(i));
-            if (suffix != null && !suffix.isEmpty()) {
-                roundSuffixes.add(suffix);
-            }
-        }
-        
-        // Safety check: if no valid round suffixes, return 0
-        if (roundSuffixes.isEmpty()) {
-            return 0;
-        }
-        
-        // Build WHERE clause to check if player has data in any round up to current round
-        StringBuilder whereClause = new StringBuilder("(");
-        for (int i = 0; i < roundSuffixes.size(); i++) {
-            if (i > 0) whereClause.append(" OR ");
-            whereClause.append("trueElo").append(roundSuffixes.get(i)).append(" IS NOT NULL");
-        }
-        whereClause.append(")");
-        
-        // Build expression to get latest ELO (check from current round backwards to R1)
-        // COALESCE requires at least 2 arguments, so for single round use column directly
-        String eloExpr;
-        if (roundSuffixes.size() == 1) {
-            eloExpr = "trueElo" + roundSuffixes.get(0);
-        } else {
-            StringBuilder coalesceExpr = new StringBuilder("COALESCE(");
-            for (int i = roundSuffixes.size() - 1; i >= 0; i--) {
-                if (i < roundSuffixes.size() - 1) coalesceExpr.append(", ");
-                coalesceExpr.append("trueElo").append(roundSuffixes.get(i));
-            }
-            coalesceExpr.append(")");
-            eloExpr = coalesceExpr.toString();
-        }
-        
-        // Count players with higher latest ELO
-        String sql = "SELECT COUNT(*) as rank FROM A1_PlayerStats " +
-                    "WHERE " + whereClause.toString() + " AND " + eloExpr + " > ? AND active = 1";
-        
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setInt(1, playerElo);
-            ResultSet rs = pstmt.executeQuery();
-            if (rs.next()) {
-                return rs.getInt("rank") + 1;  // +1 because COUNT gives how many are higher
-            }
-        }
-        return 0;
-    }
-    
-    /**
-     * Generates text output
-     */
-    private String generateTextOutput(PlayerData player1, PlayerData player2, List<String> roundsToInclude) {
+
+    private String generateTextOutput(PlayerData player1, List<Integer> orders1, PlayerData player2, List<Integer> orders2) {
         StringBuilder sb = new StringBuilder();
-        
-        sb.append("**👥 Player Comparison**\n\n");
-        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", 
-            player1.name, player1.hall, player2.name, player2.hall));
-        
-        // Player 1 details
-        sb.append(generatePlayerDetails(player1, roundsToInclude));
+        sb.append("**\uD83D\uDC65 Player Comparison**\n\n");
+        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", player1.name, player1.hall, player2.name, player2.hall));
+        sb.append(generatePlayerDetails(player1, orders1));
         sb.append("\n");
-        
-        // Player 2 details
-        sb.append(generatePlayerDetails(player2, roundsToInclude));
-        
+        sb.append(generatePlayerDetails(player2, orders2));
         return sb.toString();
     }
-    
-    /**
-     * Generates details for one player (text)
-     */
-    private String generatePlayerDetails(PlayerData player, List<String> roundsToInclude) {
+
+    private String generatePlayerDetails(PlayerData player, List<Integer> roundOrders) {
         StringBuilder sb = new StringBuilder();
-        
-        sb.append(String.format("━━━ **%s (%s)** ━━━\n\n", player.name, player.hall));
-        
-        // Player stats per round with deltas
-        sb.append("**📊 Stats Per Round:**\n```\n");
-        sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
+        sb.append(String.format("\u2501\u2501\u2501 **%s (%s)** \u2501\u2501\u2501\n\n", player.name, player.hall));
+
+        sb.append("**\uD83D\uDCCA Stats Per Round:**\n```\n");
+        sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "\u0394Rank", "ELO", "\u0394ELO"));
         sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "----", "------", "----------", "------", "----------"));
-        
+
         Integer prevRank = null;
         Integer prevElo = null;
-        
-        for (String round : roundsToInclude) {
-            Integer rank = player.rankByRound.get(round);
-            Integer elo = player.eloByRound.get(round);
-            
-            if (rank != null && elo != null) {
-                String deltaRank = "-";
-                String deltaElo = "-";
-                
-                if (prevRank != null) {
-                    int rankChange = prevRank - rank; // Positive = improvement (lower rank number)
-                    if (rankChange > 0) {
-                        deltaRank = "+" + rankChange;
-                    } else if (rankChange < 0) {
-                        deltaRank = "-" + Math.abs(rankChange);
-                    } else {
-                        deltaRank = "= ";
-                    }
-                } else {
-                    deltaRank = "- ";
-                }
-                
-                if (prevElo != null) {
-                    int eloChange = elo - prevElo;
-                    if (eloChange > 0) {
-                        deltaElo = "+" + eloChange;
-                    } else if (eloChange < 0) {
-                        deltaElo = "-" + Math.abs(eloChange);
-                    } else {
-                        deltaElo = "= ";
-                    }
-                } else {
-                    deltaElo = "- ";
-                }
-                
-                sb.append(String.format("%-4s %-6d %-10s %-6d %-10s\n", 
-                    VictoryRecordCalculator.getRoundDisplayName(round), rank, deltaRank, elo, deltaElo));
-                
-                prevRank = rank;
-                prevElo = elo;
-            }
+        for (int order : roundOrders) {
+            Integer rank = player.rankByRound.get(order);
+            Integer elo = player.eloByRound.get(order);
+            if (rank == null || elo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
+            String deltaElo = prevElo == null ? "-" : deltaString(elo - prevElo);
+            sb.append(String.format("%-4s %-6d %-10s %-6d %-10s\n", player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
+            prevRank = rank;
+            prevElo = elo;
         }
         sb.append("```\n\n");
-        
-        // Seating arrangement with proper alignment
-        sb.append("**🪑 Seating Arrangement:**\n```\n");
-        StringBuilder roundsLine = new StringBuilder();
-        StringBuilder seatsLine = new StringBuilder();
-        
-        roundsLine.append("Rnd: ");
-        seatsLine.append("Seat:");
-        
-        for (String round : roundsToInclude) {
-            String roundName = VictoryRecordCalculator.getRoundDisplayName(round);
-            Integer seat = player.seatByRound.get(round);
-            String seatStr = seat != null ? String.valueOf(seat) : "-";
-            
-            // Pad to 4 characters with trailing space and separator
-            roundsLine.append(String.format("%-4s", roundName)).append("|");
-            seatsLine.append(String.format(" %-3s", seatStr)).append("|");
+
+        sb.append("**\uD83E\uDE91 Seating Arrangement:**\n```\n");
+        StringBuilder roundsLine = new StringBuilder("Rnd: ");
+        StringBuilder seatsLine = new StringBuilder("Seat:");
+        for (int order : roundOrders) {
+            roundsLine.append(String.format("%-4s", player.roundLabelByOrder.get(order))).append("|");
+            Integer seat = player.seatByRound.get(order);
+            seatsLine.append(String.format(" %-3s", seat != null ? String.valueOf(seat) : "-")).append("|");
         }
-        
-        sb.append(roundsLine.toString()).append("\n");
-        sb.append(seatsLine.toString()).append("\n");
-        sb.append("```\n\n");
-        
-        // Victory record
-        sb.append("**🏆 Victory Record:**\n```\n");
-        for (String round : roundsToInclude) {
-            Integer outcome = player.outcomeByRound.get(round);
+        sb.append(roundsLine).append("\n").append(seatsLine).append("\n```\n\n");
+
+        sb.append("**\uD83C\uDFC6 Victory Record:**\n```\n");
+        for (int order : roundOrders) {
+            String roundName = player.roundLabelByOrder.get(order);
+            Integer outcome = player.outcomeByRound.get(order);
             if (outcome == null) {
-                if (player.eloByRound.containsKey(round)) {
-                    // Player existed this round but didn't play
-                    sb.append(String.format("%-3s  -NA-\n", VictoryRecordCalculator.getRoundDisplayName(round)));
+                if (player.eloByRound.containsKey(order)) {
+                    sb.append(String.format("%-3s  -NA-\n", roundName));
                 }
                 continue;
             }
-            
-            String oppName = player.oppNameByRound.get(round);
-            String oppHall = player.oppHallByRound.get(round);
-            
-            // Get ELO values (no parentheses to match image)
-            Integer playerElo = player.eloByRound.get(round);
-            Integer oppElo = player.oppEloByRound.get(round);
+
+            String oppName = player.oppNameByRound.get(order);
+            String oppHall = player.oppHallByRound.get(order);
+            Integer playerElo = player.eloByRound.get(order);
+            Integer oppElo = player.oppEloByRound.get(order);
             String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
             String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
-            
-            // Format: emoji playerHall playerName score oppName oppHall oppEmoji
+
             String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
             Integer oppOutcome = outcome == 0 ? 0 : -outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
-            
+
             String playerHallFormatted = TableFormatter.shortenHallName(player.hall);
             String oppHallFormatted;
-            
-            // Format score - use actual score from database if available
-            String score;
-            Double playerScore = player.scoreByRound.get(round);
-            
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                if (playerScore != null) {
-                    String scoreStr = (playerScore == Math.floor(playerScore)) ? 
-                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                    score = scoreStr + "-0";
-                } else {
-                    score = "1-0";  // Fallback
-                }
+                oppHallFormatted = "";
+                oppEloStr = "-";
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
-                oppEloStr = "-";  // Dash for WALKOVER
-                oppHallFormatted = "";  // No hall for WALKOVER
             } else {
                 oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
-                if (playerScore != null) {
-                    double maxSeeds = Double.parseDouble(PropertyResolver.getProperty("settings.maxSeeds", "368.5"));
-                    double oppScore = maxSeeds - playerScore;
-                    
-                    String playerScoreStr = (playerScore == Math.floor(playerScore)) ? 
-                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                    String oppScoreStr = (oppScore == Math.floor(oppScore)) ? 
-                        String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
-                        
-                    score = playerScoreStr + "-" + oppScoreStr;
-                } else {
-                    // Fallback to outcome-based if score not available
-                    if (outcome == 1) {
-                        score = "1-0";
-                    } else if (outcome == 0) {
-                        score = "0.5-0.5";
-                    } else {
-                        score = "0-1";
-                    }
-                }
             }
-            
-            // Build line matching image format: Rnd emoji hallAbbr elo playerName score oppName elo hallAbbr emoji
+
+            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order));
+
             String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
-                VictoryRecordCalculator.getRoundDisplayName(round),
-                hallEmoji,
-                playerHallFormatted,
-                playerEloStr,
-                player.name,
-                score,
-                oppName != null ? oppName : "?",
-                oppEloStr,
-                oppHallFormatted,
-                oppEmoji);
+                    roundName, hallEmoji, playerHallFormatted, playerEloStr, player.name, score,
+                    oppName != null ? oppName : "?", oppEloStr, oppHallFormatted, oppEmoji);
             sb.append(line).append("\n");
         }
         sb.append("```\n\n");
-        
+
         return sb.toString();
     }
-    
-    /**
-     * Creates subtitle for image header (follows hall naming convention)
-     */
-    private String createSubtitle(String name, String hall) {
-        try {
-            int num = Integer.parseInt(hall);
-            return String.format("%s (Hall %d)", name, num);
-        } catch (NumberFormatException e) {
-            return String.format("%s (%s Hall)", name, hall);
+
+    private Path generateImage(PlayerData player1, List<Integer> orders1, PlayerData player2, List<Integer> orders2) throws Exception {
+        String lastRoundLabel = null;
+        if (player1.lastRoundOrder != null) lastRoundLabel = player1.roundLabelByOrder.get(player1.lastRoundOrder);
+        if (player2.lastRoundOrder != null) {
+            int p1Order = player1.lastRoundOrder != null ? player1.lastRoundOrder : -1;
+            if (player2.lastRoundOrder > p1Order) {
+                lastRoundLabel = player2.roundLabelByOrder.get(player2.lastRoundOrder);
+            }
         }
+
+        String description = String.format("%s (%s) vs %s (%s)", player1.name, player1.hall, player2.name, player2.hall);
+        ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Player Comparison", description, lastRoundLabel);
+
+        List<ComparisonImageGenerator.Section> sections1 = buildSections(player1, orders1);
+        List<ComparisonImageGenerator.Section> sections2 = buildSections(player2, orders2);
+
+        ComparisonImageGenerator.ComparisonData data1 = new ComparisonImageGenerator.ComparisonData(player1.name, player1.hall, sections1);
+        ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(player2.name, player2.hall, sections2);
+
+        return ComparisonImageGenerator.generateComparisonImage(metadata.title, data1, data2, metadata,
+                "ComparePlayers", player1.name, player2.name);
     }
-    
-    /**
-     * Generates comparison image
-     */
-    private Path generateImage(PlayerData player1, PlayerData player2, List<String> roundsToInclude, String selectedRound) throws Exception {
-        // Prepare metadata - use selected round or find max round from data
-        String lastRoundForMetadata;
-        if (selectedRound.equals("all")) {
-            // Find the highest round between both players
-            String maxRound = player1.lastRound;
-            if (player2.lastRound != null && (maxRound == null || Constants.ROUND_SEQUENCE.indexOf(player2.lastRound) > Constants.ROUND_SEQUENCE.indexOf(maxRound))) {
-                maxRound = player2.lastRound;
-            }
-            lastRoundForMetadata = maxRound;
-        } else {
-            lastRoundForMetadata = selectedRound;
+
+    private List<ComparisonImageGenerator.Section> buildSections(PlayerData player, List<Integer> roundOrders) {
+        List<ComparisonImageGenerator.Section> sections = new ArrayList<>();
+
+        List<String> statsLines = new ArrayList<>();
+        statsLines.add(String.format("%-4s %-6s %-10s %-6s %-10s", "Rnd", "Rank", "\u0394Rank", "ELO", "\u0394ELO"));
+        Integer prevRank = null;
+        Integer prevElo = null;
+        for (int order : roundOrders) {
+            Integer rank = player.rankByRound.get(order);
+            Integer elo = player.eloByRound.get(order);
+            if (rank == null || elo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
+            String deltaElo = prevElo == null ? "-" : deltaString(elo - prevElo);
+            statsLines.add(String.format("%-4s %-6d %-10s %-6d %-10s", player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
+            prevRank = rank;
+            prevElo = elo;
         }
-        
-        String description = String.format("%s (%s) vs %s (%s)", 
-            player1.name, player1.hall, player2.name, player2.hall);
-        ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata(
-            "Player Comparison", description, lastRoundForMetadata != null ? VictoryRecordCalculator.getRoundDisplayName(lastRoundForMetadata) : null);
-        
-        // Prepare left side data (player 1)
-        List<ComparisonImageGenerator.Section> sections1 = new ArrayList<>();
-        
-        // Stats per round with deltas
-        List<String> statsLines1 = new ArrayList<>();
-        statsLines1.add(String.format("%-4s %-6s %-10s %-6s %-10s", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
-        
-        Integer prevRank1 = null;
-        Integer prevElo1 = null;
-        for (String round : roundsToInclude) {
-            Integer rank = player1.rankByRound.get(round);
-            Integer elo = player1.eloByRound.get(round);
-            if (rank != null && elo != null) {
-                String deltaRank = "-";
-                String deltaElo = "-";
-                
-                if (prevRank1 != null) {
-                    int rankChange = prevRank1 - rank;
-                    if (rankChange > 0) {
-                        deltaRank = "+" + rankChange;
-                    } else if (rankChange < 0) {
-                        deltaRank = "-" + Math.abs(rankChange);
-                    } else {
-                        deltaRank = "=";
-                    }
-                }
-                
-                if (prevElo1 != null) {
-                    int eloChange = elo - prevElo1;
-                    if (eloChange > 0) {
-                        deltaElo = "+" + eloChange;
-                    } else if (eloChange < 0) {
-                        deltaElo = "-" + Math.abs(eloChange);
-                    } else {
-                        deltaElo = "=";
-                    }
-                }
-                
-                statsLines1.add(String.format("%-4s %-6d %-10s %-6d %-10s", 
-                    VictoryRecordCalculator.getRoundDisplayName(round), rank, deltaRank, elo, deltaElo));
-                
-                prevRank1 = rank;
-                prevElo1 = elo;
-            }
+        sections.add(new ComparisonImageGenerator.Section("Stats Per Round", statsLines));
+
+        List<String> seatLines = new ArrayList<>();
+        StringBuilder seatHeader = new StringBuilder("Rnd: ");
+        StringBuilder seatData = new StringBuilder("Seat:");
+        for (int order : roundOrders) {
+            seatHeader.append(String.format("%-3s|", player.roundLabelByOrder.get(order)));
+            Integer seat = player.seatByRound.get(order);
+            seatData.append(String.format("%-3s|", seat != null ? seat : "-"));
         }
-        sections1.add(new ComparisonImageGenerator.Section("Stats Per Round", statsLines1));
-        
-        // Seating arrangement
-        List<String> seatLines1 = new ArrayList<>();
-        StringBuilder seatHeader1 = new StringBuilder("Rnd: ");
-        StringBuilder seatData1 = new StringBuilder("Seat:");
-        for (String round : roundsToInclude) {
-            seatHeader1.append(String.format("%-3s|", VictoryRecordCalculator.getRoundDisplayName(round)));
-            Integer seat = player1.seatByRound.get(round);
-            seatData1.append(String.format("%-3s|", seat != null ? seat : "-"));
-        }
-        seatLines1.add(seatHeader1.toString());
-        seatLines1.add(seatData1.toString());
-        sections1.add(new ComparisonImageGenerator.Section("Seating", seatLines1));
-        
-        // Victory record - use structured data
-        List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries1 = new ArrayList<>();
-        for (String round : roundsToInclude) {
-            Integer outcome = player1.outcomeByRound.get(round);
+        seatLines.add(seatHeader.toString());
+        seatLines.add(seatData.toString());
+        sections.add(new ComparisonImageGenerator.Section("Seating", seatLines));
+
+        List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries = new ArrayList<>();
+        for (int order : roundOrders) {
+            String roundName = player.roundLabelByOrder.get(order);
+            Integer outcome = player.outcomeByRound.get(order);
             if (outcome == null) {
-                if (player1.eloByRound.containsKey(round)) {
-                    victoryEntries1.add(new ComparisonImageGenerator.PlayerVictoryEntry(
-                        VictoryRecordCalculator.getRoundDisplayName(round),
-                        true  // isNA
-                    ));
+                if (player.eloByRound.containsKey(order)) {
+                    victoryEntries.add(new ComparisonImageGenerator.PlayerVictoryEntry(roundName, true));
                 }
                 continue;
             }
-            
-            String oppName = player1.oppNameByRound.get(round);
-            String oppHall = player1.oppHallByRound.get(round);
-            
+
+            String oppName = player.oppNameByRound.get(order);
+            String oppHall = player.oppHallByRound.get(order);
             String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
             Integer oppOutcome = outcome == 0 ? 0 : -outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
-            
-            // Use 2-letter hall abbreviations
-            String playerHallFormatted = TableFormatter.shortenHallName(player1.hall);
+
+            String playerHallFormatted = TableFormatter.shortenHallName(player.hall);
             String oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
-            
-            // Get player ELO for this round
-            Integer playerElo = player1.eloByRound.get(round);
+
+            Integer playerElo = player.eloByRound.get(order);
             String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
-            
-            // Get opponent ELO from the fetched data
-            Integer oppElo = player1.oppEloByRound.get(round);
+            Integer oppElo = player.oppEloByRound.get(order);
             String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
-            
-            // Format score - use actual score from database if available
-            String score;
-            Double playerScore = player1.scoreByRound.get(round);
-            
             if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                if (playerScore != null) {
-                    String scoreStr = (playerScore == Math.floor(playerScore)) ? 
-                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                    score = scoreStr + "-0";
-                } else {
-                    score = "1-0";  // Fallback
-                }
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
-                oppEloStr = "-";  // Show dash for WALKOVER ELO
-            } else if (playerScore != null) {
-                double maxSeeds = Double.parseDouble(PropertyResolver.getProperty("settings.maxSeeds", "368.5"));
-                double oppScore = maxSeeds - playerScore;
-                
-                String playerScoreStr = (playerScore == Math.floor(playerScore)) ? 
-                    String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                String oppScoreStr = (oppScore == Math.floor(oppScore)) ? 
-                    String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
-                    
-                score = playerScoreStr + "-" + oppScoreStr;
-            } else {
-                // Fallback to outcome-based if score not available
-                if (outcome == 1) {
-                    score = "1-0";
-                } else if (outcome == 0) {
-                    score = "0.5-0.5";
-                } else {
-                    score = "0-1";
-                }
+                oppEloStr = "-";
             }
-            
-            // Create structured entry
-            victoryEntries1.add(new ComparisonImageGenerator.PlayerVictoryEntry(
-                VictoryRecordCalculator.getRoundDisplayName(round),
-                hallEmoji,
-                playerHallFormatted,
-                playerEloStr,
-                player1.name,
-                score,
-                oppName != null ? oppName : "?",
-                oppEloStr,
-                oppHallFormatted,
-                oppEmoji,
-                outcome,
-                oppOutcome
-            ));
+
+            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order));
+
+            ComparisonImageGenerator.PlayerVictoryEntry entry = new ComparisonImageGenerator.PlayerVictoryEntry(
+                    roundName, hallEmoji, playerHallFormatted, playerEloStr, player.name, score,
+                    oppName != null ? oppName : "?", oppEloStr, oppHallFormatted, oppEmoji, outcome, oppOutcome);
+            victoryEntries.add(entry);
         }
-        sections1.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries1));
-        
-        // Prepare right side data (player 2)
-        List<ComparisonImageGenerator.Section> sections2 = new ArrayList<>();
-        
-        // Stats per round with deltas
-        List<String> statsLines2 = new ArrayList<>();
-        statsLines2.add(String.format("%-4s %-6s %-10s %-6s %-10s", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
-        
-        Integer prevRank2 = null;
-        Integer prevElo2 = null;
-        
-        for (String round : roundsToInclude) {
-            Integer rank = player2.rankByRound.get(round);
-            Integer elo = player2.eloByRound.get(round);
-            
-            if (rank != null && elo != null) {
-                String deltaRank = "-";
-                String deltaElo = "-";
-                
-                if (prevRank2 != null) {
-                    int rankChange = prevRank2 - rank;
-                    if (rankChange > 0) {
-                        deltaRank = "+" + rankChange;
-                    } else if (rankChange < 0) {
-                        deltaRank = "-" + Math.abs(rankChange);
-                    } else {
-                        deltaRank = "= ";
-                    }
-                } else {
-                    deltaRank = "- ";
-                }
-                
-                if (prevElo2 != null) {
-                    int eloChange = elo - prevElo2;
-                    if (eloChange > 0) {
-                        deltaElo = "+" + eloChange;
-                    } else if (eloChange < 0) {
-                        deltaElo = "-" + Math.abs(eloChange);
-                    } else {
-                        deltaElo = "= ";
-                    }
-                } else {
-                    deltaElo = "- ";
-                }
-                
-                statsLines2.add(String.format("%-4s %-6d %-10s %-6d %-10s", 
-                    VictoryRecordCalculator.getRoundDisplayName(round), rank, deltaRank, elo, deltaElo));
-                
-                prevRank2 = rank;
-                prevElo2 = elo;
-            }
-        }
-        sections2.add(new ComparisonImageGenerator.Section("Stats Per Round", statsLines2));
-        
-        // Seating arrangement
-        List<String> seatLines2 = new ArrayList<>();
-        StringBuilder seatHeader2 = new StringBuilder("Rnd: ");
-        StringBuilder seatData2 = new StringBuilder("Seat:");
-        for (String round : roundsToInclude) {
-            seatHeader2.append(String.format("%-3s|", VictoryRecordCalculator.getRoundDisplayName(round)));
-            Integer seat = player2.seatByRound.get(round);
-            seatData2.append(String.format("%-3s|", seat != null ? seat : "-"));
-        }
-        seatLines2.add(seatHeader2.toString());
-        seatLines2.add(seatData2.toString());
-        sections2.add(new ComparisonImageGenerator.Section("Seating", seatLines2));
-        
-        // Victory record - use structured data
-        List<ComparisonImageGenerator.PlayerVictoryEntry> victoryEntries2 = new ArrayList<>();
-        for (String round : roundsToInclude) {
-            Integer outcome = player2.outcomeByRound.get(round);
-            if (outcome == null) {
-                if (player2.eloByRound.containsKey(round)) {
-                    victoryEntries2.add(new ComparisonImageGenerator.PlayerVictoryEntry(
-                        VictoryRecordCalculator.getRoundDisplayName(round),
-                        true  // isNA
-                    ));
-                }
-                continue;
-            }
-            
-            String oppName = player2.oppNameByRound.get(round);
-            String oppHall = player2.oppHallByRound.get(round);
-            
-            String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
-            Integer oppOutcome = outcome == 0 ? 0 : -outcome;
-            String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
-            
-            // Use 2-letter hall abbreviations
-            String playerHallFormatted = TableFormatter.shortenHallName(player2.hall);
-            String oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
-            
-            // Get player ELO for this round
-            Integer playerElo = player2.eloByRound.get(round);
-            String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
-            
-            // Get opponent ELO from the fetched data
-            Integer oppElo = player2.oppEloByRound.get(round);
-            String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
-            
-            // Format score - use actual score from database if available
-            String score;
-            Double playerScore = player2.scoreByRound.get(round);
-            
-            if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                if (playerScore != null) {
-                    String scoreStr = (playerScore == Math.floor(playerScore)) ? 
-                        String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                    score = scoreStr + "-0";
-                } else {
-                    score = "1-0";  // Fallback
-                }
-                oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
-                oppEloStr = "-";  // Show dash for WALKOVER ELO
-            } else if (playerScore != null) {
-                double maxSeeds = Double.parseDouble(PropertyResolver.getProperty("settings.maxSeeds", "368.5"));
-                double oppScore = maxSeeds - playerScore;
-                
-                String playerScoreStr = (playerScore == Math.floor(playerScore)) ? 
-                    String.format("%.0f", playerScore) : String.format("%.1f", playerScore);
-                String oppScoreStr = (oppScore == Math.floor(oppScore)) ? 
-                    String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
-                    
-                score = playerScoreStr + "-" + oppScoreStr;
-            } else {
-                // Fallback to outcome-based if score not available
-                if (outcome == 1) {
-                    score = "1-0";
-                } else if (outcome == 0) {
-                    score = "0.5-0.5";
-                } else {
-                    score = "0-1";
-                }
-            }
-            
-            // Create structured entry
-            victoryEntries2.add(new ComparisonImageGenerator.PlayerVictoryEntry(
-                VictoryRecordCalculator.getRoundDisplayName(round),
-                hallEmoji,
-                playerHallFormatted,
-                playerEloStr,
-                player2.name,
-                score,
-                oppName != null ? oppName : "?",
-                oppEloStr,
-                oppHallFormatted,
-                oppEmoji,
-                outcome,
-                oppOutcome
-            ));
-        }
-        sections2.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries2));
-        
-        // Equalize section sizes
-        equalizeSectionSizes(sections1, sections2);
-        
-        // Create proper subtitles with hall name formatting
-        String subtitle1 = createSubtitle(player1.name, player1.hall);
-        String subtitle2 = createSubtitle(player2.name, player2.hall);
-        
-        ComparisonImageGenerator.ComparisonData data1 = new ComparisonImageGenerator.ComparisonData(
-            player1.name, subtitle1, sections1);
-        ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(
-            player2.name, subtitle2, sections2);
-        
-        return ComparisonImageGenerator.generateComparisonImage("Player Comparison", data1, data2, metadata, 
-            "ComparePlayers", player1.name, player2.name);
+        sections.add(ComparisonImageGenerator.Section.forPlayerVictory("Victory Record", victoryEntries));
+
+        return sections;
     }
-    
-    /**
-     * Equalizes section sizes between two players by adding empty rows to sections with fewer rows.
-     */
-    private void equalizeSectionSizes(List<ComparisonImageGenerator.Section> sections1,
-                                     List<ComparisonImageGenerator.Section> sections2) {
-        int sectionCount = Math.min(sections1.size(), sections2.size());
-        
-        for (int i = 0; i < sectionCount; i++) {
-            ComparisonImageGenerator.Section s1 = sections1.get(i);
-            ComparisonImageGenerator.Section s2 = sections2.get(i);
-            
-            // Get size based on what type of data the section contains
-            int size1 = getSectionSize(s1);
-            int size2 = getSectionSize(s2);
-            
-            if (size1 < size2) {
-                addEmptyRows(s1, size2 - size1);
-            } else if (size2 < size1) {
-                addEmptyRows(s2, size1 - size2);
-            }
-        }
+
+    private static String deltaString(int change) {
+        if (change > 0) return "+" + change;
+        if (change < 0) return "-" + Math.abs(change);
+        return "=";
     }
-    
-    private int getSectionSize(ComparisonImageGenerator.Section section) {
-        if (section.hallVictoryEntries != null) {
-            return section.hallVictoryEntries.size();
-        } else if (section.playerVictoryEntries != null) {
-            return section.playerVictoryEntries.size();
-        } else if (section.lines != null) {
-            return section.lines.size();
-        }
-        return 0;
-    }
-    
-    private void addEmptyRows(ComparisonImageGenerator.Section section, int count) {
-        if (section.hallVictoryEntries != null) {
-            for (int j = 0; j < count; j++) {
-                section.hallVictoryEntries.add(new ComparisonImageGenerator.HallVictoryEntry("", true));
-            }
-        } else if (section.playerVictoryEntries != null) {
-            for (int j = 0; j < count; j++) {
-                section.playerVictoryEntries.add(new ComparisonImageGenerator.PlayerVictoryEntry("", true));
-            }
-        } else if (section.lines != null) {
-            for (int j = 0; j < count; j++) {
-                section.lines.add("");
-            }
-        }
+
+    private String formatScorePair(Double myScore, Double oppScore) {
+        String myStr = myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?";
+        String oppStr = oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0";
+        return myStr + "-" + oppStr;
     }
 }

@@ -177,10 +177,8 @@ public class PropertyManager {
         switch (key) {
             case "settings.timezone":
                 return "Set your preferred timezone for displaying timestamps";
-            case "settings.maxSeeds":
-                return "Sets maximum score for the game for score calculation (e.g: 64 for Othello, 368.5 for Weiqi)";
-            case "settings.perfElo.enabled":
-                return "Enable Performance ELO calculations (considers point margins)";
+            case "settings.currentYear":
+                return "Sets the tournament year currently being played (used to resolve which year's rounds/players to operate on)";
             case "settings.allowNonAdminUploads":
                 return "Allow non-admin users to upload files for processing";
             case "settings.allowAllChannelsProcessing":

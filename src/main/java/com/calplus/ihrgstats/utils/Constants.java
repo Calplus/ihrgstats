@@ -1,8 +1,5 @@
 package com.calplus.ihrgstats.utils;
 
-import java.util.Arrays;
-import java.util.List;
-
 /**
  * Application-wide constants to eliminate duplication across classes.
  */
@@ -12,12 +9,6 @@ public final class Constants {
     private Constants() {
         throw new UnsupportedOperationException("Constants class cannot be instantiated");
     }
-    
-    /**
-     * Standard round sequence used throughout the application.
-     * Includes regular rounds (1-6) and tournament rounds (T16, T8, T4, T2).
-     */
-    public static final List<String> ROUND_SEQUENCE = Arrays.asList("1", "2", "3", "4", "5", "6", "t16", "t8", "t4", "t2");
     
     /**
      * Base ELO rating for new players.

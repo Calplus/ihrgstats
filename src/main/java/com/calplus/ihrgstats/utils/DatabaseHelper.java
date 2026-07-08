@@ -52,13 +52,20 @@ public final class DatabaseHelper {
     
     /**
      * Gets a database connection for the given database path.
+     * Foreign key constraint enforcement is enabled on every connection
+     * (SQLite disables it by default, per-connection) so that ON DELETE
+     * CASCADE relationships across the schema actually fire at runtime.
      * @param dbPath Path to the database file
      * @return Active database connection
      * @throws SQLException if connection fails
      */
     public static Connection getConnection(String dbPath) throws SQLException {
         String jdbcUrl = createJdbcUrl(dbPath);
-        return DriverManager.getConnection(jdbcUrl);
+        Connection conn = DriverManager.getConnection(jdbcUrl);
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA foreign_keys = ON");
+        }
+        return conn;
     }
     
     /**

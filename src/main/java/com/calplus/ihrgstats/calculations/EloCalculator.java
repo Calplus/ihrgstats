@@ -3,9 +3,12 @@ package com.calplus.ihrgstats.calculations;
 import java.util.*;
 
 /**
- * ELO calculation system using Glicko-2 algorithm.
- * Supports both TrueElo (standard Glicko-2 with binary outcomes) and 
- * PerfElo (Glicko-2 + Sigmoid Point-Margin Transform for quality of win).
+ * ELO calculation system using the Batch Glicko-2 algorithm.
+ * Computes TrueElo (standard Glicko-2 with 1.0/0.5/0.0 win/draw/loss
+ * outcomes). PerfElo (sigmoid point-margin transform) has been removed
+ * entirely - it was already non-functional in the app (see README), and
+ * the "ExpElo" rating_type reserved for future experimentation currently
+ * has no calculation code behind it at all.
  */
 public class EloCalculator {
     // Glicko-2 Constants
@@ -14,32 +17,28 @@ public class EloCalculator {
     private static final double DEFAULT_VOLATILITY = 0.06;
     private static final double TAU = 1.2; // System constant - higher for faster convergence in short tournaments
     private static final double CONVERGENCE_TOLERANCE = 0.000001;
-    
-    // PerfElo margin transform constant (sigmoid parameter)
-    // K value controls sensitivity to point margins in Weiqi/Go
-    // Recommended range: 0.1 to 0.15
-    private static final double MARGIN_K = 0.12; // Middle value for balanced sensitivity
-    
+
     // Glicko-2 scale conversion constant
     // Original Glicko-2 works on scale where 1 rating point ≈ 173.7178 in traditional scale
     private static final double GLICKO2_SCALE = 173.7178;
     
     /**
-     * Represents a single game result with all necessary data
+     * Represents a single game result with all necessary data.
+     * player1/player2 hold permanent player_id business keys (never
+     * "WLKOVR" - walkover games are never passed to the calculator at all,
+     * since they don't affect rating).
      */
     public static class Game {
         public String player1;
         public String player2;
-        public double score; // 1.0 for player1 win, 0.0 for player1 loss, or continuous value for perfElo
-        public double pointMargin; // For perfElo calculation (player1_score - player2_score)
-        public String roundName; // e.g., "1", "2", "t16"
+        public double score; // 1.0 for player1 win, 0.5 for draw, 0.0 for player1 loss
+        public int roundOrder; // sequential round number within the year being processed
         
-        public Game(String player1, String player2, double score, double pointMargin, String roundName) {
+        public Game(String player1, String player2, double score, int roundOrder) {
             this.player1 = player1;
             this.player2 = player2;
             this.score = score;
-            this.pointMargin = pointMargin;
-            this.roundName = roundName;
+            this.roundOrder = roundOrder;
         }
     }
     
@@ -66,37 +65,12 @@ public class EloCalculator {
      * Result of Glicko-2 calculation for all players across all rounds
      */
     public static class Glicko2Result {
-        // Map: roundName -> playerName -> Glicko2Rating
-        public Map<String, Map<String, Glicko2Rating>> ratingsByRound;
+        // Map: roundOrder -> playerId -> Glicko2Rating
+        public Map<Integer, Map<String, Glicko2Rating>> ratingsByRound;
         
         public Glicko2Result() {
             this.ratingsByRound = new HashMap<>();
         }
-    }
-    
-    /**
-     * Converts point margin to continuous outcome score using sigmoid transform.
-     * 
-     * Formula: s = 1 / (1 + exp(-K * m))
-     * 
-     * Where:
-     * - m = point margin (your points - opponent points)
-     * - K = sensitivity parameter (0.12 for balanced response)
-     * 
-     * Score mapping (approximate with K=0.12):
-     * - margin = 0:     s = 0.50 (even game)
-     * - margin = +10:   s ≈ 0.77 (modest advantage)
-     * - margin = +20:   s ≈ 0.92 (strong advantage)
-     * - margin = +30:   s ≈ 0.98 (dominant win)
-     * - margin = -10:   s ≈ 0.23 (modest loss)
-     * - margin = -20:   s ≈ 0.08 (strong loss)
-     * - margin = -30:   s ≈ 0.02 (dominant loss)
-     * 
-     * @param pointMargin Margin of victory (positive for win, negative for loss)
-     * @return Continuous outcome value between 0 and 1
-     */
-    public static double pointMarginToOutcome(double pointMargin) {
-        return 1.0 / (1.0 + Math.exp(-MARGIN_K * pointMargin));
     }
     
     /**
@@ -313,68 +287,61 @@ public class EloCalculator {
      * Calculates TrueElo using Batch Glicko-2 with binary win/loss/draw outcomes
      * Implements proper Batch Glicko-2 algorithm with 3 iterations per round
      * 
-     * @param allGames List of all games across all rounds
-     * @param playerNames Set of all player names
-     * @param initialRatings Map of player -> initial Glicko2Rating
-     * @param roundSequence Ordered list of round names
+     * @param allGames List of all games across all rounds being (re)processed this year
+     * @param playerIds Set of all permanent player_ids involved
+     * @param initialRatings Map of player_id -> initial Glicko2Rating (seeded from
+     *                       the player's most recent prior-year rating, or default if new)
+     * @param roundOrderSequence Ordered list of round_order values for the year being processed
      * @return Glicko2Result containing ratings for all players at each round
      */
     public static Glicko2Result calculateGlicko2TrueElo(
             List<Game> allGames,
-            Set<String> playerNames,
+            Set<String> playerIds,
             Map<String, Glicko2Rating> initialRatings,
-            List<String> roundSequence) {
+            List<Integer> roundOrderSequence) {
         
         Glicko2Result result = new Glicko2Result();
         
-        // Initialize current ratings (ensure lowercase keys for consistency)
+        // Initialize current ratings
         Map<String, Glicko2Rating> currentRatings = new HashMap<>();
-        for (String player : playerNames) {
-            String playerKey = player.toLowerCase();
-            currentRatings.put(playerKey, initialRatings.getOrDefault(playerKey, new Glicko2Rating()));
+        for (String playerId : playerIds) {
+            currentRatings.put(playerId, initialRatings.getOrDefault(playerId, new Glicko2Rating()));
         }
         
         // Group games by round
-        Map<String, List<Game>> gamesByRound = new HashMap<>();
+        Map<Integer, List<Game>> gamesByRound = new HashMap<>();
         for (Game game : allGames) {
-            gamesByRound.computeIfAbsent(game.roundName, k -> new ArrayList<>()).add(game);
+            gamesByRound.computeIfAbsent(game.roundOrder, k -> new ArrayList<>()).add(game);
         }
         
         // Process each round sequentially
-        for (String round : roundSequence) {
+        for (int round : roundOrderSequence) {
             List<Game> roundGames = gamesByRound.getOrDefault(round, new ArrayList<>());
-            
-            System.out.println("DEBUG EloCalculator: Processing round " + round + " with Batch Glicko-2");
-            System.out.println("  - Games in this round: " + roundGames.size());
             
             // Build opponent data for each player in this round
             Map<String, List<OpponentData>> playerOpponents = new HashMap<>();
             
             for (Game game : roundGames) {
-                String player1Key = game.player1.toLowerCase();
-                String player2Key = game.player2.toLowerCase();
+                String player1Id = game.player1;
+                String player2Id = game.player2;
                 
-                Glicko2Rating opp2Rating = currentRatings.get(player2Key);
+                Glicko2Rating opp2Rating = currentRatings.get(player2Id);
                 if (opp2Rating != null) {
-                    playerOpponents.computeIfAbsent(player1Key, k -> new ArrayList<>())
+                    playerOpponents.computeIfAbsent(player1Id, k -> new ArrayList<>())
                         .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
                 }
                 
-                Glicko2Rating opp1Rating = currentRatings.get(player1Key);
+                Glicko2Rating opp1Rating = currentRatings.get(player1Id);
                 if (opp1Rating != null) {
-                    playerOpponents.computeIfAbsent(player2Key, k -> new ArrayList<>())
+                    playerOpponents.computeIfAbsent(player2Id, k -> new ArrayList<>())
                         .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
                 }
             }
-            
-            System.out.println("  - Players with opponents: " + playerOpponents.size());
             
             // Perform 3 iterations of Batch Glicko-2 for this round
             Map<String, Glicko2Rating> iterationRatings = new HashMap<>(currentRatings);
             
             for (int iteration = 1; iteration <= 3; iteration++) {
-                System.out.println("  - Iteration " + iteration + "/3");
-                
                 // Reset RD to 350 before first iteration
                 if (iteration == 1) {
                     Map<String, Glicko2Rating> resetRatings = new HashMap<>();
@@ -388,28 +355,27 @@ public class EloCalculator {
                 // Update opponent data with current iteration ratings
                 Map<String, List<OpponentData>> iterationOpponents = new HashMap<>();
                 for (Game game : roundGames) {
-                    String player1Key = game.player1.toLowerCase();
-                    String player2Key = game.player2.toLowerCase();
+                    String player1Id = game.player1;
+                    String player2Id = game.player2;
                     
-                    Glicko2Rating opp2Rating = iterationRatings.get(player2Key);
+                    Glicko2Rating opp2Rating = iterationRatings.get(player2Id);
                     if (opp2Rating != null) {
-                        iterationOpponents.computeIfAbsent(player1Key, k -> new ArrayList<>())
+                        iterationOpponents.computeIfAbsent(player1Id, k -> new ArrayList<>())
                             .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
                     }
                     
-                    Glicko2Rating opp1Rating = iterationRatings.get(player1Key);
+                    Glicko2Rating opp1Rating = iterationRatings.get(player1Id);
                     if (opp1Rating != null) {
-                        iterationOpponents.computeIfAbsent(player2Key, k -> new ArrayList<>())
+                        iterationOpponents.computeIfAbsent(player2Id, k -> new ArrayList<>())
                             .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
                     }
                 }
                 
                 // Update all player ratings for this iteration
                 Map<String, Glicko2Rating> newRatings = new HashMap<>();
-                for (String player : playerNames) {
-                    String playerKey = player.toLowerCase();
-                    Glicko2Rating currentRating = iterationRatings.get(playerKey);
-                    List<OpponentData> opponents = iterationOpponents.getOrDefault(playerKey, new ArrayList<>());
+                for (String playerId : playerIds) {
+                    Glicko2Rating currentRating = iterationRatings.get(playerId);
+                    List<OpponentData> opponents = iterationOpponents.getOrDefault(playerId, new ArrayList<>());
                     
                     Glicko2Rating newRating;
                     if (opponents.isEmpty()) {
@@ -419,13 +385,11 @@ public class EloCalculator {
                         // Normal rating update with Batch Glicko-2
                         newRating = updateGlicko2Rating(currentRating, opponents);
                     }
-                    newRatings.put(playerKey, newRating);
+                    newRatings.put(playerId, newRating);
                 }
                 
                 iterationRatings = newRatings;
             }
-            
-            System.out.println("  - Batch Glicko-2 complete for round " + round);
             
             // Store final ratings for this round
             result.ratingsByRound.put(round, new HashMap<>(iterationRatings));
@@ -435,84 +399,5 @@ public class EloCalculator {
         }
         
         return result;
-    }
-    
-    /**
-     * Calculates PerfElo using Batch Glicko-2 with sigmoid-transformed point margins
-     * Uses continuous outcome values based on quality of win
-     * Implements same Batch Glicko-2 algorithm as TrueElo but with sigmoid outcomes
-     * 
-     * @param allGames List of all games with point margins
-     * @param playerNames Set of all player names
-     * @param initialRatings Map of player -> initial Glicko2Rating
-     * @param roundSequence Ordered list of round names
-     * @return Glicko2Result containing ratings for all players at each round
-     */
-    public static Glicko2Result calculateGlicko2PerfElo(
-            List<Game> allGames,
-            Set<String> playerNames,
-            Map<String, Glicko2Rating> initialRatings,
-            List<String> roundSequence) {
-        
-        // Transform games to use sigmoid outcomes
-        List<Game> transformedGames = new ArrayList<>();
-        for (Game game : allGames) {
-            double sigmoidOutcome = pointMarginToOutcome(game.pointMargin);
-            transformedGames.add(new Game(game.player1, game.player2, sigmoidOutcome, game.pointMargin, game.roundName));
-        }
-        
-        // Use same Batch Glicko-2 calculation as TrueElo but with transformed outcomes
-        return calculateGlicko2TrueElo(transformedGames, playerNames, initialRatings, roundSequence);
-    }
-    
-    /**
-     * Converts round name to time step number (for compatibility)
-     */
-    public static int roundNameToTimeStep(String roundName) {
-        roundName = roundName.toLowerCase().replace("round_", "").replace(".csv", "");
-        
-        switch (roundName) {
-            case "1": return 1;
-            case "2": return 2;
-            case "3": return 3;
-            case "4": return 4;
-            case "5": return 5;
-            case "6": return 6;
-            case "t16": return 7;
-            case "t8": return 8;
-            case "t4": return 9;
-            case "t2": return 10;
-            default: return 0;
-        }
-    }
-    
-    /**
-     * Converts time step number back to round name (for compatibility)
-     */
-    public static String timeStepToRoundName(int timeStep) {
-        switch (timeStep) {
-            case 1: return "1";
-            case 2: return "2";
-            case 3: return "3";
-            case 4: return "4";
-            case 5: return "5";
-            case 6: return "6";
-            case 7: return "t16";
-            case 8: return "t8";
-            case 9: return "t4";
-            case 10: return "t2";
-            default: return "unknown";
-        }
-    }
-    
-    /**
-     * Gets the previous round column name for database queries
-     */
-    public static String getPreviousRound(String currentRound) {
-        int timeStep = roundNameToTimeStep(currentRound);
-        if (timeStep <= 1) return null;
-        
-        String prevRound = timeStepToRoundName(timeStep - 1);
-        return prevRound;
     }
 }

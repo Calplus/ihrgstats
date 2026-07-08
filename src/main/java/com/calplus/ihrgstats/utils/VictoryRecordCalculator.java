@@ -41,6 +41,21 @@ public class VictoryRecordCalculator {
     }
     
     /**
+     * Converts the new schema's REAL outcome convention (1.0=win, 0.5=draw,
+     * 0.0=loss, stored in match_participants.outcome) to the legacy Integer
+     * convention (1/0/-1) expected by this class and OutcomeIconRenderer.
+     */
+    public static Integer toLegacyOutcome(Double outcome) {
+        if (outcome == null) {
+            return null;
+        }
+        if (outcome == 1.0) return 1;
+        if (outcome == 0.5) return 0;
+        if (outcome == 0.0) return -1;
+        return null;
+    }
+
+    /**
      * Formats score value - shows as integer if .0, otherwise 1 decimal place
      */
     public static String formatScore(double score) {
@@ -68,7 +83,7 @@ public class VictoryRecordCalculator {
     /**
      * Formats a victory record line for a hall
      * Format: "round hallEmoji hallName score oppHall oppEmoji"
-     * @param round Round name
+     * @param round Round display label (from rounds.round_label)
      * @param hallName Hall name
      * @param hallScore Hall's total score for that round
      * @param opponentHallName Opponent hall name
@@ -80,7 +95,7 @@ public class VictoryRecordCalculator {
                                                  String opponentHallName, double opponentScore,
                                                  Integer hallOutcome) {
         if (opponentHallName == null) {
-            return String.format("%s -NA-", getRoundDisplayName(round));
+            return String.format("%s -NA-", round);
         }
         
         // Apply hall naming scheme
@@ -97,7 +112,7 @@ public class VictoryRecordCalculator {
         if ("WALKOVER".equalsIgnoreCase(opponentHallName)) {
             String scoreStr = formatScore(hallScore) + "-" + formatScore(opponentScore);
             return String.format("%s %s %s %s %s %s",
-                getRoundDisplayName(round),
+                round,
                 getOutcomeEmoji(1),  // Hall wins
                 formattedHall,
                 scoreStr,
@@ -109,22 +124,12 @@ public class VictoryRecordCalculator {
         String scoreStr = formatScore(hallScore) + "-" + formatScore(opponentScore);
         
         return String.format("%s %s %s %s %s %s",
-            getRoundDisplayName(round),
+            round,
             hallEmoji,
             formattedHall,
             scoreStr,
             formattedOppHall,
             oppEmoji);
-    }
-    
-    /**
-     * Gets display name for round (T16 instead of t16)
-     */
-    public static String getRoundDisplayName(String round) {
-        if (round.startsWith("t")) {
-            return "T" + round.substring(1);
-        }
-        return round;
     }
     
     /**
@@ -143,3 +148,4 @@ public class VictoryRecordCalculator {
         return String.format("%.2f%%", winRate);
     }
 }
+

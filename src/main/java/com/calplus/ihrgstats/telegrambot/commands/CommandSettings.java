@@ -1,11 +1,12 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
+import com.calplus.ihrgstats.databasemanager.A3_Halls;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
-import java.sql.*;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,7 +18,6 @@ public class CommandSettings {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
     private final String adminUserId;
-    private final String dbPath;
     private static final Map<String, SettingsSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     /**
@@ -25,7 +25,7 @@ public class CommandSettings {
      */
     private static class SettingsSelectionState extends SelectionState {
         boolean awaitingManualInput = false;
-        String settingKey = null; // The setting key being modified (e.g., "settings.homeHall" or "settings.maxSeeds")
+        String settingKey = null; // The setting key being modified (e.g., "settings.homeHall" or "settings.currentYear")
     }
 
     public CommandSettings() {
@@ -36,7 +36,6 @@ public class CommandSettings {
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
         this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
-        this.dbPath = DatabaseHelper.getDefaultDatabasePathString();
     }
 
     /**
@@ -113,15 +112,15 @@ public class CommandSettings {
                 continue;
             }
             
-            // Special handling for maxSeeds (integer)
-            if (key.equals("settings.maxSeeds")) {
-                String currentSeeds = value.isEmpty() ? "Not set" : value;
-                message.append(String.format("🎯 **Max Seeds: %s**\n", currentSeeds));
+            // Special handling for currentYear (integer)
+            if (key.equals("settings.currentYear")) {
+                String currentYearValue = value.isEmpty() ? "Not set" : value;
+                message.append(String.format("📅 **Current Year: %s**\n", currentYearValue));
                 message.append(String.format("   %s\n\n", description));
                 
-                // Create button for maxSeeds input
-                buttonLabels.add("🎯 Change Max Seeds");
-                buttonCallbacks.add("setting_maxSeeds_select");
+                // Create button for currentYear input
+                buttonLabels.add("📅 Change Current Year");
+                buttonCallbacks.add("setting_currentYear_select");
                 continue;
             }
             
@@ -247,18 +246,12 @@ public class CommandSettings {
         telegramLog.logInfo(String.format("Admin %s requested home hall selection", userInfo));
 
         try {
-            // Query database for all distinct halls
+            // Query all halls (excluding the reserved "unknown" fallback hall)
             List<String> halls = new ArrayList<>();
-            try (Connection conn = DatabaseHelper.getConnection(dbPath);
-                 Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT DISTINCT hall FROM A1_PlayerStats WHERE hall IS NOT NULL AND hall != '' ORDER BY hall")) {
-                
-                while (rs.next()) {
-                    String hall = rs.getString("hall");
-                    if (hall != null && !hall.trim().isEmpty()) {
-                        halls.add(hall);
-                    }
-                }
+            A3_Halls hallsManager = new A3_Halls();
+            for (A3_Halls.Hall hall : hallsManager.getAllHalls()) {
+                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
+                halls.add(hall.hallName);
             }
 
             if (halls.isEmpty()) {
@@ -323,7 +316,7 @@ public class CommandSettings {
                                buttonCallbacks.toArray(new String[0]), 
                                4)); // 4 columns per row
 
-        } catch (Exception e) {
+        } catch (SQLException e) {
             String errorMsg = "❌ Error: Failed to load halls from database: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
@@ -459,43 +452,39 @@ public class CommandSettings {
             }
         }
         
-        // Handle maxSeeds setting
-        if ("settings.maxSeeds".equals(settingKey)) {
+        // Handle currentYear setting
+        if ("settings.currentYear".equals(settingKey)) {
             String inputValue = text.trim();
             
-            // Validate positive number (supports both integers and decimals)
             try {
-                double maxSeedsValue = Double.parseDouble(inputValue);
-                if (maxSeedsValue <= 0) {
-                    return "❌ Invalid input: Max seeds must be a positive number.";
+                int yearValue = Integer.parseInt(inputValue);
+                if (yearValue < 2000 || yearValue > 2100) {
+                    return "❌ Invalid input: Current year must be between 2000 and 2100.";
                 }
                 
-                // Format value, removing unnecessary decimals for whole numbers
-                String formattedValue = maxSeedsValue == (long) maxSeedsValue ? 
-                    String.format("%d", (long) maxSeedsValue) : 
-                    String.valueOf(maxSeedsValue);
+                String formattedValue = String.valueOf(yearValue);
                 
-                discordLog.logInfo(String.format("Admin %s setting maxSeeds to: %s", userId, formattedValue));
-                telegramLog.logInfo(String.format("Admin %s setting maxSeeds to: %s", userId, formattedValue));
+                discordLog.logInfo(String.format("Admin %s setting currentYear to: %s", userId, formattedValue));
+                telegramLog.logInfo(String.format("Admin %s setting currentYear to: %s", userId, formattedValue));
                 
                 // Update property
-                boolean success = PropertyManager.updateProperty("settings.maxSeeds", formattedValue);
+                boolean success = PropertyManager.updateProperty("settings.currentYear", formattedValue);
                 
                 if (success) {
-                    String successMsg = String.format("🎯 Successfully set maxSeeds to **%s**\n\nUse /settings to see updated configuration.", formattedValue);
+                    String successMsg = String.format("📅 Successfully set current year to **%s**\n\nUse /settings to see updated configuration.", formattedValue);
                     
-                    discordLog.logSuccess(String.format("MaxSeeds set to %s", formattedValue));
-                    telegramLog.logSuccess(String.format("MaxSeeds set to %s", formattedValue));
+                    discordLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
+                    telegramLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
                     
                     return successMsg;
                 } else {
-                    String errorMsg = "❌ Error: Failed to update maxSeeds setting";
+                    String errorMsg = "❌ Error: Failed to update currentYear setting";
                     discordLog.logError(errorMsg);
                     telegramLog.logError(errorMsg);
                     return errorMsg;
                 }
             } catch (NumberFormatException e) {
-                return "❌ Invalid input: Max seeds must be a valid positive number.";
+                return "❌ Invalid input: Current year must be a valid whole number (e.g., 2025).";
             }
         }
         
@@ -527,56 +516,57 @@ public class CommandSettings {
     }
 
     /**
-     * Handles the max seeds selection request (direct to manual input)
-     * @param userId The user ID who requested maxSeeds change
+     * Handles the current year selection request (direct to manual input)
+     * @param userId The user ID who requested currentYear change
      * @return Response prompting for manual input
      */
-    public SettingsResponse handleMaxSeedsSelection(String userId) {
+    public SettingsResponse handleCurrentYearSelection(String userId) {
         String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to change maxSeeds", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to change maxSeeds", userInfo));
+            discordLog.logWarning(String.format("Non-admin %s attempted to change currentYear", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted to change currentYear", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested maxSeeds change", userInfo));
-        telegramLog.logInfo(String.format("Admin %s requested maxSeeds change", userInfo));
+        discordLog.logInfo(String.format("Admin %s requested currentYear change", userInfo));
+        telegramLog.logInfo(String.format("Admin %s requested currentYear change", userInfo));
 
         // Set manual input mode
         SettingsSelectionState state = new SettingsSelectionState();
         state.awaitingManualInput = true;
-        state.settingKey = "settings.maxSeeds";
+        state.settingKey = "settings.currentYear";
         userSelectionStates.put(userId, state);
 
-        String currentMaxSeeds = PropertyResolver.getProperty("settings.maxSeeds", "361");
-        String message = String.format("Please enter the new maxSeeds value (positive number, can be a decimal).\n\nCurrent value: **%s**", currentMaxSeeds);
+        String currentValue = PropertyResolver.getProperty("settings.currentYear", "");
+        String currentValueDisplay = currentValue.isEmpty() ? "Not set" : currentValue;
+        String message = String.format("Please enter the tournament year currently being played (e.g., 2025).\n\nCurrent value: **%s**", currentValueDisplay);
 
         return new SettingsResponse(message, null);
     }
 
     /**
-     * Handles the maxSeeds callback
+     * Handles the currentYear callback
      * This is only for cancel operation as selection goes directly to manual input
      */
-    public String handleMaxSeedsCallback(String callbackData, String userId) {
+    public String handleCurrentYearCallback(String callbackData, String userId) {
         String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted unauthorized maxSeeds callback", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted unauthorized maxSeeds callback", userInfo));
+            discordLog.logWarning(String.format("Non-admin %s attempted unauthorized currentYear callback", userInfo));
+            telegramLog.logWarning(String.format("Non-admin %s attempted unauthorized currentYear callback", userInfo));
             return errorMsg;
         }
 
         // Only cancel is expected here
         if (callbackData.equals("settings_cancel")) {
             userSelectionStates.remove(userId);
-            return "🔄 Cancelled maxSeeds change.";
+            return "🔄 Cancelled currentYear change.";
         }
 
-        return "❌ Unknown callback for maxSeeds";
+        return "❌ Unknown callback for currentYear";
     }
 
     /**
