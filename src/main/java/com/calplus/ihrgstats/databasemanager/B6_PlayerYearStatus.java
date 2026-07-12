@@ -97,35 +97,11 @@ public class B6_PlayerYearStatus {
         }
     }
 
-    public void setActive(String playerId, int year, boolean active, String nowTimestamp) throws SQLException {
-        String sql = "UPDATE player_year_status SET active = ?, updated_dttm = ? WHERE player_id = ? AND year = ?";
-        try (Connection conn = DatabaseHelper.getDefaultConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, active ? 1 : 0);
-            ps.setString(2, nowTimestamp);
-            ps.setString(3, playerId);
-            ps.setInt(4, year);
-            ps.executeUpdate();
-        }
-    }
-
     public void setCapped(String playerId, int year, boolean capped, String nowTimestamp) throws SQLException {
         String sql = "UPDATE player_year_status SET capped = ?, updated_dttm = ? WHERE player_id = ? AND year = ?";
         try (Connection conn = DatabaseHelper.getDefaultConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, capped ? 1 : 0);
-            ps.setString(2, nowTimestamp);
-            ps.setString(3, playerId);
-            ps.setInt(4, year);
-            ps.executeUpdate();
-        }
-    }
-
-    public void updateHall(String playerId, int year, int hallId, String nowTimestamp) throws SQLException {
-        String sql = "UPDATE player_year_status SET hall_id = ?, updated_dttm = ? WHERE player_id = ? AND year = ?";
-        try (Connection conn = DatabaseHelper.getDefaultConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, hallId);
             ps.setString(2, nowTimestamp);
             ps.setString(3, playerId);
             ps.setInt(4, year);

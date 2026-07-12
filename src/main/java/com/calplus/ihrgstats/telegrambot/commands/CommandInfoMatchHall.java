@@ -150,6 +150,8 @@ public class CommandInfoMatchHall {
         Integer oppElo;
         Double score;
         Double oppScore;
+        boolean selfTimeout;
+        boolean oppTimeout;
     }
 
     private InfoResponse generateMatchHallInfo(int hallId, String hallName, int year, int roundOrder) throws Exception {
@@ -211,10 +213,12 @@ public class CommandInfoMatchHall {
                 player.seat = me.hallSeatNumber;
                 player.outcome = VictoryRecordCalculator.toLegacyOutcome(me.outcome);
                 player.score = me.score;
+                player.selfTimeout = C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(me.participationType);
 
                 C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(me.matchId, status.playerId);
                 if (opp != null) {
                     player.oppScore = opp.score;
+                    player.oppTimeout = C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(opp.participationType);
                     if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
                         player.oppName = "WALKOVER";
                     } else {
@@ -345,7 +349,7 @@ public class CommandInfoMatchHall {
                 oppHallFormatted = player.oppHall != null ? TableFormatter.shortenHallName(player.oppHall) : "??";
             }
 
-            String score = formatScorePair(player.score, player.oppScore);
+            String score = formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
 
             String line = String.format("%-3d %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                     player.seat != null ? player.seat : 0, emoji, playerHallFormatted, playerEloStr, player.name,
@@ -417,7 +421,7 @@ public class CommandInfoMatchHall {
                 oppEloStr = "-";
             }
 
-            String score = formatScorePair(player.score, player.oppScore);
+            String score = formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
 
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = player.seat != null ? String.valueOf(player.seat) : "?";
@@ -448,9 +452,9 @@ public class CommandInfoMatchHall {
     }
 
     /** Formats "myScore-oppScore" - both sides' raw scores are stored directly now, no formula derivation needed. */
-    private String formatScorePair(Double myScore, Double oppScore) {
-        String myStr = myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?";
-        String oppStr = oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0";
+    private String formatScorePair(Double myScore, Double oppScore, boolean selfTimeout, boolean oppTimeout) {
+        String myStr = selfTimeout ? "TIMEOUT" : (myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?");
+        String oppStr = oppTimeout ? "TIMEOUT" : (oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0");
         return myStr + "-" + oppStr;
     }
 }

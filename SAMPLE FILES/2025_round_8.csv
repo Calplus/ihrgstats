@@ -1,0 +1,21 @@
+name1,hall1,score1,name2,hall2,score2
+Sansa Stark,3,220.25,Teddy Roosevelt,HallA,148.25
+Daenerys Targaryen,3,235.25,Cleopatra,HallA,133.25
+Tyrion Lannister,3,301,Gandhi,HallA,67.5
+Arya Stark,3,53.25,Qin Shi Huang,HallA,315.25
+Jaime Lannister,3,,WALKOVER,HallA,
+Severus Snape,4,326.25,Dustin Henderson,5,42.25
+Ron Weasley,4,328,Eleven,5,40.5
+Hermione Granger,4,49.75,Lucas Sinclair,5,318.75
+Lord Voldemort,4,272.5,Mike Wheeler,5,96
+Albus Dumbledore,4,240.5,Will Byers,5,128
+Mike Ehrmantraut,1,348,Jake the Dog,2,20.5
+Walter White,1,12.75,Ice King,2,355.75
+Gus Fring,1,184.5,Marceline,2,184
+Hank Schrader,1,352.5,Finn the Human,2,16
+Kim Wexler,1,148,Princess Bubblegum,2,220.5
+Alexander Alekhine,HallB,,WALKOVER,,
+Paul Morphy,HallB,,WALKOVER,,
+Jose Raul Capablanca,HallB,,WALKOVER,,
+Bobby Fischer,HallB,,WALKOVER,,
+Emanuel Lasker,HallB,,WALKOVER,,

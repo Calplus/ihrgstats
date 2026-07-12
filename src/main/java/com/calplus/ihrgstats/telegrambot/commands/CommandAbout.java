@@ -26,7 +26,7 @@ import java.time.format.DateTimeFormatter;
  */
 public class CommandAbout {
     private final LogHelper logHelper;
-    private final String version = "1.1.5";
+    private final String version = "Beta 2 Update 11";
     private final String author = "Calplus";
     private final String lastUpdated = "05 Jan 2026";
     private final String botToken;

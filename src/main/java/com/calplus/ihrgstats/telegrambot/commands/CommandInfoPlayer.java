@@ -197,6 +197,8 @@ public class CommandInfoPlayer {
         Map<Integer, Integer> oppEloByRound = new TreeMap<>();
         Map<Integer, Double> scoreByRound = new TreeMap<>();
         Map<Integer, Double> oppScoreByRound = new TreeMap<>();
+        Map<Integer, Boolean> selfTimeoutByRound = new TreeMap<>();
+        Map<Integer, Boolean> oppTimeoutByRound = new TreeMap<>();
         Integer lastRoundOrder;
     }
 
@@ -233,10 +235,12 @@ public class CommandInfoPlayer {
                 if (me.hallSeatNumber != null) player.seatByRound.put(round.roundOrder, me.hallSeatNumber);
                 player.outcomeByRound.put(round.roundOrder, VictoryRecordCalculator.toLegacyOutcome(me.outcome));
                 player.scoreByRound.put(round.roundOrder, me.score);
+                player.selfTimeoutByRound.put(round.roundOrder, C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(me.participationType));
 
                 C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(me.matchId, playerId);
                 if (opp != null) {
                     player.oppScoreByRound.put(round.roundOrder, opp.score);
+                    player.oppTimeoutByRound.put(round.roundOrder, C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(opp.participationType));
                     if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
                         player.oppNameByRound.put(round.roundOrder, "WALKOVER");
                     } else {
@@ -340,7 +344,7 @@ public class CommandInfoPlayer {
                 oppHallFormatted = "??";
             }
 
-            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order));
+            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
 
             String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                     roundName, emoji, playerHallFormatted, playerEloStr, player.name, score,
@@ -423,7 +427,7 @@ public class CommandInfoPlayer {
                 oppEloStr = "-";
             }
 
-            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order));
+            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
 
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = roundName;
@@ -453,9 +457,9 @@ public class CommandInfoPlayer {
     }
 
     /** Formats "myScore-oppScore" - both sides' raw scores are stored directly now, no formula derivation needed. */
-    private String formatScorePair(Double myScore, Double oppScore) {
-        String myStr = myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?";
-        String oppStr = oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0";
+    private String formatScorePair(Double myScore, Double oppScore, boolean selfTimeout, boolean oppTimeout) {
+        String myStr = selfTimeout ? "TIMEOUT" : (myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?");
+        String oppStr = oppTimeout ? "TIMEOUT" : (oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0");
         return myStr + "-" + oppStr;
     }
 }

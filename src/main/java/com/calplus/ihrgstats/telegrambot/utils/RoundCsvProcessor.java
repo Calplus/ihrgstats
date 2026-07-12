@@ -85,7 +85,7 @@ public class RoundCsvProcessor {
         return new ParsedFilename(null, -1, false);
     }
 
-    private static class GameRow {
+    static class GameRow {
         String name1;
         String hall1; // may be blank for a WALKOVER side
         String score1; // may be blank for a WALKOVER row
@@ -95,6 +95,10 @@ public class RoundCsvProcessor {
 
         boolean isWalkover() {
             return name1.equalsIgnoreCase("WALKOVER") || name2.equalsIgnoreCase("WALKOVER");
+        }
+
+        boolean isTimeout() {
+            return score1.equalsIgnoreCase("TIMEOUT") || score2.equalsIgnoreCase("TIMEOUT");
         }
     }
 
@@ -223,6 +227,8 @@ public class RoundCsvProcessor {
             for (GameRow game : games) {
                 boolean p1Walkover = game.name1.equalsIgnoreCase("WALKOVER");
                 boolean p2Walkover = game.name2.equalsIgnoreCase("WALKOVER");
+                boolean p1Timeout = !p1Walkover && !p2Walkover && game.score1.equalsIgnoreCase("TIMEOUT");
+                boolean p2Timeout = !p1Walkover && !p2Walkover && game.score2.equalsIgnoreCase("TIMEOUT");
                 String p1Id = player1Ids.get(game);
                 String p2Id = player2Ids.get(game);
                 int p1HallId = player1HallIds.get(game);
@@ -245,6 +251,22 @@ public class RoundCsvProcessor {
                     } else {
                         score1 = defaultScore;
                         score2 = 0.0;
+                        outcome1 = 1.0;
+                        outcome2 = 0.0;
+                    }
+                } else if (p1Timeout || p2Timeout) {
+                    // TIMEOUT: unlike WALKOVER, both players actually played -
+                    // the timed-out side simply has no final score to report.
+                    // The winner's cell may still carry a real recorded score
+                    // (kept as-is); the timed-out side's score is always 0.
+                    if (p1Timeout) {
+                        score1 = 0.0;
+                        score2 = game.score2.trim().isEmpty() ? 0.0 : Double.parseDouble(game.score2.trim());
+                        outcome1 = 0.0;
+                        outcome2 = 1.0;
+                    } else {
+                        score2 = 0.0;
+                        score1 = game.score1.trim().isEmpty() ? 0.0 : Double.parseDouble(game.score1.trim());
                         outcome1 = 1.0;
                         outcome2 = 0.0;
                     }
@@ -275,16 +297,21 @@ public class RoundCsvProcessor {
                 }
 
                 participants.insertParticipant(matchId, p1Id, p1HallId, seat1,
-                        p1Walkover ? C9_MatchParticipants.PARTICIPATION_WALKOVER : C9_MatchParticipants.PARTICIPATION_STANDARD,
+                        p1Walkover ? C9_MatchParticipants.PARTICIPATION_WALKOVER
+                                : p1Timeout ? C9_MatchParticipants.PARTICIPATION_TIMEOUT
+                                : C9_MatchParticipants.PARTICIPATION_STANDARD,
                         score1, outcome1, nowTimestamp);
                 participants.insertParticipant(matchId, p2Id, p2HallId, seat2,
-                        p2Walkover ? C9_MatchParticipants.PARTICIPATION_WALKOVER : C9_MatchParticipants.PARTICIPATION_STANDARD,
+                        p2Walkover ? C9_MatchParticipants.PARTICIPATION_WALKOVER
+                                : p2Timeout ? C9_MatchParticipants.PARTICIPATION_TIMEOUT
+                                : C9_MatchParticipants.PARTICIPATION_STANDARD,
                         score2, outcome2, nowTimestamp);
 
                 if (!p1Walkover) allPlayerIdsThisRound.add(p1Id);
                 if (!p2Walkover) allPlayerIdsThisRound.add(p2Id);
 
-                // Walkover games do not affect ELO, matching legacy.
+                // Walkover games do not affect ELO, matching legacy. TIMEOUT
+                // games are real, rated results and are NOT excluded.
                 if (!p1Walkover && !p2Walkover) {
                     eloGames.add(new EloCalculator.Game(p1Id, p2Id, outcome1, roundOrder));
                 }
@@ -449,9 +476,14 @@ public class RoundCsvProcessor {
      * standard games. For a WALKOVER row (name1 or name2 == "WALKOVER",
      * exactly one side), hall/score for that side are optional and, when
      * left blank, the app computes a default walkover score automatically -
-     * matching legacy's convention exactly (see SAMPLE FILES).
+     * matching legacy's convention exactly (see SAMPLE FILES). For a TIMEOUT
+     * row (both players real, but one side's score cell is literally
+     * "TIMEOUT"), the other side's cell holds their real score/margin as
+     * normal (or is left blank for a 0-0 fallback) - unlike WALKOVER, a
+     * TIMEOUT match is a real, rated result; only the timed-out side is
+     * flagged, never the winner.
      */
-    private List<GameRow> parseAndValidateCSV(String csvFilePath) throws Exception {
+    List<GameRow> parseAndValidateCSV(String csvFilePath) throws Exception {
         List<GameRow> games = new ArrayList<>();
 
         try (BufferedReader reader = new BufferedReader(new FileReader(csvFilePath))) {
@@ -509,6 +541,23 @@ public class RoundCsvProcessor {
                 } else if (p2Walkover) {
                     if (game.hall1.isEmpty()) {
                         throw new Exception(String.format("Invalid CSV format at line %d: Non-WALKOVER player must have a hall", lineNumber));
+                    }
+                } else if (game.isTimeout()) {
+                    if (game.hall1.isEmpty() || game.hall2.isEmpty()) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: Hall names cannot be empty for regular games", lineNumber));
+                    }
+                    boolean s1Timeout = game.score1.equalsIgnoreCase("TIMEOUT");
+                    boolean s2Timeout = game.score2.equalsIgnoreCase("TIMEOUT");
+                    if (s1Timeout && s2Timeout) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: Both players cannot be TIMEOUT", lineNumber));
+                    }
+                    String winnerScore = s1Timeout ? game.score2 : game.score1;
+                    if (!winnerScore.isEmpty()) {
+                        try {
+                            Double.parseDouble(winnerScore);
+                        } catch (NumberFormatException e) {
+                            throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be numeric or TIMEOUT", lineNumber));
+                        }
                     }
                 } else {
                     if (game.hall1.isEmpty() || game.hall2.isEmpty()) {

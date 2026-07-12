@@ -81,58 +81,6 @@ public class VictoryRecordCalculator {
     }
     
     /**
-     * Formats a victory record line for a hall
-     * Format: "round hallEmoji hallName score oppHall oppEmoji"
-     * @param round Round display label (from rounds.round_label)
-     * @param hallName Hall name
-     * @param hallScore Hall's total score for that round
-     * @param opponentHallName Opponent hall name
-     * @param opponentScore Opponent's total score
-     * @param hallOutcome Overall outcome for the hall (based on score comparison)
-     * @return Formatted string: "round hallEmoji hallName score oppHall oppEmoji"
-     */
-    public static String formatHallVictoryRecord(String round, String hallName, double hallScore,
-                                                 String opponentHallName, double opponentScore,
-                                                 Integer hallOutcome) {
-        if (opponentHallName == null) {
-            return String.format("%s -NA-", round);
-        }
-        
-        // Apply hall naming scheme
-        String formattedHall = formatHallName(hallName);
-        String formattedOppHall = formatHallName(opponentHallName);
-        
-        // Get emojis for both sides
-        String hallEmoji = getOutcomeEmoji(hallOutcome);
-        // Opponent emoji is opposite: if hall wins (1), opponent loses (-1); if draw (0), both draw
-        Integer oppOutcome = hallOutcome == null ? null : (hallOutcome == 0 ? 0 : -hallOutcome);
-        String oppEmoji = getOutcomeEmoji(oppOutcome);
-        
-        // Handle WALKOVER - WALKOVER is a loss for the WALKOVER side
-        if ("WALKOVER".equalsIgnoreCase(opponentHallName)) {
-            String scoreStr = formatScore(hallScore) + "-" + formatScore(opponentScore);
-            return String.format("%s %s %s %s %s %s",
-                round,
-                getOutcomeEmoji(1),  // Hall wins
-                formattedHall,
-                scoreStr,
-                "WALKOVER",
-                getOutcomeEmoji(-1));  // WALKOVER loses
-        }
-        
-        // Format: "round hallEmoji hallName score oppHall oppEmoji"
-        String scoreStr = formatScore(hallScore) + "-" + formatScore(opponentScore);
-        
-        return String.format("%s %s %s %s %s %s",
-            round,
-            hallEmoji,
-            formattedHall,
-            scoreStr,
-            formattedOppHall,
-            oppEmoji);
-    }
-    
-    /**
      * Calculates win percentage
      * @param wins Number of wins
      * @param draws Number of draws

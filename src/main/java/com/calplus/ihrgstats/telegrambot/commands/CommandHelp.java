@@ -212,7 +212,7 @@ public class CommandHelp {
                 message.append("<b>Rules:</b>\n");
                 message.append("• <code>name1</code> / <code>name2</code> \n    - Player Names\n    - Walkover opponents: fill with \"WALKOVER\"\n    - Can only have 1 \"WALKOVER\" opponent per row.\n\n");
                 message.append("• <code>hall1</code> / <code>hall2</code> \n    - Hall Names\n    - Remove \"Hall\" for hall names (e.g., \"Hall 4\" becomes \"4\")\n    - Hall Walkovers: hall can be empty (falls back to an \"unknown\" hall)\n    - Player Walkovers: hall can be filled, if needed.\n\n");
-                message.append("• <code>score1</code> / <code>score2</code> \n    - Each side's own raw board score (no win-margin formula)\n    - Standard games: BOTH scores are required\n    - WALKOVER rows: leave BOTH score fields blank - the app auto-computes a default score based on the round's configured match type\n");
+                message.append("• <code>score1</code> / <code>score2</code> \n    - Each side's own raw board score (no win-margin formula)\n    - Standard games: BOTH scores are required\n    - WALKOVER rows: leave BOTH score fields blank - the app auto-computes a default score based on the round's configured match type\n    - TIMEOUT rows (clock ran out, not a WALKOVER - both players are real): put \"TIMEOUT\" in the losing side's score cell; the winner's cell keeps a real score if known, or \"0\" if not. Still a real, rated result.\n");
                 break;
                 
             case "cappedplayers":

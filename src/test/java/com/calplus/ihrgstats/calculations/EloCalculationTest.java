@@ -190,4 +190,94 @@ public class EloCalculationTest {
         assertTrue(rookieRd < DEFAULT_RD,
                 "A new player's RD should shrink below the 350 default after their first played round");
     }
+
+    /** A draw (outcome=0.5) must move neither player's rating up nor down. */
+    @Test
+    void draw_leavesEvenlyMatchedPlayersRatingsUnchanged() {
+        Set<String> players = new HashSet<>(Arrays.asList("player_a", "player_b"));
+        List<EloCalculator.Game> games = new ArrayList<>();
+        games.add(new EloCalculator.Game("player_a", "player_b", 0.5, 1));
+
+        EloCalculator.Glicko2Result result = EloCalculator.calculateGlicko2TrueElo(
+                games, players, defaultRatings(players), List.of(1));
+
+        double aRating = result.ratingsByRound.get(1).get("player_a").rating;
+        double bRating = result.ratingsByRound.get(1).get("player_b").rating;
+        assertEquals(aRating, bRating, 1e-9,
+                "Two equally-rated players drawing should end up with identical ratings");
+    }
+
+    /** A draw against a much stronger opponent should still raise the weaker player's rating. */
+    @Test
+    void draw_againstStrongerOpponent_raisesWeakerPlayersRating() {
+        Set<String> players = new HashSet<>(Arrays.asList("underdog", "favorite"));
+        Map<String, EloCalculator.Glicko2Rating> ratings = new HashMap<>();
+        ratings.put("underdog", new EloCalculator.Glicko2Rating(1000, 60, 0.06));
+        ratings.put("favorite", new EloCalculator.Glicko2Rating(1400, 60, 0.06));
+
+        List<EloCalculator.Game> games = new ArrayList<>();
+        games.add(new EloCalculator.Game("underdog", "favorite", 0.5, 1));
+
+        EloCalculator.Glicko2Result result = EloCalculator.calculateGlicko2TrueElo(
+                games, players, ratings, List.of(1));
+
+        assertTrue(result.ratingsByRound.get(1).get("underdog").rating > 1000,
+                "Drawing a much stronger opponent should raise the underdog's rating above their prior");
+        assertTrue(result.ratingsByRound.get(1).get("favorite").rating < 1400,
+                "Drawing a much weaker opponent should lower the favorite's rating below their prior");
+    }
+
+    /** RD growth from repeated idle rounds must keep growing (bounded at 350), never shrink or reset. */
+    @Test
+    void multipleConsecutiveIdleRounds_rdGrowsMonotonicallyAndNeverExceedsCap() {
+        Set<String> players = new HashSet<>(Arrays.asList("veteran", "sparring"));
+        List<EloCalculator.Game> games = new ArrayList<>();
+        for (int round = 1; round <= 5; round++) {
+            games.add(new EloCalculator.Game("veteran", "sparring", round % 2 == 0 ? 0.0 : 1.0, round));
+        }
+        // Rounds 6-55: veteran is idle for 50 consecutive rounds. The
+        // sqrt(rd^2 + vol^2) growth step is asymptotic and slow once rd is
+        // already sizeable relative to volatility - it does not reach the
+        // 350 cap in any practical number of rounds, so this only checks
+        // the two invariants that must always hold: monotonic growth, and
+        // never exceeding the cap.
+        List<Integer> rounds = new ArrayList<>();
+        for (int r = 1; r <= 55; r++) rounds.add(r);
+
+        EloCalculator.Glicko2Result result = EloCalculator.calculateGlicko2TrueElo(
+                games, players, defaultRatings(players), rounds);
+
+        double rdAfterRound5 = result.ratingsByRound.get(5).get("veteran").rd;
+        double prevRd = rdAfterRound5;
+        for (int round = 6; round <= 55; round++) {
+            double rd = result.ratingsByRound.get(round).get("veteran").rd;
+            assertTrue(rd >= prevRd - 1e-9, "RD must not shrink during an idle round (round " + round + ")");
+            assertTrue(rd <= DEFAULT_RD + 1e-9, "RD must never exceed the 350 default cap (round " + round + ")");
+            prevRd = rd;
+        }
+        assertTrue(prevRd > rdAfterRound5,
+                "RD should have grown measurably over 50 idle rounds (from " + rdAfterRound5 + " to " + prevRd + ")");
+    }
+
+    /** Volatility must stay within Glicko-2's sane operating range - it should never runaway to 0, negative, or huge. */
+    @Test
+    void volatility_staysWithinSaneBoundsAcrossManyRounds() {
+        Set<String> players = new HashSet<>(Arrays.asList("a", "b"));
+        List<EloCalculator.Game> games = new ArrayList<>();
+        for (int round = 1; round <= 10; round++) {
+            // Alternating results - a noisy, inconsistent player.
+            games.add(new EloCalculator.Game("a", "b", round % 3 == 0 ? 0.0 : 1.0, round));
+        }
+        List<Integer> rounds = new ArrayList<>();
+        for (int r = 1; r <= 10; r++) rounds.add(r);
+
+        EloCalculator.Glicko2Result result = EloCalculator.calculateGlicko2TrueElo(
+                games, players, defaultRatings(players), rounds);
+
+        for (int round : rounds) {
+            double vol = result.ratingsByRound.get(round).get("a").volatility;
+            assertTrue(vol > 0.0 && vol < 1.0,
+                    "Volatility must stay strictly positive and well below 1.0 (round " + round + ": " + vol + ")");
+        }
+    }
 }

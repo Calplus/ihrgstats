@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-1.1.5-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jan%2005,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%202%20Update%2011-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2012,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -48,7 +48,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **2. Ease of Management**: Administrators can optionally set up detailed logs to both Telegram and Discord, without the need to open up server console!
 
-**3. Advanced ELO System**: Uses Batch Glicko-2 with increased volatility for precise and distinct skill assessment with as few games as possible. Track player skills using numbers with industry-standard algorithms used by professional organizations.
+**3. Advanced ELO System**: Uses Batch Glicko-2 with increased volatility for precise and distinct skill assessment with as few games as possible. Ratings are kept consistent across the whole tournament history via a whole-history recalculation that replays every round across every year whenever new results come in (or on-demand via `/recalculate`), while point-in-time snapshots ensure "rankings as of round N" always stay accurate even after a recalculation.
 
 **4. Quick Data Retrieval**: Built on SQLite with comprehensive validation, your tournament data is stored reliably. Every file upload is thoroughly verified, every mismatch is caught, and every change is logged.
 
@@ -58,7 +58,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **7. Admin-Friendly**: Granular permission controls, interactive settings management, and detailed activity logging ensure secure administration without technical complexity.
 
-**8. Rounds Adaptability across games**: Supports up to 6 swiss rounds and 4 bracket rounds (Max. top 16). 
+**8. Rounds Adaptability across games**: Rounds are numbered sequentially per year and are no longer tied to a fixed swiss/bracket split - upload as many rounds as your tournament format needs, in order.
 
 ## Commands
 
@@ -140,15 +140,7 @@ View comprehensive match information for a specific hall in a specific round.
 
 ### Miscellanious
 
-**9. Export Player Data (/exportplayers)**
-
-Exports a high-level overview of player data into a .csv, containing detailed information about each player. This .csv file can be reuploaded to the bot to instantiate data for a blank database (particularly trueElo and lastHall). Capped status does not carry over.
-
-<div align = "center">
-<img src="Github%20Images/SCREENSHOT_playerExport.png">
-</div>
-
-**10. Help (/help)**
+**9. Help (/help)**
 
 You ask it for help. Or it asks you for help. Either way, you get to choose whether you need help for commands, or file upload format. You can also ask it for specifics of a file, if you so choose.
 
@@ -162,7 +154,7 @@ You ask it for help. Or it asks you for help. Either way, you get to choose whet
   <img src="Github%20Images/TELEGRAM_helpfilesround.png" width="45%" />
 </p>
 
-**11. About (/about)**
+**10. About (/about)**
 
 about.
 
@@ -174,7 +166,7 @@ about.
 
 ### Administrator Commands
 
-**12. (ADMIN) Settings (/settings)**
+**11. (ADMIN) Settings (/settings)**
 
 Fine-tune specific settings for your bot, from your home hall to allowing file processing in all channels!
 
@@ -182,9 +174,17 @@ Fine-tune specific settings for your bot, from your home hall to allowing file p
 <img src="Github%20Images/TELEGRAM_settings.png">
 </div>
 
-**13. (ADMIN) Export Database (/exportdatabase)**
+**12. (ADMIN) Match Types (/matchtypes)**
 
-Need to bug-test your database? Run your own data analytics? Migrating servers? Backing up your database? You need your database easily. Fetch your database easily at any time! Sent to your DM for additional privacy!
+Create, list, and edit match types (name, max score, time limit, description), and assign a match type to a round that was uploaded without one. A match type must be assigned to a round before it can process a WALKOVER, since the walkover's default score is derived from the match type's max score.
+
+**13. (ADMIN) Recalculate Ratings (/recalculate)**
+
+Manually triggers the whole-history rating recalculation: every stored round across every year is replayed through the rating engine and `player_ratings` is rewritten from scratch. This runs automatically after every round upload already - use this command to refresh ratings on demand (e.g. after a rating-engine update) without re-uploading any files. Point-in-time snapshots ("rankings as of round N") are never touched by a recalculation.
+
+**14. (ADMIN) Export Database (/exportdatabase)**
+
+Need to bug-test your database? Run your own data analytics? Migrating servers? Backing up your database? Choose between a full **.xlsx export** (one sheet per populated table - great for spreadsheet analysis) or the **raw .db file** (a drop-in backup/restore of the entire SQLite database). Sent to your DM for additional privacy!
 
 <div align = "center">
 <img src="Github%20Images/TELEGRAM_exportdatabase.png">
@@ -254,11 +254,10 @@ Create a file named `.env.properties` in the project root directory:
 
 ```properties
 # Settings
-SETTINGS_PERFELO_ENABLED=true
 SETTINGS_ALLOWNONADMINUPLOADS=false
 SETTINGS_ALLOWALLCHANNELSPROCESSING=true
 SETTINGS_HOMEHALL=
-SETTINGS_MAXSEEDS=368.5
+SETTINGS_CURRENTYEAR=
 SETTINGS_TIMEZONE=0
 
 # Internet Connectivity
@@ -283,11 +282,10 @@ TELEGRAM_PUBLIC_CHATID_COMMANDS=
 ```
 
 **Settings Explained:**
-- `SETTINGS_PERFELO_ENABLED`: Enable Performance ELO calculations (considers point margins). NOTE: As of v1.1.1, this setting does nothing.
 - `SETTINGS_ALLOWNONADMINUPLOADS`: Allow non-admin users to upload files for processing
 - `SETTINGS_ALLOWALLCHANNELSPROCESSING`: Allow file processing from any channel (not just configured ones)
 - `SETTINGS_HOMEHALL`: Your home hall number for highlighting in image exports
-- `SETTINGS_MAXSEEDS`: Maximum score for the game (e.g., 64 for Othello, 368.5 for Weiqi)
+- `SETTINGS_CURRENTYEAR`: The tournament year currently being played. Used to resolve which year's rounds/players a command or upload operates on - required before uploading `round_{n}.csv` (without a year prefix) or `cappedlist.csv`
 - `SETTINGS_TIMEZONE`: Timezone offset for displaying timestamps (e.g., 8 for UTC+8)
 
 **Internet Connectivity Settings:**
@@ -342,8 +340,8 @@ ssh user@yourserver
 # Navigate to the application directory
 cd /opt/ihrgstats
 
-# Run the bot
-java -jar ihrgstats-1.0-SNAPSHOT.jar
+# Run the bot (quote the jar name - the version string contains spaces)
+java -jar "<JAR_NAME>.jar"
 ```
 
 **For Oracle Cloud Servers:**
@@ -367,8 +365,8 @@ nohup java -Denv.file.path=./.env.properties -jar <.JAR NAME>.jar
 # Copy files to server directory
 # Open PowerShell or Command Prompt in the application directory
 
-# Run the bot
-java -jar ihrgstats-1.0-SNAPSHOT.jar
+# Run the bot (quote the jar name - the version string contains spaces)
+java -jar "<JAR_NAME>.jar"
 ```
 
 ### Step 5: Run as Background Service
@@ -385,7 +383,7 @@ After=network.target
 Type=simple
 User=yourusername
 WorkingDirectory=/opt/ihrgstats
-ExecStart=/usr/bin/java -jar /opt/ihrgstats/ihrgstats-1.0-SNAPSHOT.jar
+ExecStart=/usr/bin/java -jar "/opt/ihrgstats/<JAR_NAME>.jar"
 Restart=on-failure
 RestartSec=10
 
@@ -412,7 +410,7 @@ sudo journalctl -u ihrgstats -f
 3. Trigger: "When the computer starts"
 4. Action: "Start a program"
 5. Program: `java`
-6. Arguments: `-jar C:\path\to\ihrgstats-1.0-SNAPSHOT.jar`
+6. Arguments: `-jar "C:\path\to\<JAR_NAME>.jar"`
 7. Start in: `C:\path\to\`
 
 ### Verification
@@ -422,44 +420,13 @@ After deployment, the bot should send a ping message every 5 minutes to the dev/
 ## File Upload System
 
 
-The bot accepts three types of CSV files for data import. Upload files directly to the configured Telegram upload channel.
+The bot accepts two types of CSV files for data import. Upload files directly to the configured Telegram upload channel. Players don't need a separate import file - they're created automatically the first time their name appears in an uploaded round.
 
 You may refer to the "SAMPLE FILES" folder in the project repo.
 
 ### File Types
 
-#### 1. playerExport_YYYYMMDD_HHMMSS.csv
-Initial player data import file containing baseline player information.
-
-**Format (csv):**
-```csv
-name,trueElo,perfElo,rdTrueElo,volTrueElo,rdPerfElo,volPerfElo,lastRound,lastHall,capped
-Joyce Byers,933,768,244.1903,0.059694,240.8558,0.059666,t16,5,false
-Draco Malfoy,786,747,253.6173,0.059696,243.5927,0.059666,t16,4,false
-Jon Snow,1026,747,252.0210,0.059648,243.5917,0.059582,t2,3,true
-```
-
-**Columns:**
-- `name`: Player's stored name
-- `trueElo`: True ELO rating
-- `perfElo`: Performance ELO rating
-- `rdTrueElo`: Rating deviation for True ELO
-- `volTrueElo`: Volatility for True ELO
-- `rdPerfElo`: Rating deviation for Performance ELO
-- `volPerfElo`: Volatility for Performance ELO
-- `lastRound`: Last played round
-- `lastHall`: Player's hall affiliation as of download.
-- `capped`: TRUE/FALSE (capped status; will not be uploaded. Use cappedlist.csv.)
-
-**Error Handling:**
-- File not found: "Failed to download file from Telegram"
-- Invalid format: "Invalid CSV format: Header must match expected columns"
-- Duplicate players: "Duplicate player found: (name)"
-- Missing columns: "Missing required columns: (column_list)"
-- Invalid data types: "Invalid data type in row X, column Y: expected (type), got (value)"
----
-
-#### 2. cappedlist.csv
+#### 1. cappedlist.csv
 List of capped players (released from previous year's IHRG).
 
 **Format:**
@@ -475,6 +442,7 @@ Jon Snow,3
 - `hall`: Player's hall affiliation
 
 **Error Handling:**
+- No current year: "Cannot process cappedlist.csv: no current year set. An admin must set settings.currentYear first." (only applies to the plain `cappedlist.csv` name - use `{year}_cappedlist.csv` to specify the year directly)
 - File not found: "cappedlist.csv file not found at: (path)"
 - Invalid format: "Invalid CSV format: Header must have exactly 2 columns (name,hall)"
 - Incorrect headers: "Invalid CSV format: Header must be 'name,hall' (case insensitive)"
@@ -484,46 +452,43 @@ Jon Snow,3
 
 ---
 
-#### 3. round_{n}.csv
-Round results file containing match outcomes for a specific round.
-n = {1, 2, 3, 4, 5, 6, t16, t8, t4, t2}
+#### 2. {year}_round_{n}.csv (or round_{n}.csv)
+Round results file containing match outcomes for a specific round. Rounds are just sequential numbers now - there's no separate "swiss" vs "bracket" filename convention. Number them however your tournament format needs (e.g. rounds 1-6 as swiss, then 7-10 continuing as bracket rounds).
+
+- `{year}_round_{n}.csv` (e.g. `2025_round_1.csv`) is self-contained and always processes into that year.
+- `round_{n}.csv` (no year prefix) falls back to the admin-configured `settings.currentYear` - an admin must set it first via `/settings`.
 
 **Format:**
 ```csv
-name1,hall1,winby1,name2,hall2,winby2
-Hank Schrader,1,59.5,Princess Bubblegum,2,
-Jesse Pinkman,1,,Jake the Dog,2,191
-Kim Wexler,1,draw,Flame Princess,2,draw
+name1,hall1,score1,name2,hall2,score2
+Hank Schrader,1,59.5,Princess Bubblegum,2,0
+Jesse Pinkman,1,0,Jake the Dog,2,191
+Kim Wexler,1,0,Flame Princess,2,0
 ```
 
 **Columns:**
 - `name1`, `name2`: Player names. Use "WALKOVER" for walkover opponents (only one per row).
-- `hall1`, `hall2`: Hall names (numeric or short name, e.g., "4", "Binjai"). Remove the word "Hall" (e.g., "Hall 4" → "4"). For walkovers, hall can be empty.
-- `winby1`, `winby2`: How much a player won by (numeric, "draw", or 1/0 for win/loss). Only the winner's column needs to be filled, except for draws (both must be "draw").
+- `hall1`, `hall2`: Hall names (numeric or short name, e.g., "4", "Binjai"). Remove the word "Hall" (e.g., "Hall 4" → "4"). For a WALKOVER row, only the non-walkover side's hall is required.
+- `score1`, `score2`: Each side's raw board score. Both are required and numeric for standard games (equal values = a draw). Leave both blank for a WALKOVER row - the bot computes the default walkover score automatically from the round's assigned match type. For a game decided by a clock timeout rather than a finished board, put `TIMEOUT` in the losing side's score cell instead of a number - the winning side's cell can still hold a real recorded score, or `0` if none was recorded.
 
 **Rules & Validation:**
-- The header must be exactly: `name1,hall1,winby1,name2,hall2,winby2` (case-insensitive, no extra spaces).
+- The header must be exactly: `name1,hall1,score1,name2,hall2,score2` (case-insensitive, no extra spaces).
 - Each row represents a match between two players. If a player is absent (walkover), use "WALKOVER" for their name and leave their hall/score blank.
 - Only one "WALKOVER" per row is allowed.
-- Hall names must match those in the database (case-insensitive, whitespace trimmed). For walkovers, hall can be empty.
-- For win/loss, use either a numeric value (e.g., 204.5), "draw" for draws (both columns), or 1/0 for win/loss (one column must be 1, the other 0).
-- If both winby columns are filled, they must both be "draw" or one must be 1 and the other 0.
+- Hall names must match those in the database (case-insensitive, whitespace trimmed).
+- A round containing a WALKOVER must have a match type assigned (see `/matchtypes`) so the default walkover score can be computed.
+- A TIMEOUT result is still a real, rated win/loss (unlike a WALKOVER) - both players must be real, present names with valid halls. Only one side's score cell may be `TIMEOUT`.
 - Player names must not be empty. Both players cannot be "WALKOVER" in the same row.
 - All matches must be valid and not duplicated.
 
-**Valid Round Names:**
-- `round_1`, `round_2`, `round_3`, `round_4`, `round_5`, `round_6` (Swiss)
-- `round_t16`, `round_t8`, `round_t4`, `round_t2` (Bracket)
-
 **Error Handling:**
-- Invalid filename: "Invalid round filename format: (filename)"
-- Invalid round name: "Invalid round name: (name). Valid rounds: 1, 2, 3, 4, 5, 6, t16, t8, t4, t2"
+- Invalid filename: "Unknown file type: (filename). Accepted files: cappedlist.csv, {year}_cappedlist.csv, {year}_round_[n].csv, round_[n].csv"
+- No year available: "Cannot process (filename): filename has no year prefix and no current year is set..."
 - File not found: "round_{n}.csv file not found at: (path)"
-- Invalid format: "Invalid CSV format: Header must have exactly 6 columns (name1,hall1,winby1,name2,hall2,winby2)"
+- Invalid format: "Invalid CSV format: Header must have exactly 6 columns (name1,hall1,score1,name2,hall2,score2)"
 - Incorrect headers: "Invalid CSV header: Expected '(col)' at column (n), found '(col)'"
 - Duplicate matches: "Duplicate match found for player: (name)"
 - Invalid values: "Invalid CSV format at line (n): ..."
-- Player not found: "Player '(name)' not found in database. Upload playerExport file first."
 - Hall mismatch (active players): Stops processing with error message
 - Hall mismatch (inactive players): Interactive resolution dialog (see below)
 - WALKOVER detection: Only one walkover per row; both cannot be walkover.
@@ -548,12 +513,13 @@ When a player's hall in the CSV doesn't match the database and the player is ina
 
 ### Recommended Upload Workflow
 
-1. **Start with playerExport.csv** - Establishes baseline player data
-2. **Upload cappedlist.csv** - Updates capping status for players
-3. **Upload round files in order** - Process round_1, round_2, etc. sequentially
-4. **Monitor confirmation messages** - Check for warnings or validation errors
-5. **Resolve conflicts promptly** - Handle hall mismatch dialogs immediately
-6. **Backup regularly** - Use `/exportdatabase` before major uploads
+1. **Set the current year** - Use `/settings` to set `settings.currentYear` (or use year-prefixed filenames throughout)
+2. **Set up match types** - Use `/matchtypes` to create at least one match type before any round with a WALKOVER
+3. **Upload cappedlist.csv** - Updates capping status for players
+4. **Upload round files in order** - Process round_1, round_2, etc. sequentially (players are created automatically on first appearance)
+5. **Monitor confirmation messages** - Check for warnings or validation errors
+6. **Resolve conflicts promptly** - Handle hall mismatch dialogs immediately
+7. **Backup regularly** - Use `/exportdatabase` before major uploads
 
 ### File Upload Permissions
 
@@ -631,10 +597,9 @@ By default, commands only work in designated channels/threads. This can be chang
 - Does not write/modify any data until all checks passed
 
 **Backup Capabilities:**
-- `/exportdatabase` creates timestamped full backup
-- `/exportplayers` exports player data only
+- `/exportdatabase` creates a timestamped full backup - choose a full .xlsx (one sheet per table) or the raw .db file
+- Restoring from a .db export is a straight file swap - no re-import step needed
 - All exports include timestamps in filename
-- CSV format ensures portability & readability
 
 ## Project Structure
 
@@ -645,11 +610,9 @@ ihrgstats/
 │   │   ├── java/com/calplus/ihrgstats/
 │   │   │   ├── Main.java                          # Application entry point
 │   │   │   ├── calculations/
-│   │   │   │   └── EloCalculator.java             # ELO rating calculations
-│   │   │   ├── databasemanager/
-│   │   │   │   ├── DatabaseSchema.java            # Database initialization/Scheme
-│   │   │   │   ├── A1_PlayerStats.java            # Player statistics manager
-│   │   │   │   └── A2_CappedPlayers.java          # Capped players manager
+│   │   │   │   ├── EloCalculator.java             # Batch Glicko-2 rating math
+│   │   │   │   └── RatingRecalculator.java        # Whole-history multi-pass recalculation
+│   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E-prefixed managers)
 │   │   │   ├── discordbot/
 │   │   │   │   └── logs/DiscordLog.java           # Discord logging
 │   │   │   ├── telegrambot/
@@ -664,14 +627,15 @@ ihrgstats/
 │   │   │   │   │   ├── CommandInfoMatchHall.java
 │   │   │   │   │   ├── CommandComparePlayers.java
 │   │   │   │   │   ├── CommandCompareHalls.java
-│   │   │   │   │   ├── CommandExportPlayers.java
+│   │   │   │   │   ├── CommandMatchTypes.java
+│   │   │   │   │   ├── CommandRecalculate.java
 │   │   │   │   │   ├── CommandExportDatabase.java
 │   │   │   │   │   ├── CommandSettings.java
 │   │   │   │   │   ├── CommandHelp.java
 │   │   │   │   │   └── CommandAbout.java
+│   │   │   │   ├── utils/                         # RoundCsvProcessor, MatchScoreUtils, etc.
 │   │   │   │   └── logs/TelegramLog.java          # Telegram logging
-│   │   │   └── utils/                             # Utility classes
-│   │   │       └── ...
+│   │   │   └── utils/                             # Shared utility classes (TelegramHtml, TableFormatter, VictoryRecordCalculator, ...)
 │   │   └── resources/
 │   │       ├── application.properties             # Configuration
 │   │       └── halls/                             # Hall icons (PNG files)
@@ -680,9 +644,11 @@ ihrgstats/
 ├── database/
 │   └── core/
 │       └── default.db                             # SQLite database (auto-created)
-├── temp/                                          # Temporary files (auto-created)
+├── temp/                                          # Temporary files (auto-created, gitignored)
+├── docs/legacy/                                   # Retired reference material (e.g. pre-v2 schema)
 ├── Github Images/                                 # Sample images for README
 ├── SAMPLE FILES/                                  # Sample CSV files for testing/reference
+│   └── backup_old_format/                         # Pre-v2 sample files, kept for reference
 ├── .env.properties                                # Environment variables (SENSITIVE)
 ├── pom.xml                                        # Maven configuration
 └── README.md                                      # This file (lol)
@@ -710,8 +676,8 @@ For support, questions, or feature requests:
 
 **File upload fails:**
 - Verify file format matches templates in SAMPLE FILES folder
-- Check file name matches expected patterns
-- Ensure playerExport uploaded before round files
+- Check file name matches expected patterns ({year}_round_[n].csv, round_[n].csv, cappedlist.csv, {year}_cappedlist.csv)
+- If using a year-less filename, ensure `settings.currentYear` is set via `/settings`
 - Review validation error messages carefully
 
 **Commands return errors:**
@@ -735,9 +701,9 @@ For support, questions, or feature requests:
 ### Sample Files
 
 The `SAMPLE FILES` folder contains example CSV files demonstrating correct formats:
-- `playerExport_YYYYMMDD_HHMMSS.csv` - Initial player data
 - `cappedlist.csv` - Capped players list
-- `round_1.csv` through `round_6.csv` - Round results
-- `round_t16.csv`, `round_t8.csv`, `round_t4.csv`, `round_t2.csv` - Tournament rounds
+- `2025_round_1.csv` through `2025_round_10.csv` - Round results (rounds 1-6 swiss, 7-10 continuing as bracket rounds)
+
+Pre-v2 originals (old `winby1/winby2` format, `round_t16.csv`-style bracket names) are preserved under `SAMPLE FILES/backup_old_format/` for reference.
 
 Use these files as templates when creating your own data files.

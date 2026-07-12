@@ -15,6 +15,7 @@ public class C9_MatchParticipants {
 
     public static final String PARTICIPATION_STANDARD = "STANDARD";
     public static final String PARTICIPATION_WALKOVER = "WALKOVER";
+    public static final String PARTICIPATION_TIMEOUT = "TIMEOUT";
 
     public static class Participant {
         public final int matchId;
