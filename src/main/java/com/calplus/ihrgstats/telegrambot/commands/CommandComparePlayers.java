@@ -5,6 +5,7 @@ import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
+import com.calplus.ihrgstats.utils.TelegramHtml;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -145,7 +146,7 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSelect the **second player's hall**:",
-                    state.firstPlayerName, state.firstHallName);
+                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName);
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -186,7 +187,7 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player's hall: **%s**\nSelect the **second player**:",
-                    state.firstPlayerName, state.firstHallName, state.secondHallName);
+                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName, state.secondHallName);
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -225,7 +226,7 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player: **%s** (%s)\n\nSelect rounds to compare:",
-                    state.firstPlayerName, state.firstHallName, state.secondPlayerName, state.secondHallName);
+                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName, TelegramHtml.escape(state.secondPlayerName), state.secondHallName);
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -358,7 +359,7 @@ public class CommandComparePlayers {
     private String generateTextOutput(PlayerData player1, List<Integer> orders1, PlayerData player2, List<Integer> orders2) {
         StringBuilder sb = new StringBuilder();
         sb.append("**\uD83D\uDC65 Player Comparison**\n\n");
-        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", player1.name, player1.hall, player2.name, player2.hall));
+        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", TelegramHtml.escape(player1.name), player1.hall, TelegramHtml.escape(player2.name), player2.hall));
         sb.append(generatePlayerDetails(player1, orders1));
         sb.append("\n");
         sb.append(generatePlayerDetails(player2, orders2));
@@ -367,7 +368,7 @@ public class CommandComparePlayers {
 
     private String generatePlayerDetails(PlayerData player, List<Integer> roundOrders) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("\u2501\u2501\u2501 **%s (%s)** \u2501\u2501\u2501\n\n", player.name, player.hall));
+        sb.append(String.format("\u2501\u2501\u2501 **%s (%s)** \u2501\u2501\u2501\n\n", TelegramHtml.escape(player.name), player.hall));
 
         sb.append("**\uD83D\uDCCA Stats Per Round:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "\u0394Rank", "ELO", "\u0394ELO"));

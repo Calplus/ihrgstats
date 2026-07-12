@@ -278,13 +278,24 @@ public class TableFormatter {
     }
     
     /**
-     * Shortens round name for display
-     * @param round The round name (e.g., "1", "t16")
-     * @return Shortened version
+     * Shortens a round label for display in narrow table columns. Rounds'
+     * default label is "Round {N}" (see A1_Rounds.getOrCreateRound) - this
+     * strips that prefix down to "R{N}" so it fits a 3-character column
+     * instead of being hard-truncated to garbage by formatRow. Any other
+     * (admin-renamed) label is just uppercased and left to formatRow's
+     * normal truncation, same as before.
+     * @param round The round label (e.g., "Round 12", or a custom name)
+     * @return Shortened version (e.g., "R12")
      */
     public static String shortenRoundName(String round) {
         if (round == null || round.isEmpty()) {
             return "";
+        }
+        if (round.regionMatches(true, 0, "Round ", 0, 6)) {
+            String suffix = round.substring(6).trim();
+            if (!suffix.isEmpty()) {
+                return "R" + suffix.toUpperCase();
+            }
         }
         return round.toUpperCase();
     }

@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
@@ -245,13 +246,26 @@ public class CommandInfoMatchHall {
         return "WALKOVER";
     }
 
-    /** Aggregates +1 win / +0.5 draw per player into a "X-Y" match score string. */
+    /**
+     * Aggregates +1 win / +0.5 draw per player into a "X-Y" match score
+     * string. If EVERY player faced a WALKOVER this round (a full-team
+     * sweep, not just some boards), normalizes to the "3-2" convention -
+     * derived from the hall's actual observed board count, matching
+     * CommandInfoMatch.calculateCumulativeScores. Partial-team walkovers
+     * (some boards real, some walkover) are left as a raw sum.
+     */
     private String calculateMatchScore(List<HallPlayerData> players) {
         double hallScore = 0.0;
         double oppScore = 0.0;
+        int countedPlayers = 0;
+        int walkoverCount = 0;
 
         for (HallPlayerData player : players) {
             if (player.outcome == null) continue;
+            countedPlayers++;
+            if ("WALKOVER".equalsIgnoreCase(player.oppName)) {
+                walkoverCount++;
+            }
             if (player.outcome == 1) {
                 hallScore += 1.0;
             } else if (player.outcome == 0) {
@@ -260,6 +274,12 @@ public class CommandInfoMatchHall {
             } else if (player.outcome == -1) {
                 oppScore += 1.0;
             }
+        }
+
+        if (walkoverCount > 0 && walkoverCount == countedPlayers) {
+            double winner = MatchScoreUtils.computeWalkoverDefaultScore(walkoverCount);
+            hallScore = winner;
+            oppScore = walkoverCount - winner;
         }
 
         String hallScoreStr = (hallScore % 1 == 0) ? String.format("%.0f", hallScore) : String.format("%.1f", hallScore);

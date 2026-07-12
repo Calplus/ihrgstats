@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
@@ -140,7 +141,7 @@ public class CommandRankPlayers {
                     }
                 }
             }
-            imagePath = generatePlayersImage(players, highlightRows, selectedRound);
+            imagePath = generatePlayersImage(players, highlightRows, selectedRound, year);
         } catch (Exception e) {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
@@ -236,7 +237,7 @@ public class CommandRankPlayers {
         return table;
     }
 
-    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound) throws Exception {
+    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
         String[] headers = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
         Alignment[] alignments = {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
         int[] columnWidths = {4, 4, 4, 3, 3, 20};
@@ -256,7 +257,7 @@ public class CommandRankPlayers {
         }
 
         String lastRoundForMetadata = selectedRound.equalsIgnoreCase("all")
-            ? (players.isEmpty() ? null : players.get(0).lastRound)
+            ? MatchScoreUtils.latestRoundLabel(rounds, year)
             : selectedRound;
 
         TableImageGenerator.ImageMetadata metadata = new TableImageGenerator.ImageMetadata(

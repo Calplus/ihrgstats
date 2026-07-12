@@ -126,38 +126,39 @@ public class CommandHelp {
         
         message.append("<b>Match & Data Commands:</b>\n");
         message.append("• /infomatch - Get details of a match for a specific round\n");
-        message.append("• /infomatchhall - Get detailed match information for a hall in a specific round\n");
-        message.append("• /exportplayers - Exports latest player data as a multi-sheet .xlsx workbook.\n\n");
-        
+        message.append("• /infomatchhall - Get detailed match information for a hall in a specific round\n\n");
+
         message.append("<b>Utility Commands:</b>\n");
         message.append("• /about - About this bot\n");
         message.append("• /help - i think you need help\n\n");
-        
+
         message.append("<b>Administrator Commands:</b>\n");
         message.append("• /settings - (ADMIN) Change bot's settings\n");
-        message.append("• /exportdatabase - (ADMIN) Exports database for debugging/storing data.\n\n");
-        
+        message.append("• /exportdatabase - (ADMIN) Exports the full database as .xlsx or the raw .db file\n");
+        message.append("• /matchtypes - (ADMIN) Manage match types (name, max score, time limit, description)\n");
+        message.append("• /recalculate - (ADMIN) Recalculates all ratings across all years (whole-history WHR-style refit)\n\n");
+
         message.append("Click on any command below for detailed information:\n");
-        
+
         String[] labels = {
             "/rankplayers", "/rankhalls",
             "/compareplayers", "/comparehalls",
             "/infoplayer", "/infohall",
             "/infomatch", "/infomatchhall",
-            "/exportplayers", "/settings",
-            "/exportdatabase", "/about",
-            "/help", "🔙 Back",
-            "❌ Cancel"
+            "/settings", "/exportdatabase",
+            "/matchtypes", "/recalculate",
+            "/about", "/help",
+            "🔙 Back", "❌ Cancel"
         };
         String[] callbacks = {
             "help_cmd_rankplayers", "help_cmd_rankhalls",
             "help_cmd_compareplayers", "help_cmd_comparehalls",
             "help_cmd_infoplayer", "help_cmd_infohall",
             "help_cmd_infomatch", "help_cmd_infomatchhall",
-            "help_cmd_exportplayers", "help_cmd_settings",
-            "help_cmd_exportdatabase", "help_cmd_about",
-            "help_cmd_help", "help_back",
-            "help_cancel"
+            "help_cmd_settings", "help_cmd_exportdatabase",
+            "help_cmd_matchtypes", "help_cmd_recalculate",
+            "help_cmd_about", "help_cmd_help",
+            "help_back", "help_cancel"
         };
         
         logHelper.logSuccess("Generated commands help menu with buttons");
@@ -520,53 +521,68 @@ public class CommandHelp {
                 message.append("• Changes take effect immediately\n");
                 break;
                 
-            case "exportplayers":
-                message.append("<b>/exportplayers</b>\n\n");
-                message.append("<b>Description:</b>\n");
-                message.append("Export player data from the database to a multi-sheet Excel (.xlsx) file for backup or analysis.\n\n");
-                message.append("<b>Usage:</b>\n");
-                message.append("<code>/exportplayers</code>\n\n");
-                message.append("<b>Process:</b>\n");
-                message.append("• Command generates an .xlsx file automatically\n");
-                message.append("• File sent as attachment for download\n");
-                message.append("• Filename format: playerExport_YYYYMMDD_HHMMSS.xlsx\n\n");
-                message.append("<b>Exported Sheets:</b>\n");
-                message.append("• <b>Players</b> - Current snapshot: player ID, name, hall, capped status, latest TrueElo\n");
-                message.append("• <b>Name History</b> - All names ever used per player, with first/last seen year\n");
-                message.append("• <b>Rating History</b> - Full TrueElo rating history per player per round\n");
-                message.append("• <b>Year Status History</b> - Hall/capped/active status per player per year\n\n");
-                message.append("<b>Use Cases:</b>\n");
-                message.append("• Backup player data before major changes\n");
-                message.append("• External data analysis\n");
-                break;
-                
             case "exportdatabase":
                 message.append("<b>(ADMIN) /exportdatabase</b>\n\n");
                 message.append("<b>Description:</b>\n");
-                message.append("Export the complete SQLite database file for backup, debugging, or migration. Admin-only command.\n\n");
+                message.append("Export the entire database, in your choice of format. Admin-only command.\n\n");
                 message.append("<b>Usage:</b>\n");
                 message.append("<code>/exportdatabase</code>\n\n");
                 message.append("<b>Access:</b>\n");
                 message.append("• Only users with admin privileges can use this command\n");
                 message.append("• Non-admin users will receive an access denied message\n\n");
                 message.append("<b>Process:</b>\n");
-                message.append("1. Command prompts for confirmation (prevents accidental exports)\n");
-                message.append("2. User confirms with \"✅ Confirm\" button or cancels with \"❌ Cancel\"\n");
-                message.append("3. Upon confirmation, database file is sent to admin's DM\n");
-                message.append("4. File sent as attachment (default.db)\n\n");
-                message.append("<b>Exported Content:</b>\n");
-                message.append("• Complete SQLite database file\n");
-                message.append("• All player statistics and Elo ratings\n");
-                message.append("• All round data and match results\n");
-                message.append("• All hall information\n");
-                message.append("• Database schema and indices\n\n");
+                message.append("1. Command prompts for a format choice\n");
+                message.append("2. Choose <b>Full export (.xlsx)</b> or <b>Database file (.db)</b>, or cancel\n");
+                message.append("3. The exported file is sent to your Direct Message\n\n");
+                message.append("<b>Full export (.xlsx):</b>\n");
+                message.append("• One sheet per populated table - a complete, mechanical dump of the current database\n");
+                message.append("• Best for browsing/analysis in a spreadsheet\n\n");
+                message.append("<b>Database file (.db):</b>\n");
+                message.append("• The raw SQLite file, unchanged\n");
+                message.append("• <b>Recommended disaster-recovery path:</b> restore this file into <code>database/core/</code> to fully restore the database\n\n");
                 message.append("<b>Use Cases:</b>\n");
                 message.append("• Full system backup before major changes\n");
                 message.append("• Database debugging and inspection\n");
                 message.append("• Migration to new server\n");
                 message.append("• Disaster recovery\n");
                 break;
-                
+
+            case "matchtypes":
+                message.append("<b>(ADMIN) /matchtypes</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("Manage match types (name, max score, time limit, description). Admin-only command.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/matchtypes</code>\n\n");
+                message.append("<b>Access:</b>\n");
+                message.append("• Only users with admin privileges can use this command\n\n");
+                message.append("<b>Why it matters:</b>\n");
+                message.append("• Round processing blocks and prompts for a match type whenever a walkover is present and none is assigned yet - the match type's max score is what determines the default walkover score\n\n");
+                message.append("<b>Actions:</b>\n");
+                message.append("• <b>Create New</b> - Add a match type (name, max score, time limit, description)\n");
+                message.append("• <b>List All</b> - View all existing match types\n");
+                message.append("• <b>Edit Existing</b> - Update a match type's details\n");
+                message.append("• <b>Assign to Round</b> - Retroactively assign a match type to a round whose matches ended up with none set (e.g. after a reprocess with no walkover in the new data)\n");
+                break;
+
+            case "recalculate":
+                message.append("<b>(ADMIN) /recalculate</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("Runs a whole-history (WHR-style) recalculation of every player's TrueElo rating. Admin-only command.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/recalculate</code>\n\n");
+                message.append("<b>Access:</b>\n");
+                message.append("• Only users with admin privileges can use this command\n\n");
+                message.append("<b>What it does:</b>\n");
+                message.append("• Replays every stored round across every year, in chronological order, through 5 refinement passes\n");
+                message.append("• Later results can revise earlier rounds' rating estimates (unlike a normal round upload, which only ever computes forward)\n");
+                message.append("• Rewrites the current ratings used by rankings/comparisons/info commands\n\n");
+                message.append("<b>What it does NOT touch:</b>\n");
+                message.append("• Point-in-time snapshots (\"rankings as of round N\") stay exactly as originally published\n");
+                message.append("• Match data is only read, never modified\n\n");
+                message.append("<b>When to run it:</b>\n");
+                message.append("• This runs automatically after every round upload - manual use is for refreshing stored ratings without re-uploading data (e.g. after a rating-engine update)\n");
+                break;
+
             default:
                 return new CommandResponse("❌ Unknown command.", (java.nio.file.Path) null);
         }

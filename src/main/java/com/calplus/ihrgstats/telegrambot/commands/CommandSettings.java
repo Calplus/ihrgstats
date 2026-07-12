@@ -5,6 +5,7 @@ import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
+import com.calplus.ihrgstats.utils.TelegramHtml;
 
 import java.sql.SQLException;
 import java.util.*;
@@ -77,7 +78,7 @@ public class CommandSettings {
 
         // Build message
         StringBuilder message = new StringBuilder();
-        message.append("⚙️ **Application Settings**\n\n");
+        message.append("⚙️ <b>Application Settings</b>\n\n");
         message.append("Configure boolean settings below:\n\n");
 
         List<String> buttonLabels = new ArrayList<>();
@@ -87,50 +88,50 @@ public class CommandSettings {
             String key = entry.getKey();
             String value = entry.getValue();
             String description = PropertyManager.getSettingDescription(key);
-            
+
             // Special handling for homeHall (non-boolean)
             if (key.equals("settings.homeHall")) {
                 String currentHall = value.isEmpty() ? "Not set" : value;
-                message.append(String.format("🏠 **Home Hall: %s**\n", currentHall));
-                message.append(String.format("   %s\n\n", description));
-                
+                message.append(String.format("🏠 <b>Home Hall: %s</b>\n", TelegramHtml.escape(currentHall)));
+                message.append(String.format("   %s\n\n", TelegramHtml.escape(description)));
+
                 // Create button for homeHall selection
                 buttonLabels.add("🏠 Change Home Hall");
                 buttonCallbacks.add("setting_homeHall_select");
                 continue;
             }
-            
+
             // Special handling for timezone
             if (key.equals("settings.timezone")) {
                 String currentTimezone = value.isEmpty() ? "Not set" : formatTimezoneDisplay(value);
-                message.append(String.format("🌍 **Timezone: %s**\n", currentTimezone));
-                message.append(String.format("   %s\n\n", description));
-                
+                message.append(String.format("🌍 <b>Timezone: %s</b>\n", TelegramHtml.escape(currentTimezone)));
+                message.append(String.format("   %s\n\n", TelegramHtml.escape(description)));
+
                 // Create button for timezone selection
                 buttonLabels.add("🌍 Change Timezone");
                 buttonCallbacks.add("setting_timezone_select");
                 continue;
             }
-            
+
             // Special handling for currentYear (integer)
             if (key.equals("settings.currentYear")) {
                 String currentYearValue = value.isEmpty() ? "Not set" : value;
-                message.append(String.format("📅 **Current Year: %s**\n", currentYearValue));
-                message.append(String.format("   %s\n\n", description));
-                
+                message.append(String.format("📅 <b>Current Year: %s</b>\n", TelegramHtml.escape(currentYearValue)));
+                message.append(String.format("   %s\n\n", TelegramHtml.escape(description)));
+
                 // Create button for currentYear input
                 buttonLabels.add("📅 Change Current Year");
                 buttonCallbacks.add("setting_currentYear_select");
                 continue;
             }
-            
+
             // Determine current status (for boolean settings)
             boolean isEnabled = value.equalsIgnoreCase("true");
             String statusEmoji = isEnabled ? "✅" : "❌";
             String statusText = isEnabled ? "Enabled" : "Disabled";
-            
-            message.append(String.format("%s **%s**\n", statusEmoji, statusText));
-            message.append(String.format("   %s\n\n", description));
+
+            message.append(String.format("%s <b>%s</b>\n", statusEmoji, statusText));
+            message.append(String.format("   %s\n\n", TelegramHtml.escape(description)));
 
             // Create button label and callback
             String toggleText = isEnabled ? "Disable" : "Enable";
@@ -212,7 +213,7 @@ public class CommandSettings {
             String settingName = extractSettingName(settingKey);
             String statusEmoji = newBool ? "✅" : "❌";
             String statusText = newBool ? "enabled" : "disabled";
-            String successMsg = String.format("%s Successfully %s **%s**\n\nUse /settings to see updated configuration.", 
+            String successMsg = String.format("%s Successfully %s <b>%s</b>\n\nUse /settings to see updated configuration.",
                 statusEmoji, statusText, settingName);
             
             discordLog.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
@@ -286,10 +287,10 @@ public class CommandSettings {
 
             // Build message
             StringBuilder message = new StringBuilder();
-            message.append("🏠 **Select Your Home Hall**\n\n");
+            message.append("🏠 <b>Select Your Home Hall</b>\n\n");
             message.append("Choose your home hall from the list below.\n");
             if (!currentHomeHall.isEmpty()) {
-                message.append(String.format("Current home hall: **%s**\n", currentHomeHall));
+                message.append(String.format("Current home hall: <b>%s</b>\n", TelegramHtml.escape(currentHomeHall)));
             }
             message.append("\nSelect a hall or choose manual input:");
 
@@ -353,11 +354,11 @@ public class CommandSettings {
             String currentHomeHall = PropertyResolver.getProperty("settings.homeHall", "");
             String currentValueDisplay = currentHomeHall.isEmpty() ? "Not set" : currentHomeHall;
             
-            return String.format("✏️ **Manual Home Hall Input**\n\n" +
+            return String.format("✏️ <b>Manual Home Hall Input</b>\n\n" +
                                 "Please reply with the hall number or name you want to set as your home hall.\n\n" +
-                                "**Current home hall:** %s\n\n" +
-                                "_Example: Type '4' or 'Hall 4' to set Hall 4 as your home hall_", 
-                                currentValueDisplay);
+                                "<b>Current home hall:</b> %s\n\n" +
+                                "<i>Example: Type '4' or 'Hall 4' to set Hall 4 as your home hall</i>",
+                                TelegramHtml.escape(currentValueDisplay));
         }
 
         // Extract hall value from callback data
@@ -374,11 +375,11 @@ public class CommandSettings {
         boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
         
         if (success) {
-            String successMsg = String.format("🏠 Successfully set home hall to **%s**\n\nUse /settings to see updated configuration.", hallValue);
-            
+            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(hallValue));
+
             discordLog.logSuccess(String.format("Home hall set to %s", hallValue));
             telegramLog.logSuccess(String.format("Home hall set to %s", hallValue));
-            
+
             return successMsg;
         } else {
             String errorMsg = "❌ Error: Failed to update home hall setting";
@@ -434,9 +435,9 @@ public class CommandSettings {
                 boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
                 
                 if (success) {
-                    String successMsg = String.format("🌍 Successfully set timezone to **%s**\n\nUse /settings to see updated configuration.", 
-                                                    formatTimezoneDisplay(timezoneValue));
-                    
+                    String successMsg = String.format("🌍 Successfully set timezone to <b>%s</b>\n\nUse /settings to see updated configuration.",
+                                                    TelegramHtml.escape(formatTimezoneDisplay(timezoneValue)));
+
                     discordLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
                     telegramLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
                     
@@ -471,8 +472,8 @@ public class CommandSettings {
                 boolean success = PropertyManager.updateProperty("settings.currentYear", formattedValue);
                 
                 if (success) {
-                    String successMsg = String.format("📅 Successfully set current year to **%s**\n\nUse /settings to see updated configuration.", formattedValue);
-                    
+                    String successMsg = String.format("📅 Successfully set current year to <b>%s</b>\n\nUse /settings to see updated configuration.", formattedValue);
+
                     discordLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
                     telegramLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
                     
@@ -501,8 +502,8 @@ public class CommandSettings {
         boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
         
         if (success) {
-            String successMsg = String.format("🏠 Successfully set home hall to **%s**\n\nUse /settings to see updated configuration.", hallValue);
-            
+            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(hallValue));
+
             discordLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
             telegramLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
             
@@ -541,7 +542,7 @@ public class CommandSettings {
 
         String currentValue = PropertyResolver.getProperty("settings.currentYear", "");
         String currentValueDisplay = currentValue.isEmpty() ? "Not set" : currentValue;
-        String message = String.format("Please enter the tournament year currently being played (e.g., 2025).\n\nCurrent value: **%s**", currentValueDisplay);
+        String message = String.format("Please enter the tournament year currently being played (e.g., 2025).\n\nCurrent value: <b>%s</b>", TelegramHtml.escape(currentValueDisplay));
 
         return new SettingsResponse(message, null);
     }
@@ -592,10 +593,10 @@ public class CommandSettings {
 
         // Build message
         StringBuilder message = new StringBuilder();
-        message.append("🌍 **Select Timezone**\n\n");
+        message.append("🌍 <b>Select Timezone</b>\n\n");
         message.append("Choose your timezone offset from UTC.\n");
         if (!currentTimezone.isEmpty()) {
-            message.append(String.format("Current timezone: **%s**\n", formatTimezoneDisplay(currentTimezone)));
+            message.append(String.format("Current timezone: <b>%s</b>\n", TelegramHtml.escape(formatTimezoneDisplay(currentTimezone))));
         }
         message.append("\nSelect a timezone or choose manual input:");
 
@@ -677,11 +678,11 @@ public class CommandSettings {
             String currentTimezone = PropertyResolver.getProperty("settings.timezone", "");
             String currentValueDisplay = currentTimezone.isEmpty() ? "Not set" : formatTimezoneDisplay(currentTimezone);
             
-            return String.format("✏️ **Manual Timezone Input**\n\n" +
+            return String.format("✏️ <b>Manual Timezone Input</b>\n\n" +
                                 "Please reply with the timezone offset you want to set.\n\n" +
-                                "**Current timezone:** %s\n\n" +
-                                "_Example: Type '+8' for UTC+8, '-5' for UTC-5, or '+9.5' for UTC+9.5_", 
-                                currentValueDisplay);
+                                "<b>Current timezone:</b> %s\n\n" +
+                                "<i>Example: Type '+8' for UTC+8, '-5' for UTC-5, or '+9.5' for UTC+9.5</i>",
+                                TelegramHtml.escape(currentValueDisplay));
         }
 
         // Extract timezone offset from callback data
@@ -709,9 +710,9 @@ public class CommandSettings {
         boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
         
         if (success) {
-            String successMsg = String.format("🌍 Successfully set timezone to **%s**\n\nUse /settings to see updated configuration.", 
-                                            formatTimezoneDisplay(timezoneValue));
-            
+            String successMsg = String.format("🌍 Successfully set timezone to <b>%s</b>\n\nUse /settings to see updated configuration.",
+                                            TelegramHtml.escape(formatTimezoneDisplay(timezoneValue)));
+
             discordLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
             telegramLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
             

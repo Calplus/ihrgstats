@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
@@ -278,6 +279,7 @@ public class CommandInfoMatch {
 
             Map<Integer, Map<Integer, Double>> roundHallVsHallPoints = new HashMap<>();
             Map<Integer, Integer> walkoverCountPerHall = new HashMap<>();
+            Map<Integer, Integer> totalParticipantsPerHall = new HashMap<>();
 
             for (C9_MatchParticipants.Participant p : allParticipants) {
                 if (p.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) continue;
@@ -287,6 +289,7 @@ public class CommandInfoMatch {
                 double points = p.outcome;
                 HallScoreData hsd = hallScores.computeIfAbsent(p.hallId, k -> new HallScoreData(p.hallId, hallNames.get(p.hallId)));
                 hsd.boardWins += points;
+                totalParticipantsPerHall.merge(p.hallId, 1, Integer::sum);
 
                 if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
                     walkoverCountPerHall.merge(p.hallId, 1, Integer::sum);
@@ -295,13 +298,18 @@ public class CommandInfoMatch {
                 }
             }
 
-            // If an entire team (>=5 boards) faced WALKOVER this round, normalize to the "3-2" convention.
+            // If an entire team faced WALKOVER this round (every board this hall
+            // played this round was a walkover, not just some of them), normalize
+            // to the "3-2" convention - derived from the hall's ACTUAL observed
+            // board count this round, not a hardcoded assumption of 5 boards.
             for (Map.Entry<Integer, Integer> entry : walkoverCountPerHall.entrySet()) {
                 int hallId = entry.getKey();
                 int walkoverCount = entry.getValue();
-                if (walkoverCount >= 5) {
+                int totalForHall = totalParticipantsPerHall.getOrDefault(hallId, 0);
+                if (walkoverCount > 0 && walkoverCount == totalForHall) {
+                    double winnerNormalized = MatchScoreUtils.computeWalkoverDefaultScore(walkoverCount);
                     HallScoreData hsd = hallScores.get(hallId);
-                    hsd.boardWins -= (walkoverCount - 3.0);
+                    hsd.boardWins -= (walkoverCount - winnerNormalized);
                     hsd.matchWins += 1.0;
                 }
             }
@@ -362,11 +370,13 @@ public class CommandInfoMatch {
                 double displayScore1 = m.hall1Score;
                 double displayScore2 = m.hall2Score;
                 if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                    displayScore1 = 3.0;
-                    displayScore2 = 2.0;
+                    double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
+                    displayScore1 = winner;
+                    displayScore2 = m.hall1Score - winner;
                 } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                    displayScore1 = 2.0;
-                    displayScore2 = 3.0;
+                    double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
+                    displayScore2 = winner;
+                    displayScore1 = m.hall2Score - winner;
                 }
 
                 String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
@@ -420,11 +430,13 @@ public class CommandInfoMatch {
             double displayScore1 = m.hall1Score;
             double displayScore2 = m.hall2Score;
             if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                displayScore1 = 3.0;
-                displayScore2 = 2.0;
+                double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
+                displayScore1 = winner;
+                displayScore2 = m.hall1Score - winner;
             } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                displayScore1 = 2.0;
-                displayScore2 = 3.0;
+                double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
+                displayScore2 = winner;
+                displayScore1 = m.hall2Score - winner;
             }
 
             String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))

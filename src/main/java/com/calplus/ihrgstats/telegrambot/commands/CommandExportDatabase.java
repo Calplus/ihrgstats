@@ -3,18 +3,34 @@ package com.calplus.ihrgstats.telegrambot.commands;
 import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
+import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.*;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Command handler for /exportdatabase command.
- * Exports the current database file and sends it to the requesting admin's DM.
+ * Command handler for /exportdatabase (admin-only) - the single merged
+ * export command, replacing the old separate /exportplayers (curated
+ * multi-sheet player workbook) and /exportdatabase (raw .db file) pair.
+ * Offers two formats:
+ * - Full export (.xlsx): a generic, one-sheet-per-table dump of every
+ *   populated table, read directly via JDBC/sqlite_master metadata so it
+ *   stays correct as the schema evolves without needing per-table code.
+ * - Database file (.db): the raw SQLite file, unchanged - restoring this
+ *   file into database/core/ is the recommended full-database recovery
+ *   path (the old "re-import a player export" workflow no longer exists;
+ *   this replaces it).
  */
 public class CommandExportDatabase {
     private final DiscordLog discordLog;
@@ -23,36 +39,30 @@ public class CommandExportDatabase {
     private final Path dbPath;
 
     public CommandExportDatabase() {
-        // Load environment variables
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
-        
+
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
         this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
         this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db");
     }
 
-    /**
-     * Checks if a user is an admin
-     * @param userId The user ID to check
-     * @return true if user is admin, false otherwise
-     */
     public boolean isAdmin(String userId) {
         return !adminUserId.isEmpty() && adminUserId.equals(userId);
     }
 
     /**
-     * Handles the initial /exportdatabase command (sends confirmation request)
-     * @param userId The user ID who issued the command
-     * @return ExportResponse containing the confirmation message and buttons
+     * Handles the initial /exportdatabase command - presents a choice
+     * between the two export formats (no separate confirmation step; the
+     * format buttons themselves double as the confirmation, since both
+     * formats carry the same sensitivity warning).
      */
-    public ExportResponse requestConfirmation(String userId) {
+    public ExportResponse requestFormatChoice(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
         discordLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
         telegramLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
 
-        // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can export the database.";
             discordLog.logWarning(String.format("Non-admin user %s attempted to use /exportdatabase", userId));
@@ -60,40 +70,31 @@ public class CommandExportDatabase {
             return new ExportResponse(errorMsg, null, false);
         }
 
-        // Check if database exists
         if (!Files.exists(dbPath)) {
-            String errorMsg = "❌ Error: Database file not found at: " + dbPath.toString();
+            String errorMsg = "❌ Error: Database file not found at: " + dbPath;
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
 
-        // Build confirmation message
-        String message = "⚠️ **Database Export Confirmation**\n\n" +
-                        "You are about to export the entire database file.\n\n" +
-                        "**Database:** `default.db`\n" +
-                        "**Location:** `database/core/`\n\n" +
-                        "The database file will be sent to your Direct Message.\n\n" +
-                        "⚠️ **Warning:** The database contains sensitive data. " +
-                        "Handle it securely and do not share it publicly.\n\n" +
-                        "Do you want to proceed?";
+        String message = "📦 <b>Export Database</b>\n\n" +
+                "Choose an export format:\n" +
+                "• <b>Full export (.xlsx)</b> - every table as a spreadsheet, human-readable\n" +
+                "• <b>Database file (.db)</b> - the raw SQLite file; restoring this into <code>database/core/</code> is the recommended full recovery path\n\n" +
+                "⚠️ Both contain the complete dataset. Handle exports securely and do not share them publicly.\n\n" +
+                "Do you want to proceed?";
 
-        String[] buttonLabels = {"✅ Yes, Export Database", "❌ Cancel"};
-        String[] buttonCallbacks = {"export_db_confirm", "export_db_cancel"};
+        String[] buttonLabels = {"📊 Full export (.xlsx)", "🗄️ Database file (.db)", "❌ Cancel"};
+        String[] buttonCallbacks = {"export_db_xlsx", "export_db_confirm", "export_db_cancel"};
 
-        discordLog.logInfo(String.format("Sent database export confirmation to admin %s", userId));
-        telegramLog.logInfo(String.format("Sent database export confirmation to admin %s", userId));
+        discordLog.logInfo(String.format("Sent export format choice to admin %s", userId));
+        telegramLog.logInfo(String.format("Sent export format choice to admin %s", userId));
 
         return new ExportResponse(message, new ButtonConfig(buttonLabels, buttonCallbacks), false);
     }
 
-    /**
-     * Handles the database export after confirmation
-     * @param userId The user ID who confirmed
-     * @return ExportResponse containing the result and database file path if successful
-     */
-    public ExportResponse executeExport(String userId) {
-        // Check admin authorization again
+    /** Raw .db file export - unchanged behavior from the original /exportdatabase. */
+    public ExportResponse executeDbExport(String userId) {
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can export the database.";
             discordLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
@@ -101,39 +102,36 @@ public class CommandExportDatabase {
             return new ExportResponse(errorMsg, null, false);
         }
 
-        discordLog.logInfo(String.format("Admin %s confirmed database export", userId));
-        telegramLog.logInfo(String.format("Admin %s confirmed database export", userId));
+        discordLog.logInfo(String.format("Admin %s confirmed .db file export", userId));
+        telegramLog.logInfo(String.format("Admin %s confirmed .db file export", userId));
 
-        // Check if database exists
         if (!Files.exists(dbPath)) {
-            String errorMsg = "❌ Error: Database file not found at: " + dbPath.toString();
+            String errorMsg = "❌ Error: Database file not found at: " + dbPath;
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
 
         try {
-            // Create a timestamped copy in temp directory
             String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
             String exportFileName = "database_export_" + timestamp + ".db";
             Path tempDir = Files.createTempDirectory("db_export_");
             Path exportPath = tempDir.resolve(exportFileName);
 
-            // Copy database file
             Files.copy(dbPath, exportPath, StandardCopyOption.REPLACE_EXISTING);
 
-            String successMsg = "✅ Database exported successfully!\n\n" +
-                              "The database file has been sent to your Direct Message.\n\n" +
-                              "Filename: " + exportFileName + "\n" +
-                              "Timestamp: " + timestamp;
+            String successMsg = "✅ Database file exported successfully!\n\n" +
+                    "The database file has been sent to your Direct Message.\n\n" +
+                    "Filename: " + exportFileName + "\n" +
+                    "Timestamp: " + timestamp;
 
-            discordLog.logSuccess(String.format("Database exported successfully for admin %s", userId));
-            telegramLog.logSuccess(String.format("Database exported successfully for admin %s", userId));
+            discordLog.logSuccess(String.format("Database file exported successfully for admin %s", userId));
+            telegramLog.logSuccess(String.format("Database file exported successfully for admin %s", userId));
 
             return new ExportResponse(successMsg, null, true, exportPath);
 
         } catch (IOException e) {
-            String errorMsg = "❌ Error: Failed to export database: " + e.getMessage();
+            String errorMsg = "❌ Error: Failed to export database file: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
@@ -141,19 +139,109 @@ public class CommandExportDatabase {
     }
 
     /**
-     * Handles the cancellation of database export
-     * @param userId The user ID who cancelled
-     * @return Response message
+     * Generic one-sheet-per-table .xlsx dump of the entire database. Table
+     * names are enumerated from sqlite_master (never user input), so
+     * interpolating them directly into the SELECT statement is safe.
      */
+    public ExportResponse executeXlsxExport(String userId) {
+        if (!isAdmin(userId)) {
+            String errorMsg = "❌ Access Denied: Only administrators can export the database.";
+            discordLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
+            telegramLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
+            return new ExportResponse(errorMsg, null, false);
+        }
+
+        discordLog.logInfo(String.format("Admin %s confirmed full .xlsx export", userId));
+        telegramLog.logInfo(String.format("Admin %s confirmed full .xlsx export", userId));
+
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             XSSFWorkbook workbook = new XSSFWorkbook()) {
+
+            int tableCount = 0;
+            for (String tableName : listTables(conn)) {
+                if (dumpTableToSheet(conn, workbook, tableName)) {
+                    tableCount++;
+                }
+            }
+
+            String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
+            String filename = String.format("database_export_%s.xlsx", timestamp);
+            Path tempDir = Files.createTempDirectory("db_export_");
+            Path xlsxPath = tempDir.resolve(filename);
+            try (FileOutputStream fos = new FileOutputStream(xlsxPath.toFile())) {
+                workbook.write(fos);
+            }
+
+            String successMsg = String.format(
+                    "✅ Full database export completed: %d populated tables exported to %s.",
+                    tableCount, filename);
+            discordLog.logSuccess(successMsg);
+            telegramLog.logSuccess(successMsg);
+            return new ExportResponse(successMsg, null, true, xlsxPath);
+
+        } catch (Exception e) {
+            String errorMsg = "❌ Error: Full export failed: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return new ExportResponse(errorMsg, null, false);
+        }
+    }
+
+    private List<String> listTables(Connection conn) throws SQLException {
+        List<String> tables = new ArrayList<>();
+        String sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                tables.add(rs.getString(1));
+            }
+        }
+        return tables;
+    }
+
+    /**
+     * Dumps one table's full contents into a new sheet named after the
+     * table (column headers from ResultSetMetaData). Returns false (no
+     * sheet created) if the table has no rows - "every POPULATED table".
+     */
+    private boolean dumpTableToSheet(Connection conn, XSSFWorkbook workbook, String tableName) throws SQLException {
+        String sql = "SELECT * FROM \"" + tableName + "\"";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            ResultSetMetaData meta = rs.getMetaData();
+            int columnCount = meta.getColumnCount();
+
+            Sheet sheet = null;
+            int rowNum = 0;
+            while (rs.next()) {
+                if (sheet == null) {
+                    sheet = workbook.createSheet(tableName);
+                    Row header = sheet.createRow(rowNum++);
+                    for (int c = 1; c <= columnCount; c++) {
+                        header.createCell(c - 1).setCellValue(meta.getColumnLabel(c));
+                    }
+                }
+                Row row = sheet.createRow(rowNum++);
+                for (int c = 1; c <= columnCount; c++) {
+                    Object value = rs.getObject(c);
+                    row.createCell(c - 1).setCellValue(value != null ? value.toString() : "");
+                }
+            }
+            if (sheet == null) {
+                return false;
+            }
+            for (int c = 0; c < columnCount; c++) {
+                sheet.autoSizeColumn(c);
+            }
+            return true;
+        }
+    }
+
     public String handleCancel(String userId) {
         discordLog.logInfo(String.format("Admin %s cancelled database export", userId));
         telegramLog.logInfo(String.format("Admin %s cancelled database export", userId));
         return "ℹ️ Database export cancelled.";
     }
 
-    /**
-     * Response object for database export operations
-     */
+    /** Response object for database export operations. */
     public static class ExportResponse {
         public final String message;
         public final ButtonConfig buttons;
@@ -172,9 +260,7 @@ public class CommandExportDatabase {
         }
     }
 
-    /**
-     * Button configuration for inline keyboard
-     */
+    /** Button configuration for inline keyboard. */
     public static class ButtonConfig {
         public final String[] labels;
         public final String[] callbacks;

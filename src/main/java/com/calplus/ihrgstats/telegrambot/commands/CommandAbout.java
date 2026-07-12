@@ -6,6 +6,7 @@ import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
+import com.calplus.ihrgstats.utils.TelegramHtml;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -119,30 +120,32 @@ public class CommandAbout {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
             
             StringBuilder message = new StringBuilder();
-            message.append("ℹ️ **About IHRG Stats Bot**\n\n");
-            
-            message.append("**Developer:** ").append(author).append("\n");
-            message.append("**Version:** ").append(version).append("\n");
-            message.append("**Timezone:** ").append(TimezoneHelper.getFormattedTimezone()).append("\n");
-            message.append("**GitHub:** https://github.com/Calplus/ihrgstats\n\n");
-            
-            message.append("**Bot Launched:**\n");
-            message.append("`").append(TimezoneHelper.toConfiguredZone(Main.LAUNCH_TIME).format(formatter)).append("`\n\n");
-            
-            message.append("**Last Updated:**\n");
-            message.append("`").append(lastUpdated).append("`\n\n");
-            
-            message.append("**Current Time:**\n");
-            message.append("`").append(now.format(formatter)).append("`\n\n");
-            
+            message.append("ℹ️ <b>About IHRG Stats Bot</b>\n\n");
+
+            message.append("<b>Developer:</b> ").append(TelegramHtml.escape(author)).append("\n");
+            message.append("<b>Version:</b> ").append(TelegramHtml.escape(version)).append("\n");
+            message.append("<b>Timezone:</b> ").append(TelegramHtml.escape(TimezoneHelper.getFormattedTimezone())).append("\n");
+            message.append("<b>GitHub:</b> https://github.com/Calplus/ihrgstats\n\n");
+
+            message.append("<b>Bot Launched:</b>\n");
+            message.append("<code>").append(TimezoneHelper.toConfiguredZone(Main.LAUNCH_TIME).format(formatter)).append("</code>\n\n");
+
+            message.append("<b>Last Updated:</b>\n");
+            message.append("<code>").append(TelegramHtml.escape(lastUpdated)).append("</code>\n\n");
+
+            message.append("<b>Current Time:</b>\n");
+            message.append("<code>").append(now.format(formatter)).append("</code>\n\n");
+
             if (!adminUserId.isEmpty()) {
-                // Fetch the username for the admin user ID
+                // Fetch the username for the admin user ID - a Telegram profile
+                // field the admin controls, so it must be escaped like any
+                // other dynamic content.
                 String adminHandle = fetchUsername(adminUserId);
-                message.append("**Bot Administrator:**\n");
-                message.append("@").append(adminHandle).append("\n\n");
+                message.append("<b>Bot Administrator:</b>\n");
+                message.append("@").append(TelegramHtml.escape(adminHandle)).append("\n\n");
             }
-            
-            message.append("_For help with commands, use_ `/help`");
+
+            message.append("<i>For help with commands, use</i> <code>/help</code>");
             String userInfo2 = TelegramListener.formatUserInfo(userId);
             logHelper.logSuccess(String.format("%s received about information", userInfo2));
             return new CommandResponse(message.toString(), (java.nio.file.Path) null);

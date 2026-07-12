@@ -3,6 +3,7 @@ package com.calplus.ihrgstats.telegrambot.utils;
 import com.calplus.ihrgstats.calculations.EloCalculator;
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.utils.Constants;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -144,6 +145,13 @@ public class RoundCsvProcessor {
 
             A1_Rounds.Round round = rounds.getOrCreateRound(year, roundOrder, nowTimestamp);
 
+            // Capture any match_type already assigned to this round's matches
+            // BEFORE clearing them below - match_type_id lives on the matches
+            // rows themselves, so once they're deleted this lookup can never
+            // recover it again (a previously-fixed bug: the lookup used to run
+            // after the delete and always returned null on reprocess).
+            Integer matchTypeId = matches.getMatchTypeIdForRound(round.id);
+
             if (isReprocess) {
                 // Clear this round's OWN data (keep the round row so admin-set
                 // metadata like round_datetime survives). Snapshots are cleared
@@ -154,9 +162,8 @@ public class RoundCsvProcessor {
                 ratingSnapshots.deleteSnapshotsForRound(round.id);
             }
 
-            // Resolve match_type: only urgently needed if this round has a walkover
-            // (walkover default scoring needs max_score). Otherwise fully deferrable.
-            Integer matchTypeId = matches.getMatchTypeIdForRound(round.id);
+            // Only urgently needed if this round has a walkover (walkover
+            // default scoring needs max_score). Otherwise fully deferrable.
             boolean hasWalkover = games.stream().anyMatch(GameRow::isWalkover);
             if (matchTypeId == null && hasWalkover) {
                 matchTypeId = resolveMatchTypeInteractively();
@@ -229,7 +236,7 @@ public class RoundCsvProcessor {
                 double outcome2;
 
                 if (p1Walkover || p2Walkover) {
-                    double defaultScore = computeWalkoverDefaultScore(maxScore != null ? maxScore : 0.0);
+                    double defaultScore = MatchScoreUtils.computeWalkoverDefaultScore(maxScore != null ? maxScore : 0.0);
                     if (p1Walkover) {
                         score1 = 0.0;
                         score2 = defaultScore;
@@ -280,6 +287,21 @@ public class RoundCsvProcessor {
                 // Walkover games do not affect ELO, matching legacy.
                 if (!p1Walkover && !p2Walkover) {
                     eloGames.add(new EloCalculator.Game(p1Id, p2Id, outcome1, roundOrder));
+                }
+            }
+
+            // Non-blocking warning (not a validation failure) if a hall fielded more
+            // players than expected this round - the historical "max 5 players per
+            // hall" requirement, previously defined (Constants.Validation.MAX_PLAYERS_PER_HALL)
+            // but never enforced anywhere.
+            for (Map.Entry<String, Integer> entry : hallSeatCounter.entrySet()) {
+                if (entry.getValue() > Constants.Validation.MAX_PLAYERS_PER_HALL) {
+                    int hallId = Integer.parseInt(entry.getKey());
+                    A3_Halls.Hall hall = halls.getHallById(hallId);
+                    String hallName = hall != null ? hall.hallName : ("hall_id=" + hallId);
+                    notify("🟡", String.format(
+                            "Round %d: hall %s fielded %d players this round, exceeding the expected max of %d.",
+                            roundOrder, hallName, entry.getValue(), Constants.Validation.MAX_PLAYERS_PER_HALL));
                 }
             }
 
@@ -390,15 +412,6 @@ public class RoundCsvProcessor {
         }
         A3_Halls.Hall hall = halls.getHallByName(hallName.trim());
         return hall != null ? hall : halls.getHallByCode(A3_Halls.UNKNOWN_HALL_CODE);
-    }
-
-    /** Same formula as legacy: winner gets ceil(maxScore/2), or maxScore/2+1 if that's already an integer. */
-    double computeWalkoverDefaultScore(double maxScore) {
-        double halfSeeds = maxScore / 2.0;
-        if (halfSeeds == Math.floor(halfSeeds)) {
-            return halfSeeds + 1;
-        }
-        return Math.ceil(halfSeeds);
     }
 
     private Integer resolveMatchTypeInteractively() throws SQLException {

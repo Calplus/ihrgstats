@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
@@ -266,9 +267,7 @@ public class CommandRankHalls {
 
         String lastRoundForMetadata;
         if (selectedRound.equalsIgnoreCase("all")) {
-            int latestOrder = rounds.getLatestRoundOrder(year);
-            A1_Rounds.Round latest = latestOrder > 0 ? rounds.getRoundByYearAndOrder(year, latestOrder) : null;
-            lastRoundForMetadata = latest != null ? latest.roundLabel : null;
+            lastRoundForMetadata = MatchScoreUtils.latestRoundLabel(rounds, year);
         } else {
             A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
             lastRoundForMetadata = round != null ? round.roundLabel : selectedRound;

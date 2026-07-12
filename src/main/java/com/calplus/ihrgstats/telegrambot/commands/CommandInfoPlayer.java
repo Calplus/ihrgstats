@@ -150,7 +150,7 @@ public class CommandInfoPlayer {
             callbacks.add("infoplayer_cancel");
 
             String message = String.format("**👤 Player Information**\n\nPlayer: **%s** (%s)\n\nSelect rounds to display:",
-                    state.playerName, state.hallName);
+                    TelegramHtml.escape(state.playerName), state.hallName);
             return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -271,7 +271,7 @@ public class CommandInfoPlayer {
     private String generateTextOutput(PlayerData player, List<Integer> roundOrders) {
         StringBuilder sb = new StringBuilder();
         sb.append("**👤 Player Information**\n\n");
-        sb.append(String.format("**%s** (%s)\n\n", player.name, player.hall));
+        sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(player.name), player.hall));
 
         sb.append("**📊 Stats Per Round:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
