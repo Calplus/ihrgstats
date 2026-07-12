@@ -241,6 +241,28 @@ public class DatabaseSchema {
             "    FOREIGN KEY (rating_type_id) REFERENCES rating_types(id)\n" +
             ")");
 
+        // Point-in-time record: the rating each player had for a round AS
+        // COMPUTED WHEN THAT ROUND WAS ORIGINALLY PROCESSED. Unlike
+        // player_ratings (which the whole-history recalculation rewrites as
+        // later results arrive), snapshot rows are immutable - replaced only
+        // when their own round is re-uploaded/reprocessed. "Rankings as of
+        // round N" queries read this table.
+        createTable(conn, "player_ratings_snapshot",
+            "CREATE TABLE IF NOT EXISTS player_ratings_snapshot (\n" +
+            "    player_id TEXT NOT NULL,\n" +
+            "    round_id INTEGER NOT NULL,\n" +
+            "    rating_type_id INTEGER NOT NULL,\n" +
+            "    rating_value REAL NOT NULL,\n" +
+            "    rating_deviation REAL NOT NULL,\n" +
+            "    volatility REAL NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    PRIMARY KEY (player_id, round_id, rating_type_id),\n" +
+            "    FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (round_id) REFERENCES rounds(id) ON DELETE CASCADE,\n" +
+            "    FOREIGN KEY (rating_type_id) REFERENCES rating_types(id)\n" +
+            ")");
+
         // ====================================================================
         // DOMAIN 5: AI HYBRID FEATURES
         // ====================================================================
@@ -295,6 +317,7 @@ public class DatabaseSchema {
         createIndex(conn, "idx_capped_imports_year_mapped", "capped_imports", "year, mapped");
         createIndex(conn, "idx_player_ratings_round_type", "player_ratings", "round_id, rating_type_id");
         createIndex(conn, "idx_player_ratings_value_search", "player_ratings", "rating_type_id, rating_value");
+        createIndex(conn, "idx_player_ratings_snapshot_round_type", "player_ratings_snapshot", "round_id, rating_type_id");
         createIndex(conn, "idx_player_profiles_year", "player_profiles", "last_calculated_year");
         createIndex(conn, "idx_ai_predictions_winner_id", "ai_predictions", "predicted_winner_player_id");
     }

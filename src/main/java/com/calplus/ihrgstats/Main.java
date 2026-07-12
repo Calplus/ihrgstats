@@ -87,38 +87,45 @@ public class Main {
     }
     
     /**
-     * Checks if the database exists, creates it if not
+     * Ensures the database and its full schema exist. Schema creation always
+     * runs (every statement is CREATE ... IF NOT EXISTS, so this is
+     * idempotent) - this is what lets tables added in later versions, such
+     * as player_ratings_snapshot, appear in a database created by an older
+     * version.
      */
     private static void initializeDatabase(DiscordLog discordLog, TelegramLog telegramLog) {
         Path dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db");
-        
-        if (Files.exists(dbPath)) {
-            discordLog.batchInfo("Database already exists at: " + dbPath);
-            telegramLog.batchInfo("Database already exists at: " + dbPath);
-            System.out.println("Database found: " + dbPath);
+        boolean dbExisted = Files.exists(dbPath);
+
+        if (dbExisted) {
+            discordLog.batchInfo("Database already exists at: " + dbPath + " - ensuring schema is up to date");
+            telegramLog.batchInfo("Database already exists at: " + dbPath + " - ensuring schema is up to date");
+            System.out.println("Database found: " + dbPath + " (ensuring schema is up to date)");
         } else {
             discordLog.batchInfo("Database not found. Creating new database...");
             telegramLog.batchInfo("Database not found. Creating new database...");
             System.out.println("Database not found. Creating new database at: " + dbPath);
-            
+
             discordLog.flushBatch();
             telegramLog.flushBatch();
-            
-            try {
-                DatabaseSchema schema = new DatabaseSchema();
-                schema.createDatabase("default.db");
-                
+        }
+
+        try {
+            DatabaseSchema schema = new DatabaseSchema();
+            schema.createDatabase("default.db");
+
+            if (!dbExisted) {
                 discordLog.logSuccess("Database created successfully");
                 telegramLog.logSuccess("Database created successfully");
                 System.out.println("Database created successfully");
-            } catch (Exception e) {
-                String errorMsg = "Failed to create database: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
-                System.err.println(errorMsg);
-                e.printStackTrace();
-                System.exit(1);
             }
+        } catch (Exception e) {
+            String errorMsg = "Failed to " + (dbExisted ? "update database schema" : "create database") + ": " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            System.err.println(errorMsg);
+            e.printStackTrace();
+            System.exit(1);
         }
 
         seedReferenceData(discordLog, telegramLog);

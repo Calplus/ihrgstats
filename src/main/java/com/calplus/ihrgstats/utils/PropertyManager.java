@@ -151,7 +151,7 @@ public class PropertyManager {
     private static boolean updateEnvironmentProperty(String propertyKey, String value) {
         try {
             // Convert property key to environment variable name
-            // settings.perfElo.enabled -> SETTINGS_PERFELO_ENABLED
+            // settings.currentYear -> SETTINGS_CURRENTYEAR
             // internet.webhook.url -> INTERNET_WEBHOOK_URL
             String envKey = propertyKey.toUpperCase().replace(".", "_");
             

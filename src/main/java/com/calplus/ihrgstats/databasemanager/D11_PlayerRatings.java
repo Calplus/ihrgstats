@@ -168,4 +168,20 @@ public class D11_PlayerRatings {
             ps.executeUpdate();
         }
     }
+
+    /**
+     * Deletes one rating type's rows for a round. Used by the whole-history
+     * recalculation so each recalculated round's stored rows exactly mirror
+     * the recalculated player set (players dropped from the set don't leave
+     * stale rows behind), without touching other rating types.
+     */
+    public void deleteRatingsForRoundAndType(int roundId, int ratingTypeId) throws SQLException {
+        String sql = "DELETE FROM player_ratings WHERE round_id = ? AND rating_type_id = ?";
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, roundId);
+            ps.setInt(2, ratingTypeId);
+            ps.executeUpdate();
+        }
+    }
 }

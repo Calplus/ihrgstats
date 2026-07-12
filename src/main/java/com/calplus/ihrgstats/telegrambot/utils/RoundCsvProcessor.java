@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.utils;
 
 import com.calplus.ihrgstats.calculations.EloCalculator;
+import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.*;
 
 import java.io.BufferedReader;
@@ -42,6 +43,7 @@ public class RoundCsvProcessor {
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
+    private final D15_PlayerRatingSnapshots ratingSnapshots = new D15_PlayerRatingSnapshots();
     private final PlayerIdentityResolver identityResolver = new PlayerIdentityResolver();
 
     private MultiChoiceCallback multiChoiceCallback;
@@ -144,9 +146,12 @@ public class RoundCsvProcessor {
 
             if (isReprocess) {
                 // Clear this round's OWN data (keep the round row so admin-set
-                // metadata like round_datetime survives).
+                // metadata like round_datetime survives). Snapshots are cleared
+                // too - the underlying match data is changing, so this round's
+                // point-in-time record legitimately gets re-taken.
                 matches.deleteMatchesForRound(round.id);
                 playerRatings.deleteRatingsForRound(round.id);
+                ratingSnapshots.deleteSnapshotsForRound(round.id);
             }
 
             // Resolve match_type: only urgently needed if this round has a walkover
@@ -309,14 +314,35 @@ public class RoundCsvProcessor {
             EloCalculator.Glicko2Result eloResult = EloCalculator.calculateGlicko2TrueElo(
                     eloGames, allPlayerIdsThisRound, initialRatings, List.of(roundOrder));
 
+            // Persist this round's single-round result twice:
+            // - player_ratings: the current best estimate (superseded by the
+            //   whole-history recalculation below);
+            // - player_ratings_snapshot: the immutable point-in-time record of
+            //   what was published when this round was processed - recalc
+            //   never touches it.
             Map<String, EloCalculator.Glicko2Rating> finalRatings = eloResult.ratingsByRound.getOrDefault(roundOrder, Map.of());
             for (Map.Entry<String, EloCalculator.Glicko2Rating> entry : finalRatings.entrySet()) {
                 EloCalculator.Glicko2Rating rating = entry.getValue();
                 playerRatings.insertRating(entry.getKey(), round.id, trueEloTypeId, rating.rating, rating.rd, rating.volatility, nowTimestamp);
+                ratingSnapshots.insertSnapshot(entry.getKey(), round.id, trueEloTypeId, rating.rating, rating.rd, rating.volatility, nowTimestamp);
             }
 
             notify("🟢", String.format("round_%d.csv processed successfully for %d. %d matches, %d players rated.",
                     roundOrder, year, games.size(), finalRatings.size()));
+
+            // Whole-history recalculation: replay ALL stored rounds across all
+            // years so later results refine earlier rounds' estimates. The
+            // round itself is already fully committed - a recalc failure must
+            // not roll it back or fail the upload.
+            try {
+                RatingRecalculator.RecalcResult recalc = new RatingRecalculator().recalculateAll(nowTimestamp);
+                notify("🟢", String.format(
+                        "Whole-history recalculation complete: %d rounds recalculated across all years (%d passes, %d rating rows updated).",
+                        recalc.roundsRecalculated, recalc.passes, recalc.ratingRowsWritten));
+            } catch (SQLException e) {
+                notify("🟠", "Round data was saved, but the whole-history recalculation failed: " + e.getMessage()
+                        + " - run /recalculate to retry.");
+            }
 
             promptForRoundDatetimeIfMissing(round, nowTimestamp);
 

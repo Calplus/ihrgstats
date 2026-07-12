@@ -24,7 +24,6 @@ public class CommandComparePlayers {
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
-    private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
     private static final Map<String, PlayerCompareSelectionState> userSelectionStates = new HashMap<>();
@@ -283,7 +282,7 @@ public class CommandComparePlayers {
         player.hall = hall;
 
         for (A1_Rounds.Round round : roundsToInclude) {
-            D11_PlayerRatings.Rating rating = playerRatings.getRating(playerId, round.id, trueEloTypeId);
+            D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(playerId, round.id, trueEloTypeId);
             if (rating == null) continue;
 
             int elo = (int) Math.round(rating.ratingValue);
@@ -308,7 +307,7 @@ public class CommandComparePlayers {
                     } else {
                         String oppName = playerNames.getNameForYear(opp.playerId, year);
                         player.oppNameByRound.put(round.roundOrder, oppName != null ? oppName : opp.playerId);
-                        D11_PlayerRatings.Rating oppRating = playerRatings.getRating(opp.playerId, round.id, trueEloTypeId);
+                        D11_PlayerRatings.Rating oppRating = rankingQueryHelper.getPointInTimeRating(opp.playerId, round.id, trueEloTypeId);
                         if (oppRating != null) {
                             player.oppEloByRound.put(round.roundOrder, (int) Math.round(oppRating.ratingValue));
                         }

@@ -23,7 +23,6 @@ public class CommandInfoHall {
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
-    private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
     private static final Map<String, HallInfoSelectionState> userSelectionStates = new HashMap<>();
@@ -214,7 +213,7 @@ public class CommandInfoHall {
             player.capped = status.capped;
 
             for (A1_Rounds.Round round : roundsToInclude) {
-                D11_PlayerRatings.Rating rating = playerRatings.getRating(status.playerId, round.id, trueEloTypeId);
+                D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
                 if (rating == null) continue;
 
                 int elo = (int) Math.round(rating.ratingValue);
@@ -288,7 +287,7 @@ public class CommandInfoHall {
         for (A1_Rounds.Round round : roundsToInclude) {
             Map<Integer, List<Double>> elosByHall = new HashMap<>();
             for (B6_PlayerYearStatus.Status status : allStatuses) {
-                D11_PlayerRatings.Rating rating = playerRatings.getRating(status.playerId, round.id, trueEloTypeId);
+                D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
                 if (rating == null) continue;
                 elosByHall.computeIfAbsent(status.hallId, k -> new ArrayList<>()).add(rating.ratingValue);
             }

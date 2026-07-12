@@ -167,7 +167,7 @@ public class CommandSettings {
 
     /**
      * Handles a settings toggle callback
-     * @param callbackData The callback data from the button (e.g., "setting_toggle_settings.perfElo.enabled")
+     * @param callbackData The callback data from the button (e.g., "setting_toggle_settings.allowAllChannelsProcessing")
      * @param userId The user ID who clicked the button
      * @return Response message after toggling the setting
      */

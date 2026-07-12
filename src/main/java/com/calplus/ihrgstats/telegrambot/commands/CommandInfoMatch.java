@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
@@ -22,7 +23,7 @@ public class CommandInfoMatch {
     private final A3_Halls halls = new A3_Halls();
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
-    private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
+    private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
 
     private static final Map<String, SelectionState> userSelectionStates = new ConcurrentHashMap<>();
@@ -175,7 +176,7 @@ public class CommandInfoMatch {
         List<B6_PlayerYearStatus.Status> allStatuses = playerYearStatus.getActiveStatusesForYear(year);
         Map<Integer, List<Double>> elosByHall = new HashMap<>();
         for (B6_PlayerYearStatus.Status status : allStatuses) {
-            D11_PlayerRatings.Rating rating = playerRatings.getRating(status.playerId, roundId, trueEloTypeId);
+            D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, roundId, trueEloTypeId);
             if (rating == null) continue;
             elosByHall.computeIfAbsent(status.hallId, k -> new ArrayList<>()).add(rating.ratingValue);
         }

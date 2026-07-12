@@ -1,18 +1,27 @@
 package com.calplus.ihrgstats.calculations;
 
+import com.calplus.ihrgstats.utils.Constants;
+
 import java.util.*;
 
 /**
  * ELO calculation system using the Batch Glicko-2 algorithm.
  * Computes TrueElo (standard Glicko-2 with 1.0/0.5/0.0 win/draw/loss
- * outcomes). PerfElo (sigmoid point-margin transform) has been removed
- * entirely - it was already non-functional in the app (see README), and
- * the "ExpElo" rating_type reserved for future experimentation currently
- * has no calculation code behind it at all.
+ * outcomes). The "ExpElo" rating_type is a reserved slot with no
+ * calculation code yet - it will be repurposed into the future AI + WHR
+ * rating system (the old PerfElo sigmoid point-margin transform it
+ * replaced was removed entirely; it was already non-functional in the
+ * app).
+ *
+ * Supports whole-history recalculation: {@link #calculateWholeHistory}
+ * replays an arbitrary chronological round sequence in multiple passes,
+ * where each pass's opponent estimates come from the previous pass's
+ * full trajectory - letting later results back-propagate into earlier
+ * rounds' estimates (WHR-style refinement).
  */
 public class EloCalculator {
     // Glicko-2 Constants
-    private static final double DEFAULT_RATING = 1000.0;
+    private static final double DEFAULT_RATING = Constants.BASE_ELO;
     private static final double DEFAULT_RD = 350.0; // High initial uncertainty for fast convergence
     private static final double DEFAULT_VOLATILITY = 0.06;
     private static final double TAU = 1.2; // System constant - higher for faster convergence in short tournaments
@@ -205,6 +214,21 @@ public class EloCalculator {
     }
     
     /**
+     * One Glicko-2 inactivity step: rating deviation grows to reflect
+     * increasing uncertainty while the rating value and volatility stay
+     * exactly unchanged. Computed on the Glicko-2 internal scale
+     * (phi' = sqrt(phi^2 + sigma^2), phi = RD / GLICKO2_SCALE), capped at
+     * DEFAULT_RD. Applied once per round to every player who has no games
+     * that round (sat out, or only faced a WALKOVER).
+     */
+    private static Glicko2Rating applyInactivityStep(Glicko2Rating currentRating) {
+        double phi = currentRating.rd / GLICKO2_SCALE;
+        double newPhi = Math.sqrt(phi * phi + currentRating.volatility * currentRating.volatility);
+        double newRd = Math.min(newPhi * GLICKO2_SCALE, DEFAULT_RD);
+        return new Glicko2Rating(currentRating.rating, newRd, currentRating.volatility);
+    }
+
+    /**
      * Helper class to store opponent data for calculations
      */
     private static class OpponentData {
@@ -229,10 +253,9 @@ public class EloCalculator {
     private static Glicko2Rating updateGlicko2Rating(Glicko2Rating currentRating, List<OpponentData> opponents) {
         // If no games played, increase RD due to inactivity
         if (opponents.isEmpty()) {
-            double newRd = Math.sqrt(currentRating.rd * currentRating.rd + currentRating.volatility * currentRating.volatility);
-            return new Glicko2Rating(currentRating.rating, Math.min(newRd, DEFAULT_RD), currentRating.volatility);
+            return applyInactivityStep(currentRating);
         }
-        
+
         // Step 1: Calculate variance v
         double v = calculateVariance(currentRating.rating, opponents);
         
@@ -259,39 +282,21 @@ public class EloCalculator {
             ratingChange += gPhi * (opp.outcome - e);
         }
         double newRating = currentRating.rating + (newRdScaled * newRdScaled) * ratingChange * GLICKO2_SCALE;
-        
-        // DEBUG: First call only
-        if (DEBUG_FIRST_UPDATE) {
-            DEBUG_FIRST_UPDATE = false;
-            System.out.println("DEBUG updateGlicko2Rating (FIXED v2):");
-            System.out.println("  Current: rating=" + currentRating.rating + ", rd=" + currentRating.rd);
-            System.out.println("  Opponents: " + opponents.size());
-            System.out.println("  Variance v (Glicko-2 scale): " + v);
-            System.out.println("  Delta: " + delta);
-            System.out.println("  New volatility: " + newVolatility);
-            System.out.println("  RD scaled: " + rdScaled);
-            System.out.println("  PhiStar: " + phiStar);
-            System.out.println("  New RD scaled: " + newRdScaled);
-            System.out.println("  New RD (unscaled): " + newRd);
-            System.out.println("  RatingChange sum: " + ratingChange);
-            System.out.println("  Rating change: " + ((newRdScaled * newRdScaled) * ratingChange * GLICKO2_SCALE));
-            System.out.println("  New rating: " + newRating);
-        }
-        
+
         return new Glicko2Rating(newRating, newRd, newVolatility);
     }
-    
-    private static boolean DEBUG_FIRST_UPDATE = true;
-    
+
     /**
-     * Calculates TrueElo using Batch Glicko-2 with binary win/loss/draw outcomes
-     * Implements proper Batch Glicko-2 algorithm with 3 iterations per round
-     * 
-     * @param allGames List of all games across all rounds being (re)processed this year
+     * Calculates TrueElo using Batch Glicko-2 with binary win/loss/draw outcomes.
+     * Single forward pass; each round is solved as a 3-iteration fixed point
+     * (see {@link #solveRound}). Equivalent to
+     * {@code calculateWholeHistory(..., 1)}.
+     *
+     * @param allGames List of all games across all rounds being (re)processed
      * @param playerIds Set of all permanent player_ids involved
      * @param initialRatings Map of player_id -> initial Glicko2Rating (seeded from
      *                       the player's most recent prior-year rating, or default if new)
-     * @param roundOrderSequence Ordered list of round_order values for the year being processed
+     * @param roundOrderSequence Ordered list of round_order values being processed
      * @return Glicko2Result containing ratings for all players at each round
      */
     public static Glicko2Result calculateGlicko2TrueElo(
@@ -299,105 +304,131 @@ public class EloCalculator {
             Set<String> playerIds,
             Map<String, Glicko2Rating> initialRatings,
             List<Integer> roundOrderSequence) {
-        
-        Glicko2Result result = new Glicko2Result();
-        
-        // Initialize current ratings
-        Map<String, Glicko2Rating> currentRatings = new HashMap<>();
-        for (String playerId : playerIds) {
-            currentRatings.put(playerId, initialRatings.getOrDefault(playerId, new Glicko2Rating()));
-        }
-        
-        // Group games by round
+        return calculateWholeHistory(allGames, playerIds, initialRatings, roundOrderSequence, 1);
+    }
+
+    /**
+     * Whole-history (WHR-style) multi-pass calculation. Pass 1 is a plain
+     * chronological forward sweep. In every later pass, the opponent
+     * estimates used when solving round r are taken from the PREVIOUS
+     * pass's trajectory at round r - estimates that were themselves
+     * informed by every round in the history - so information from later
+     * rounds back-propagates into earlier rounds' ratings. Players' own
+     * priors always chain forward within the current pass (their rating
+     * after round r-1 seeds round r).
+     *
+     * @param passes number of full sweeps over the history (>= 1)
+     */
+    public static Glicko2Result calculateWholeHistory(
+            List<Game> allGames,
+            Set<String> playerIds,
+            Map<String, Glicko2Rating> initialRatings,
+            List<Integer> roundOrderSequence,
+            int passes) {
+
+        // Group games by round once
         Map<Integer, List<Game>> gamesByRound = new HashMap<>();
         for (Game game : allGames) {
             gamesByRound.computeIfAbsent(game.roundOrder, k -> new ArrayList<>()).add(game);
         }
-        
-        // Process each round sequentially
-        for (int round : roundOrderSequence) {
-            List<Game> roundGames = gamesByRound.getOrDefault(round, new ArrayList<>());
-            
-            // Build opponent data for each player in this round
-            Map<String, List<OpponentData>> playerOpponents = new HashMap<>();
-            
+
+        Glicko2Result previousPass = null;
+        for (int pass = 1; pass <= Math.max(1, passes); pass++) {
+            Glicko2Result result = new Glicko2Result();
+
+            Map<String, Glicko2Rating> currentRatings = new HashMap<>();
+            for (String playerId : playerIds) {
+                currentRatings.put(playerId, initialRatings.getOrDefault(playerId, new Glicko2Rating()));
+            }
+
+            for (int round : roundOrderSequence) {
+                List<Game> roundGames = gamesByRound.getOrDefault(round, new ArrayList<>());
+                Map<String, Glicko2Rating> fixedOpponents =
+                        previousPass != null ? previousPass.ratingsByRound.get(round) : null;
+                currentRatings = solveRound(roundGames, playerIds, currentRatings, fixedOpponents);
+                result.ratingsByRound.put(round, new HashMap<>(currentRatings));
+            }
+
+            previousPass = result;
+        }
+        return previousPass;
+    }
+
+    /**
+     * Solves one round's simultaneous Glicko-2 equations.
+     *
+     * Players with no games this round get exactly one inactivity RD-growth
+     * step (rating value and volatility unchanged) - the seeded rating is
+     * otherwise carried through verbatim, never reset.
+     *
+     * Players with games are solved as a fixed point: each player's own
+     * prior is always their ROUND-ENTRY rating (so the round's games are
+     * incorporated exactly once), while opponent estimates iterate - 3
+     * iterations when opponents come from within this round
+     * (fixedOpponentRatings == null), or a single application when opponent
+     * estimates are supplied from a previous whole-history pass.
+     */
+    private static Map<String, Glicko2Rating> solveRound(
+            List<Game> roundGames,
+            Set<String> playerIds,
+            Map<String, Glicko2Rating> entryRatings,
+            Map<String, Glicko2Rating> fixedOpponentRatings) {
+
+        Set<String> playersWithGames = new HashSet<>();
+        for (Game game : roundGames) {
+            playersWithGames.add(game.player1);
+            playersWithGames.add(game.player2);
+        }
+
+        // No-game players: one inactivity step, applied once per round.
+        Map<String, Glicko2Rating> solved = new HashMap<>();
+        for (String playerId : playerIds) {
+            Glicko2Rating entry = entryRatings.get(playerId);
+            if (entry == null) {
+                entry = new Glicko2Rating();
+            }
+            solved.put(playerId, playersWithGames.contains(playerId) ? entry : applyInactivityStep(entry));
+        }
+        if (playersWithGames.isEmpty()) {
+            return solved;
+        }
+
+        int iterations = fixedOpponentRatings != null ? 1 : 3;
+        Map<String, Glicko2Rating> opponentSource =
+                fixedOpponentRatings != null ? fixedOpponentRatings : solved;
+
+        for (int iteration = 1; iteration <= iterations; iteration++) {
+            // Opponent data from the current opponent-estimate source
+            Map<String, List<OpponentData>> iterationOpponents = new HashMap<>();
             for (Game game : roundGames) {
-                String player1Id = game.player1;
-                String player2Id = game.player2;
-                
-                Glicko2Rating opp2Rating = currentRatings.get(player2Id);
+                Glicko2Rating opp2Rating = opponentSource.get(game.player2);
                 if (opp2Rating != null) {
-                    playerOpponents.computeIfAbsent(player1Id, k -> new ArrayList<>())
+                    iterationOpponents.computeIfAbsent(game.player1, k -> new ArrayList<>())
                         .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
                 }
-                
-                Glicko2Rating opp1Rating = currentRatings.get(player1Id);
+                Glicko2Rating opp1Rating = opponentSource.get(game.player1);
                 if (opp1Rating != null) {
-                    playerOpponents.computeIfAbsent(player2Id, k -> new ArrayList<>())
+                    iterationOpponents.computeIfAbsent(game.player2, k -> new ArrayList<>())
                         .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
                 }
             }
-            
-            // Perform 3 iterations of Batch Glicko-2 for this round
-            Map<String, Glicko2Rating> iterationRatings = new HashMap<>(currentRatings);
-            
-            for (int iteration = 1; iteration <= 3; iteration++) {
-                // Reset RD to 350 before first iteration
-                if (iteration == 1) {
-                    Map<String, Glicko2Rating> resetRatings = new HashMap<>();
-                    for (Map.Entry<String, Glicko2Rating> entry : iterationRatings.entrySet()) {
-                        resetRatings.put(entry.getKey(), 
-                            new Glicko2Rating(entry.getValue().rating, DEFAULT_RD, entry.getValue().volatility));
-                    }
-                    iterationRatings = resetRatings;
+
+            // Re-apply each playing player's update from their ROUND-ENTRY prior
+            Map<String, Glicko2Rating> updated = new HashMap<>(solved);
+            for (String playerId : playersWithGames) {
+                Glicko2Rating entry = entryRatings.get(playerId);
+                if (entry == null) {
+                    entry = new Glicko2Rating();
                 }
-                
-                // Update opponent data with current iteration ratings
-                Map<String, List<OpponentData>> iterationOpponents = new HashMap<>();
-                for (Game game : roundGames) {
-                    String player1Id = game.player1;
-                    String player2Id = game.player2;
-                    
-                    Glicko2Rating opp2Rating = iterationRatings.get(player2Id);
-                    if (opp2Rating != null) {
-                        iterationOpponents.computeIfAbsent(player1Id, k -> new ArrayList<>())
-                            .add(new OpponentData(opp2Rating.rating, opp2Rating.rd, game.score));
-                    }
-                    
-                    Glicko2Rating opp1Rating = iterationRatings.get(player1Id);
-                    if (opp1Rating != null) {
-                        iterationOpponents.computeIfAbsent(player2Id, k -> new ArrayList<>())
-                            .add(new OpponentData(opp1Rating.rating, opp1Rating.rd, 1.0 - game.score));
-                    }
-                }
-                
-                // Update all player ratings for this iteration
-                Map<String, Glicko2Rating> newRatings = new HashMap<>();
-                for (String playerId : playerIds) {
-                    Glicko2Rating currentRating = iterationRatings.get(playerId);
-                    List<OpponentData> opponents = iterationOpponents.getOrDefault(playerId, new ArrayList<>());
-                    
-                    Glicko2Rating newRating;
-                    if (opponents.isEmpty()) {
-                        // No opponents - preserve rating exactly
-                        newRating = new Glicko2Rating(currentRating.rating, currentRating.rd, currentRating.volatility);
-                    } else {
-                        // Normal rating update with Batch Glicko-2
-                        newRating = updateGlicko2Rating(currentRating, opponents);
-                    }
-                    newRatings.put(playerId, newRating);
-                }
-                
-                iterationRatings = newRatings;
+                List<OpponentData> opponents = iterationOpponents.getOrDefault(playerId, new ArrayList<>());
+                updated.put(playerId, updateGlicko2Rating(entry, opponents));
             }
-            
-            // Store final ratings for this round
-            result.ratingsByRound.put(round, new HashMap<>(iterationRatings));
-            
-            // Update current ratings for next round
-            currentRatings = iterationRatings;
+
+            solved = updated;
+            if (fixedOpponentRatings == null) {
+                opponentSource = solved;
+            }
         }
-        
-        return result;
+        return solved;
     }
 }

@@ -23,7 +23,6 @@ public class CommandInfoMatchHall {
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
-    private final D11_PlayerRatings playerRatings = new D11_PlayerRatings();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
     private static final Map<String, MatchHallSelectionState> userSelectionStates = new HashMap<>();
@@ -185,7 +184,7 @@ public class CommandInfoMatchHall {
         List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(hallId, year);
 
         for (B6_PlayerYearStatus.Status status : statuses) {
-            D11_PlayerRatings.Rating rating = playerRatings.getRating(status.playerId, round.id, trueEloTypeId);
+            D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
             if (rating == null) continue; // no data this round
 
             HallPlayerData player = new HallPlayerData();
@@ -198,7 +197,7 @@ public class CommandInfoMatchHall {
             player.currentRank = rankingQueryHelper.calculateRank(allRatings, rating.ratingValue);
 
             if (prevRound != null) {
-                D11_PlayerRatings.Rating prevRating = playerRatings.getRating(status.playerId, prevRound.id, trueEloTypeId);
+                D11_PlayerRatings.Rating prevRating = rankingQueryHelper.getPointInTimeRating(status.playerId, prevRound.id, trueEloTypeId);
                 if (prevRating != null) {
                     player.prevElo = (int) Math.round(prevRating.ratingValue);
                     Map<String, D11_PlayerRatings.Rating> allPrevRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, prevRound.roundOrder, trueEloTypeId);
@@ -220,7 +219,7 @@ public class CommandInfoMatchHall {
                     } else {
                         String oppName = playerNames.getNameForYear(opp.playerId, year);
                         player.oppName = oppName != null ? oppName : opp.playerId;
-                        D11_PlayerRatings.Rating oppRating = playerRatings.getRating(opp.playerId, round.id, trueEloTypeId);
+                        D11_PlayerRatings.Rating oppRating = rankingQueryHelper.getPointInTimeRating(opp.playerId, round.id, trueEloTypeId);
                         if (oppRating != null) player.oppElo = (int) Math.round(oppRating.ratingValue);
                     }
                     A3_Halls.Hall oppHall = halls.getHallById(opp.hallId);

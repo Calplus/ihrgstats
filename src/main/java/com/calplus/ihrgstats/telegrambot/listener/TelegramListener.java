@@ -1426,9 +1426,68 @@ public class TelegramListener {
             handleInfoMatchHallCommand(message);
         } else if (command.equalsIgnoreCase("/matchtypes")) {
             handleMatchTypesCommand(message);
+        } else if (command.equalsIgnoreCase("/recalculate")) {
+            handleRecalculateCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
+    }
+
+    /**
+     * Handles /recalculate command - admin-triggered whole-history rating
+     * recalculation. Runs on a background thread (like file processing) so
+     * the polling thread stays free to receive the confirmation button
+     * callback, and reuses the same multi-choice confirmation future the
+     * file-processing flow uses.
+     */
+    private void handleRecalculateCommand(JsonObject message) {
+        String userInfo = getUserInfoFromMessage(message);
+        discordLog.logInfo(String.format("%s: Processing /recalculate command", userInfo));
+        telegramLog.logInfo(String.format("%s: Processing /recalculate command", userInfo));
+
+        Thread recalcThread = new Thread(() -> {
+            try {
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.get("id").getAsString();
+
+                com.calplus.ihrgstats.telegrambot.commands.CommandRecalculate recalcCommand =
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandRecalculate();
+
+                String[] options = {"Start recalculation", "Cancel"};
+                sendMessageWithButtons(recalcCommand.buildConfirmationMessage(), options, message);
+
+                CompletableFuture<Integer> future = new CompletableFuture<>();
+                pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY,
+                    new MultiChoiceConfirmationRequest(recalcCommand.buildConfirmationMessage(), options, future, message));
+
+                int choice;
+                try {
+                    choice = future.get(60, TimeUnit.SECONDS);
+                } catch (TimeoutException e) {
+                    pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                    sendMessageToCommandsChannel("⏱️ Confirmation timeout - recalculation cancelled.", message);
+                    return;
+                }
+
+                if (choice != 0) {
+                    sendMessageToCommandsChannel("🟡 Recalculation cancelled.", message);
+                    return;
+                }
+
+                sendMessageToCommandsChannel("⏳ Recalculating all rounds across all years...", message);
+                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = recalcCommand.execute(userId);
+                sendMessageToCommandsChannel(response.message, message);
+
+            } catch (Exception e) {
+                String errorMsg = "Error processing /recalculate command: " + e.getMessage();
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                e.printStackTrace();
+                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+            }
+        });
+        recalcThread.setDaemon(true);
+        recalcThread.start();
     }
 
     /**

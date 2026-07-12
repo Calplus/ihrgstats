@@ -9,9 +9,10 @@ import java.util.List;
 /**
  * Data-access helper for the {@code rating_types} table.
  * Seeds exactly 2 rows: "TrueElo" (the only currently-functional rating,
- * computed via Batch Glicko-2) and "ExpElo" (a placeholder reserved for
- * future experimentation - renamed from the legacy "PerfElo", which has
- * been removed entirely along with all of its calculation code).
+ * computed via Batch Glicko-2) and "ExpElo" (a reserved slot with no
+ * calculation code yet - it will be repurposed into the future AI + WHR
+ * rating system; renamed from the legacy "PerfElo", which was removed
+ * entirely along with all of its calculation code).
  */
 public class D10_RatingTypes {
 
