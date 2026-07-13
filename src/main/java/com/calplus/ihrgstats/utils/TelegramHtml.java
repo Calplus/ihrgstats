@@ -62,24 +62,41 @@ public final class TelegramHtml {
     }
 
     /**
-     * Converts every "**bold**" span outside of (already-converted)
-     * {@code <pre>} blocks into {@code <b>bold</b>}. Must run AFTER
-     * {@link #convertCodeFencesToPre(String)} so table content is already
-     * opaque HTML text by the time this pattern is applied.
+     * Converts every "**bold**" span in {@code message} into {@code <b>bold</b>}.
+     * {@link #prepareForSending(String)} only ever calls this on text segments
+     * OUTSIDE of ``` fences - never on a fence's own content - since Telegram's
+     * HTML parser rejects a nested entity inside a {@code <pre>} block.
      */
     public static String convertMarkdownBoldToHtml(String message) {
         return BOLD_MARKDOWN.matcher(message).replaceAll("<b>$1</b>");
     }
 
     /**
-     * Applies both compatibility conversions, in the required order.
-     * Call this on every outgoing message text immediately before deciding
+     * Applies both compatibility conversions, in the required order. Call
+     * this on every outgoing message text immediately before deciding
      * parse_mode / building the send payload.
+     *
+     * Bold-conversion is applied ONLY to the text segments outside ```
+     * fences, never to a fence's own content - Telegram's HTML parser does
+     * not allow a nested entity (e.g. {@code <b>}) inside a {@code <pre>}
+     * block, so a literal "**" that happens to appear inside a fenced table
+     * cell must stay untouched, not become an invalid {@code <pre><b>...}
+     * nesting (A11).
      */
     public static String prepareForSending(String message) {
         if (message == null) {
             return null;
         }
-        return convertMarkdownBoldToHtml(convertCodeFencesToPre(message));
+
+        Matcher matcher = CODE_FENCE.matcher(message);
+        StringBuilder result = new StringBuilder();
+        int lastEnd = 0;
+        while (matcher.find()) {
+            result.append(convertMarkdownBoldToHtml(message.substring(lastEnd, matcher.start())));
+            result.append("<pre>").append(escape(matcher.group(1))).append("</pre>");
+            lastEnd = matcher.end();
+        }
+        result.append(convertMarkdownBoldToHtml(message.substring(lastEnd)));
+        return result.toString();
     }
 }

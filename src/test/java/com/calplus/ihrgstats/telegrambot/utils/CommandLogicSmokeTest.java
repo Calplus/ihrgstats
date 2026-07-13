@@ -43,6 +43,7 @@ public class CommandLogicSmokeTest {
         new A3_Halls().seedDefaults(NOW);
         new B4_Players().seedDefaults(NOW);
         new D10_RatingTypes().seedDefaults(NOW);
+        new F16_Admins().seedDefaults(NOW);
     }
 
     @AfterEach
@@ -151,8 +152,14 @@ public class CommandLogicSmokeTest {
         assertTrue(Files.exists(dbResponse.exportedFilePath) && Files.size(dbResponse.exportedFilePath) > 0,
                 "Exported .db file should exist and be non-empty");
 
-        // === Checklist item: /recalculate completes and reports real counts ===
+        // === Checklist item: /recalculate is admin-gated and completes for an admin ===
         CommandRecalculate recalculate = new CommandRecalculate();
+        assertTrue(recalculate.isAdmin(ADMIN_USER_ID), "The seeded admin should be recognized via the new admins table");
+        assertFalse(recalculate.isAdmin("not_an_admin"), "A non-admin must not be recognized as admin");
+
+        var deniedResult = recalculate.execute("not_an_admin");
+        assertTrue(deniedResult.message.contains("Access Denied"), "A non-admin must be denied /recalculate: " + deniedResult.message);
+
         String confirmationMessage = recalculate.buildConfirmationMessage();
         assertTrue(confirmationMessage.contains("Whole-History"), "Confirmation message should describe the whole-history recalculation");
         var recalcResult = recalculate.execute(ADMIN_USER_ID);

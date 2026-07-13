@@ -6,8 +6,8 @@ import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Command handler for /help command.
@@ -17,7 +17,7 @@ public class CommandHelp {
     private final LogHelper logHelper;
     
     // State management for multi-step selection
-    private static final Map<String, HelpSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, HelpSelectionState> userSelectionStates = new ConcurrentHashMap<>();
     
     private static class HelpSelectionState extends SelectionState {
         String category;  // "commands" or "fileupload"

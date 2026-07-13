@@ -68,7 +68,20 @@ public class TelegramLog {
         // Add shutdown hook to ensure all messages are sent before exit
         if (telegramEnabled) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                flushInfoBatch(); // Send any pending INFO messages
+                // Send (not discard) any pending INFO messages - despite its
+                // comment, flushInfoBatch() only ever cleared the buffer and
+                // never sent anything, so INFO logs accumulated right up to
+                // shutdown (with no later SUCCESS/WARNING/ERROR to combine
+                // with) were silently lost at exactly the moment they'd be
+                // most useful for diagnosing why the app was shutting down.
+                String pendingInfo;
+                synchronized (infoBatchLock) {
+                    pendingInfo = infoBatchBuffer.length() > 0 ? infoBatchBuffer.toString() : null;
+                    infoBatchBuffer.setLength(0);
+                }
+                if (pendingInfo != null) {
+                    queueMessage(pendingInfo);
+                }
                 flushBatch(); // Send any pending batch messages
                 flush();
             }));
@@ -262,13 +275,18 @@ public class TelegramLog {
                 System.err.println("Error processing message queue: " + e.getMessage());
             } finally {
                 isProcessing.set(false);
-                
+
                 // If interrupted, complete all remaining messages as failed
                 if (interrupted) {
                     QueuedMessage remaining;
                     while ((remaining = messageQueue.poll()) != null) {
                         remaining.future.complete(false);
                     }
+                } else if (!messageQueue.isEmpty()) {
+                    // A message may have been queued after the loop's last isEmpty()
+                    // check but before isProcessing was cleared - reprocess so it
+                    // isn't stranded until another unrelated call happens to arrive.
+                    processQueue();
                 }
             }
         });
@@ -341,11 +359,14 @@ public class TelegramLog {
         }
         
         System.err.println(formattedMessage);
-        
-        // Flush any accumulated INFO messages before sending error
-        flushInfoBatch();
-        
-        return queueMessage(formattedMessage);
+
+        // Combine (not discard) any accumulated INFO messages leading up to
+        // this error - previously flushInfoBatch() threw this context away
+        // right when it mattered most for debugging, while SUCCESS/WARNING
+        // both correctly prepend it via combineInfoBatchWithMessage below.
+        String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
+
+        return queueMessage(combinedMessage);
     }
 
     /**
@@ -532,16 +553,6 @@ public class TelegramLog {
         }
     }
 
-    /**
-     * Flushes any accumulated INFO messages without sending them
-     * (Used internally when error occurs to clear the buffer)
-     */
-    private void flushInfoBatch() {
-        synchronized (infoBatchLock) {
-            infoBatchBuffer.setLength(0);
-        }
-    }
-    
     /**
      * Combines accumulated INFO messages with a terminal message (SUCCESS/ERROR/WARNING)
      * and clears the INFO buffer

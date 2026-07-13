@@ -8,6 +8,7 @@ import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -25,7 +26,7 @@ public class CommandInfoPlayer {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, PlayerInfoSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, PlayerInfoSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class PlayerInfoSelectionState extends SelectionState {
         int hallId;
@@ -96,7 +97,7 @@ public class CommandInfoPlayer {
             List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(hallId, year);
             if (statuses.isEmpty()) {
                 userSelectionStates.remove(userId);
-                return new InfoResponse(String.format("ℹ️ No active players found in %s for %d.", state.hallName, year), (Path) null, null);
+                return new InfoResponse(String.format("ℹ️ No active players found in %s for %d.", VictoryRecordCalculator.formatHallName(state.hallName), year), (Path) null, null);
             }
 
             List<String> labels = new ArrayList<>();
@@ -109,7 +110,7 @@ public class CommandInfoPlayer {
             labels.add("❌ Cancel");
             callbacks.add("infoplayer_cancel");
 
-            String message = String.format("**👤 Player Information**\n\nHall: **%s**\nSelect the **player**:", state.hallName);
+            String message = String.format("**👤 Player Information**\n\nHall: **%s**\nSelect the **player**:", VictoryRecordCalculator.formatHallName(state.hallName));
             return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -150,7 +151,7 @@ public class CommandInfoPlayer {
             callbacks.add("infoplayer_cancel");
 
             String message = String.format("**👤 Player Information**\n\nPlayer: **%s** (%s)\n\nSelect rounds to display:",
-                    TelegramHtml.escape(state.playerName), state.hallName);
+                    TelegramHtml.escape(state.playerName), VictoryRecordCalculator.formatHallName(state.hallName));
             return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -275,7 +276,7 @@ public class CommandInfoPlayer {
     private String generateTextOutput(PlayerData player, List<Integer> roundOrders) {
         StringBuilder sb = new StringBuilder();
         sb.append("**👤 Player Information**\n\n");
-        sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(player.name), player.hall));
+        sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(player.name), VictoryRecordCalculator.formatHallName(player.hall)));
 
         sb.append("**📊 Stats Per Round:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
@@ -361,7 +362,7 @@ public class CommandInfoPlayer {
 
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Player Information";
-        metadata.subtitle = String.format("%s (Hall %s)", player.name, player.hall);
+        metadata.subtitle = String.format("%s (%s)", player.name, VictoryRecordCalculator.formatHallName(player.hall));
         metadata.description = "Player statistics and performance";
         metadata.lastRound = lastRoundLabel;
 

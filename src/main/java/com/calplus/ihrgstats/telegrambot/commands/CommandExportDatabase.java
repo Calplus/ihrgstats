@@ -5,7 +5,7 @@ import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
-import com.calplus.ihrgstats.utils.PropertyResolver;
+import com.calplus.ihrgstats.utils.OutputPaths;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
 import org.apache.poi.ss.usermodel.Row;
@@ -18,6 +18,7 @@ import java.nio.file.*;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Command handler for /exportdatabase (admin-only) - the single merged
@@ -35,7 +36,7 @@ import java.util.List;
 public class CommandExportDatabase {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
-    private final String adminUserId;
+    private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private final Path dbPath;
 
     public CommandExportDatabase() {
@@ -44,12 +45,18 @@ public class CommandExportDatabase {
 
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
-        this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
         this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db");
     }
 
+    /** Fails closed (denies) on a database error rather than risking a false "admin". */
     public boolean isAdmin(String userId) {
-        return !adminUserId.isEmpty() && adminUserId.equals(userId);
+        try {
+            return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
+        } catch (java.sql.SQLException e) {
+            discordLog.logError("Database error checking admin status: " + e.getMessage());
+            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -114,9 +121,16 @@ public class CommandExportDatabase {
 
         try {
             String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
-            String exportFileName = "database_export_" + timestamp + ".db";
-            Path tempDir = Files.createTempDirectory("db_export_");
-            Path exportPath = tempDir.resolve(exportFileName);
+            // A short random suffix guarantees uniqueness even within the
+            // same second - the old per-export Files.createTempDirectory()
+            // gave every export its own randomly-named directory, so two
+            // exports completing in the same second could never collide;
+            // moving to one shared output directory removed that accidental
+            // protection, so the filename itself must provide it now.
+            String exportFileName = "database_export_" + timestamp + "_" + shortUniqueSuffix() + ".db";
+            // Shared, dedicated output directory (not a fresh OS temp dir
+            // per export) - nothing was ever cleaning those up either.
+            Path exportPath = OutputPaths.getOutputDirectory().resolve(exportFileName);
 
             Files.copy(dbPath, exportPath, StandardCopyOption.REPLACE_EXISTING);
 
@@ -165,9 +179,12 @@ public class CommandExportDatabase {
             }
 
             String timestamp = TimezoneHelper.formatNow("yyyyMMdd_HHmmss");
-            String filename = String.format("database_export_%s.xlsx", timestamp);
-            Path tempDir = Files.createTempDirectory("db_export_");
-            Path xlsxPath = tempDir.resolve(filename);
+            // See the matching comment in executeDbExport for why the short
+            // unique suffix is needed now that exports share one directory.
+            String filename = String.format("database_export_%s_%s.xlsx", timestamp, shortUniqueSuffix());
+            // Shared, dedicated output directory (not a fresh OS temp dir
+            // per export) - nothing was ever cleaning those up either.
+            Path xlsxPath = OutputPaths.getOutputDirectory().resolve(filename);
             try (FileOutputStream fos = new FileOutputStream(xlsxPath.toFile())) {
                 workbook.write(fos);
             }
@@ -185,6 +202,11 @@ public class CommandExportDatabase {
             telegramLog.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
+    }
+
+    /** A short, filename-safe unique token (8 hex chars) - see the comments at both call sites. */
+    private static String shortUniqueSuffix() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 
     private List<String> listTables(Connection conn) throws SQLException {

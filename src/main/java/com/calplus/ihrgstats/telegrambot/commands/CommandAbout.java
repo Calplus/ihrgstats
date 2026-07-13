@@ -1,10 +1,10 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.Main;
+import com.calplus.ihrgstats.databasemanager.F16_Admins;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
-import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
 import com.calplus.ihrgstats.utils.TelegramHtml;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * Command handler for /about command.
@@ -113,7 +114,9 @@ public class CommandAbout {
         logHelper.logInfo(String.format("%s requested /about", userInfo));
         
         try {
-            String adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
+            List<F16_Admins.Admin> telegramAdmins = new F16_Admins().getAllAdmins().stream()
+                    .filter(admin -> F16_Admins.PLATFORM_TELEGRAM.equals(admin.platform))
+                    .collect(java.util.stream.Collectors.toList());
             ZoneId timezone = TimezoneHelper.getConfiguredZoneId();
             ZonedDateTime now = TimezoneHelper.now();
             
@@ -136,13 +139,16 @@ public class CommandAbout {
             message.append("<b>Current Time:</b>\n");
             message.append("<code>").append(now.format(formatter)).append("</code>\n\n");
 
-            if (!adminUserId.isEmpty()) {
-                // Fetch the username for the admin user ID - a Telegram profile
-                // field the admin controls, so it must be escaped like any
-                // other dynamic content.
-                String adminHandle = fetchUsername(adminUserId);
-                message.append("<b>Bot Administrator:</b>\n");
-                message.append("@").append(TelegramHtml.escape(adminHandle)).append("\n\n");
+            if (!telegramAdmins.isEmpty()) {
+                message.append("<b>Bot Administrator").append(telegramAdmins.size() > 1 ? "s" : "").append(":</b>\n");
+                for (F16_Admins.Admin admin : telegramAdmins) {
+                    // Fetch the username for the admin's Telegram user ID - a
+                    // profile field the admin controls, so it must be escaped
+                    // like any other dynamic content.
+                    String adminHandle = fetchUsername(admin.platformUserId);
+                    message.append("@").append(TelegramHtml.escape(adminHandle)).append("\n");
+                }
+                message.append("\n");
             }
 
             message.append("<i>For help with commands, use</i> <code>/help</code>");

@@ -1,0 +1,187 @@
+package com.calplus.ihrgstats.telegrambot.commands;
+
+import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Regression tests for A30 (hall-vs-hall victory records mixing totals from
+ * different opponents) and A33 (win-probability tie-handling and denominator)
+ * - same user.dir-redirect bootstrap pattern as CommandLogicSmokeTest.
+ */
+public class CommandCompareHallsTest {
+
+    private static final int YEAR = 2026;
+    private static final String NOW = "2026-01-01 00:00:00.000";
+    private static final String ADMIN_USER_ID = "test_admin";
+
+    private String originalUserDir;
+
+    @BeforeEach
+    void setUp(@TempDir Path tempDir) throws Exception {
+        originalUserDir = System.getProperty("user.dir");
+        System.setProperty("user.dir", tempDir.toString());
+        System.setProperty("SETTINGS_CURRENTYEAR", String.valueOf(YEAR));
+
+        new DatabaseSchema().createDatabase("default.db");
+        new A3_Halls().seedDefaults(NOW);
+        new B4_Players().seedDefaults(NOW);
+        new D10_RatingTypes().seedDefaults(NOW);
+        new F16_Admins().seedDefaults(NOW);
+        new A2_MatchTypes().createMatchType("TestType", 20.0, null, "Test match type", NOW);
+    }
+
+    @AfterEach
+    void tearDown() {
+        System.setProperty("user.dir", originalUserDir);
+        System.clearProperty("SETTINGS_CURRENTYEAR");
+    }
+
+    private static Path writeRoundCsv(Path dir, String fileName, String dataRows) throws Exception {
+        Path csv = dir.resolve(fileName);
+        Files.writeString(csv, "name1,hall1,score1,name2,hall2,score2\n" + dataRows);
+        return csv;
+    }
+
+    private static RoundCsvProcessor newProcessor() {
+        RoundCsvProcessor processor = new RoundCsvProcessor();
+        processor.setMultiChoiceCallback((message, options) -> 0);
+        return processor;
+    }
+
+    // --- A30: per-opponent tallies, not one combined total per hall ---
+
+    @Test
+    void hallVictoryRecord_walkoverBonusDoesNotSkewRealOpponentScore(@TempDir Path csvDir) throws Exception {
+        // Hall 1 fields 3 players this round: A1 beats B1 (hall 2), A2 loses
+        // to B2 (hall 2), and A3 gets a walkover win (no real opponent).
+        // The TRUE head-to-head against hall 2 is a 1-1 draw; the walkover
+        // win is a separate bonus that has nothing to do with hall 2.
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,5,B2,2,10\n" +
+                "A3,1,,WALKOVER,,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        int hall2Id = new A3_Halls().getHallByName("2").id;
+        compareHalls.handleCommand(ADMIN_USER_ID);
+        compareHalls.handleFirstHallSelection(ADMIN_USER_ID, hall1Id);
+        compareHalls.handleSecondHallSelection(ADMIN_USER_ID, hall2Id);
+        CommandCompareHalls.CompareResponse response = compareHalls.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        assertTrue(response.message.contains("1-1"),
+                "The real head-to-head vs Hall 2 should be a 1-1 draw, not inflated by the separate walkover win: " + response.message);
+        assertFalse(response.message.contains("2-1"),
+                "The walkover win must not be folded into the score shown against Hall 2: " + response.message);
+    }
+
+    @Test
+    void hallVictoryRecord_multiOpponentRound_reportsPrimaryOpponentOnly(@TempDir Path csvDir) throws Exception {
+        // Hall 1 fields 3 players: 2 boards vs hall 2 (both won), 1 board vs
+        // hall 3 (lost). Hall 2 is the primary opponent (2 boards vs 1) - the
+        // record must show hall 1's real 2-0 sweep of hall 2, not a fabricated
+        // "win" against hall 3 built from mismatched totals.
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,10,B2,2,5\n" +
+                "A3,1,5,C1,3,10\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        int hall2Id = new A3_Halls().getHallByName("2").id;
+        compareHalls.handleCommand(ADMIN_USER_ID);
+        compareHalls.handleFirstHallSelection(ADMIN_USER_ID, hall1Id);
+        compareHalls.handleSecondHallSelection(ADMIN_USER_ID, hall2Id);
+        CommandCompareHalls.CompareResponse response = compareHalls.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        assertTrue(response.message.contains("2-0"),
+                "Hall 1 swept its actual (majority) opponent Hall 2 2-0: " + response.message);
+        assertFalse(response.message.contains("Hall 3") && response.message.contains("2-1"),
+                "Hall 1 lost its single board against Hall 3 (0-1) - it must never be shown as a 2-1 win over Hall 3: " + response.message);
+    }
+
+    // --- A30: identical fix in CommandInfoHall (same bug, same code shape) ---
+
+    @Test
+    void infoHall_walkoverBonusDoesNotSkewRealOpponentScore(@TempDir Path csvDir) throws Exception {
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,5,B2,2,10\n" +
+                "A3,1,,WALKOVER,,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandInfoHall infoHall = new CommandInfoHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoHall.InfoResponse response = infoHall.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        assertTrue(response.message.contains("1-1"),
+                "Same A30 fix applies to /infohall - real head-to-head vs Hall 2 is a 1-1 draw: " + response.message);
+        assertFalse(response.message.contains("2-1"), "Walkover win must not skew the vs-Hall-2 score: " + response.message);
+    }
+
+    // --- A33: win-probability tie-handling and denominator ---
+
+    private static CommandCompareHalls.PlayerData playerWithElo(int elo) {
+        CommandCompareHalls.PlayerData p = new CommandCompareHalls.PlayerData();
+        p.elo = elo;
+        return p;
+    }
+
+    private static CommandCompareHalls.HallData hallOf(int... elos) {
+        CommandCompareHalls.HallData h = new CommandCompareHalls.HallData();
+        for (int elo : elos) {
+            h.players.add(playerWithElo(elo));
+        }
+        return h;
+    }
+
+    @Test
+    void winProbability_teamSizeMismatch_usesComparedBoardsAsDenominator() {
+        // Hall 1 fields a single, much stronger player; hall 2 fields 3
+        // weaker players. Only 1 board is ever actually compared
+        // (min(1,3)=1), and hall 1 wins it in every possible pairing - hall 1
+        // should be the clear, ~100% favorite. The old code divided the
+        // win threshold by team2.size()=3 instead of the 1 board actually
+        // compared, requiring an unreachable >1.5 wins from a single board.
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        CommandCompareHalls.HallData hall1 = hallOf(1000);
+        CommandCompareHalls.HallData hall2 = hallOf(900, 900, 900);
+
+        double winProbability = compareHalls.calculateWinningProbability(hall1, hall2);
+
+        assertEquals(100.0, winProbability, 0.001,
+                "Hall 1's only player outrates every one of hall 2's players - it should win with certainty, not 0%");
+    }
+
+    @Test
+    void winProbability_tiesCountAsHalfCredit_notFullLoss() {
+        // Hall 1 = [1000, 900] vs Hall 2 = [1000, 800]. Across the 2 possible
+        // pairings: one has a tie (1000 vs 1000) plus a clear win (900 vs
+        // 800) = 1.5/2 boards, a win for hall 1; the other has a clear win
+        // (1000 vs 800) plus a clear loss (900 vs 1000) = 1.0/2 boards, an
+        // exact tie, not a win. Correctly counting the tie as 0.5 credit
+        // gives hall 1 a real, non-zero win chance (1 of 2 permutations).
+        // The old code gave a tied board ZERO credit, so neither permutation
+        // ever cleared the win threshold, undercounting hall 1 as a flat 0%.
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        CommandCompareHalls.HallData hall1 = hallOf(1000, 900);
+        CommandCompareHalls.HallData hall2 = hallOf(1000, 800);
+
+        double winProbability = compareHalls.calculateWinningProbability(hall1, hall2);
+
+        assertEquals(50.0, winProbability, 0.001,
+                "Counting a tied board as half-credit should give hall 1 a real win chance, not the old code's flat 0%");
+    }
+}

@@ -5,10 +5,8 @@ import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -302,9 +300,12 @@ public class ComparisonImageGenerator {
             filename = String.format("%s_%s.png", commandName, timestamp);
         }
         
-        Path tempFile = Paths.get(System.getProperty("java.io.tmpdir"), filename);
+        // Save to the shared, dedicated output directory (not the OS temp
+        // dir - nothing was ever cleaning that up, so images accumulated
+        // there indefinitely with no inspectable, intentional home).
+        Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
         ImageIO.write(image, "PNG", tempFile.toFile());
-        
+
         return tempFile;
     }
     
@@ -542,37 +543,60 @@ public class ComparisonImageGenerator {
             
             // Check if this is a structured victory record section
             if (section.hallVictoryEntries != null) {
+                // Round-column width must fit the WIDEST round label actually
+                // present (Swiss rounds render as "Round 9", not just the
+                // short bracket-stage labels like "T16" this used to assume) -
+                // a fixed guess sized only for "T16 " lets the outcome icon
+                // get drawn straight on top of a longer label.
+                int roundColWidth = 0;
+                for (HallVictoryEntry e : section.hallVictoryEntries) {
+                    if (e.round != null && !e.round.isEmpty()) {
+                        roundColWidth = Math.max(roundColWidth, fm.stringWidth(e.round));
+                    }
+                }
+                if (roundColWidth > 0) {
+                    roundColWidth += 6;
+                }
                 // Render hall victory records from structured data
                 for (int i = 0; i < section.hallVictoryEntries.size(); i++) {
                     HallVictoryEntry entry = section.hallVictoryEntries.get(i);
-                    
+
                     // Draw row background if not empty
                     if (!entry.isNA || entry.round != null) {
                         Color rowColor = getRowColor(i, isLeft);
                         g2d.setColor(rowColor);
                         g2d.fillRect(x, currentY, width, ROW_HEIGHT);
                     }
-                    
+
                     g2d.setColor(TEXT_COLOR);
                     int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
-                    drawHallVictoryEntry(g2d, entry, x, textY, width, fm);
+                    drawHallVictoryEntry(g2d, entry, x, textY, width, fm, roundColWidth);
                     currentY += ROW_HEIGHT;
                 }
             } else if (section.playerVictoryEntries != null) {
+                int roundColWidth = 0;
+                for (PlayerVictoryEntry e : section.playerVictoryEntries) {
+                    if (e.round != null && !e.round.isEmpty()) {
+                        roundColWidth = Math.max(roundColWidth, fm.stringWidth(e.round));
+                    }
+                }
+                if (roundColWidth > 0) {
+                    roundColWidth += 6;
+                }
                 // Render player victory records from structured data
                 for (int i = 0; i < section.playerVictoryEntries.size(); i++) {
                     PlayerVictoryEntry entry = section.playerVictoryEntries.get(i);
-                    
+
                     // Draw row background if not empty
                     if (!entry.isNA || entry.round != null) {
                         Color rowColor = getRowColor(i, isLeft);
                         g2d.setColor(rowColor);
                         g2d.fillRect(x, currentY, width, ROW_HEIGHT);
                     }
-                    
+
                     g2d.setColor(TEXT_COLOR);
                     int textY = currentY + (ROW_HEIGHT - fm.getHeight()) / 2 + fm.getAscent();
-                    drawPlayerVictoryEntry(g2d, entry, x, textY, width, fm);
+                    drawPlayerVictoryEntry(g2d, entry, x, textY, width, fm, roundColWidth);
                     currentY += ROW_HEIGHT;
                 }
             } else if (section.lines != null) {
@@ -621,7 +645,7 @@ public class ComparisonImageGenerator {
      * Draws a hall victory record entry using structured data
      */
     private static void drawHallVictoryEntry(Graphics2D g2d, HallVictoryEntry entry, int x, int y,
-                                            int width, FontMetrics fm) {
+                                            int width, FontMetrics fm, int roundColWidth) {
         if (entry.isNA) {
             // Draw round left-justified, -NA- centered separately
             g2d.drawString(entry.round, x + 5, y);
@@ -629,10 +653,7 @@ public class ComparisonImageGenerator {
             g2d.drawString("-NA-", x + (width - naWidth) / 2, y);
             return;
         }
-        
-        // Fixed width for round column
-        int roundColWidth = fm.stringWidth("T16 ");
-        
+
         // Use fixed-width score column for alignment (max width for scores like "267.7-180.8")
         // Split score at dash and center the dash character
         int fixedScoreColWidth = fm.stringWidth("200.5-100.5");
@@ -678,21 +699,27 @@ public class ComparisonImageGenerator {
         g2d.drawString("-", dashX, y);
         g2d.drawString(rightScore, rightScoreX, y);
         
-        // Draw hall names centered around fixed score column
-        int hallNameSpace = scoreColStartX - 8 - leftX;
-        int oppNameSpace = rightX - (scoreColEndX + 8);
-        
+        // Draw hall names, using the ACTUAL drawn score extents (not the
+        // fixed-template scoreColStartX/EndX) as the safe edge - a score
+        // wider than the "200.5-100.5" template fixedScoreColWidth was sized
+        // for would otherwise let a name get drawn directly against (or
+        // inside) the score text with no gap.
+        int scoreLeftEdge = Math.min(scoreColStartX, leftScoreX);
+        int scoreRightEdge = Math.max(scoreColEndX, rightScoreX + fm.stringWidth(rightScore));
+        int hallNameSpace = scoreLeftEdge - 8 - leftX;
+        int oppNameSpace = rightX - (scoreRightEdge + 8);
+
         // Hall name (right-justified before score column)
         if (hallNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.hallName, hallNameSpace, fm);
             int nameWidth = fm.stringWidth(displayName);
-            g2d.drawString(displayName, scoreColStartX - 8 - nameWidth, y);
+            g2d.drawString(displayName, scoreLeftEdge - 8 - nameWidth, y);
         }
-        
+
         // Opponent name (left-justified after score column)
         if (oppNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.oppName, oppNameSpace, fm);
-            g2d.drawString(displayName, scoreColEndX + 8, y);
+            g2d.drawString(displayName, scoreRightEdge + 8, y);
         }
     }
     
@@ -700,7 +727,7 @@ public class ComparisonImageGenerator {
      * Draws a player victory record entry using structured data
      */
     private static void drawPlayerVictoryEntry(Graphics2D g2d, PlayerVictoryEntry entry, int x, int y,
-                                              int width, FontMetrics fm) {
+                                              int width, FontMetrics fm, int roundColWidth) {
         if (entry.isNA) {
             // Draw round left-justified, -NA- centered separately
             g2d.drawString(entry.round, x + 5, y);
@@ -708,10 +735,7 @@ public class ComparisonImageGenerator {
             g2d.drawString("-NA-", x + (width - naWidth) / 2, y);
             return;
         }
-        
-        // Fixed width for round column to ensure vertical alignment
-        int roundColWidth = fm.stringWidth("T16 ");
-        
+
         // Use fixed-width score column for alignment (max width for scores like "267.7-180.8")
         // Split score at dash and center the dash character
         int fixedScoreColWidth = fm.stringWidth("200.5-100.5");
@@ -766,45 +790,62 @@ public class ComparisonImageGenerator {
         g2d.drawString("-", dashX, y);
         g2d.drawString(rightScore, rightScoreX, y);
         
-        // Calculate available space for names relative to fixed score column
-        int playerNameSpace = scoreColStartX - 20 - leftX;  // Updated from 8 to 20
-        int oppNameSpace = rightX - (scoreColEndX + 20);  // Updated from 8 to 20
-        
+        // Calculate available space for names using the ACTUAL drawn score
+        // extents (not the fixed-template scoreColStartX/EndX) as the safe
+        // edge - see the matching comment in drawHallVictoryEntry above.
+        int scoreLeftEdge = Math.min(scoreColStartX, leftScoreX);
+        int scoreRightEdge = Math.max(scoreColEndX, rightScoreX + fm.stringWidth(rightScore));
+        int playerNameSpace = scoreLeftEdge - 20 - leftX;
+        int oppNameSpace = rightX - (scoreRightEdge + 20);
+
         // Draw player name (right-justified before score column)
         if (playerNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
             int nameWidth = fm.stringWidth(displayName);
-            g2d.drawString(displayName, scoreColStartX - 20 - nameWidth, y);  // Updated from 8 to 20
+            g2d.drawString(displayName, scoreLeftEdge - 20 - nameWidth, y);
         }
-        
+
         // Draw opponent name (left-justified after score column)
         if (oppNameSpace > 20) {
             String displayName = shortenNameWithInitials(entry.oppName, oppNameSpace, fm);
-            g2d.drawString(displayName, scoreColEndX + 20, y);  // Updated from 8 to 20
+            g2d.drawString(displayName, scoreRightEdge + 20, y);
         }
     }
     
     /**
-     * Shortens a name by converting words to initials until it fits in the available width.
+     * Fraction of the truly available pixel width actually targeted when
+     * shortening/truncating a name - stops comfortably under the hard limit
+     * rather than at the exact last pixel, so font-metric rounding/hinting
+     * differences between environments can't tip a "just barely fits" name
+     * into overlapping the next element (A36).
+     */
+    private static final double NAME_WIDTH_SAFETY_MARGIN = 0.9;
+
+    /**
+     * Shortens a name by converting words to initials until it fits within
+     * availableWidth (measured in real pixels via fm, with a safety margin -
+     * see NAME_WIDTH_SAFETY_MARGIN), falling back to hard pixel-based
+     * truncation with an ellipsis if even every word reduced to an initial
+     * still doesn't fit.
      * Always shortens the longest word first.
      * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
      */
-    private static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+    static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+        int targetWidth = (int) (availableWidth * NAME_WIDTH_SAFETY_MARGIN);
+
+        if (fm.stringWidth(name) <= targetWidth) {
+            return name;
+        }
+
         // Split name into words
         String[] words = name.split("\\s+");
         if (words.length == 1) {
-            // Single word - return as-is if <= 20 chars, otherwise truncate
-            if (name.length() <= 20) {
-                return name;
-            }
-            // Truncate to 20 chars with ellipsis
-            return name.substring(0, 17) + "...";
+            return truncateToPixelWidth(name, targetWidth, fm);
         }
-        
+
         // Track which words are already initials
         boolean[] isInitial = new boolean[words.length];
-        
-        // Keep shortening one word at a time until name is <= 20 characters
+
         while (true) {
             // Build current name
             StringBuilder current = new StringBuilder();
@@ -812,14 +853,13 @@ public class ComparisonImageGenerator {
                 if (i > 0) current.append(" ");
                 current.append(words[i]);
             }
-            
+
             String currentName = current.toString();
-            
-            // If current name is 20 chars or less, we're done
-            if (currentName.length() <= 20) {
+
+            if (fm.stringWidth(currentName) <= targetWidth) {
                 return currentName;
             }
-            
+
             // Find longest non-initial word to shorten
             int longestIndex = -1;
             int longestLength = 0;
@@ -829,17 +869,44 @@ public class ComparisonImageGenerator {
                     longestIndex = i;
                 }
             }
-            
+
             if (longestIndex == -1) {
-                // All words are already initials, can't shorten more
-                // Return as-is even if > 20 chars
-                return currentName;
+                // All words are already initials and it still doesn't fit -
+                // fall back to hard pixel truncation rather than overflowing.
+                return truncateToPixelWidth(currentName, targetWidth, fm);
             }
-            
+
             // Shorten the longest word to initial
             words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
             isInitial[longestIndex] = true;
         }
+    }
+
+    /**
+     * Truncates text to the longest prefix (plus an ellipsis) whose real
+     * rendered width fits within targetWidth, binary-searching on actual
+     * pixel width rather than assuming a fixed character count. Returns an
+     * empty string in the (very cramped) case where even the ellipsis alone
+     * doesn't fit - drawing nothing is safer than drawing something that
+     * still overflows.
+     */
+    static String truncateToPixelWidth(String text, int targetWidth, FontMetrics fm) {
+        String ellipsis = "...";
+        int ellipsisWidth = fm.stringWidth(ellipsis);
+        if (ellipsisWidth > targetWidth) {
+            return "";
+        }
+
+        int lo = 0, hi = text.length();
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (fm.stringWidth(text.substring(0, mid)) + ellipsisWidth <= targetWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return text.substring(0, lo) + ellipsis;
     }
     
     /**
@@ -847,7 +914,16 @@ public class ComparisonImageGenerator {
      */
     private static int calculateMaxWidth(ComparisonData data, FontMetrics fm) {
         int maxWidth = 600;
-        
+
+        // Assumed name budget for this canvas pre-sizing pass ONLY - not the
+        // real per-row draw-time constraint (drawHallVictoryEntry/
+        // drawPlayerVictoryEntry compute each row's true available space
+        // from actual layout geometry instead). Keeps the size estimate in
+        // roughly the same ballpark as before shortenNameWithInitials became
+        // pixel-aware, when every name was shortened toward ~20 characters
+        // for this estimate.
+        int nameSizingEstimateWidth = fm.stringWidth("M".repeat(20));
+
         Graphics2D tempG2d = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
         tempG2d.setFont(HEADER_FONT);
         FontMetrics headerFm = tempG2d.getFontMetrics();
@@ -860,13 +936,16 @@ public class ComparisonImageGenerator {
                 for (PlayerVictoryEntry entry : section.playerVictoryEntries) {
                     if (!entry.isNA) {
                         // Estimate width: round + emoji + hall + elo + name + score + name + elo + hall + emoji + spacing
-                        int roundWidth = fm.stringWidth("T16 ");
+                        // Uses the entry's actual round label - "Round 9" is
+                        // wider than "T16 " - so the canvas is sized to fit
+                        // what will really be drawn.
+                        int roundWidth = fm.stringWidth(entry.round != null && !entry.round.isEmpty() ? entry.round + " " : "T16 ");
                         int emojiWidth = fm.stringWidth(entry.hallEmoji) + 6;
                         int hallWidth = fm.stringWidth(entry.playerHall) + 6;
                         int eloWidth = fm.stringWidth(entry.playerElo) + 20;
-                        int nameWidth = fm.stringWidth(shortenNameWithInitials(entry.playerName, 999, fm)) + 20;
+                        int nameWidth = fm.stringWidth(shortenNameWithInitials(entry.playerName, nameSizingEstimateWidth, fm)) + 20;
                         int scoreWidth = fm.stringWidth(entry.score) + 40;
-                        int oppNameWidth = fm.stringWidth(shortenNameWithInitials(entry.oppName, 999, fm)) + 20;
+                        int oppNameWidth = fm.stringWidth(shortenNameWithInitials(entry.oppName, nameSizingEstimateWidth, fm)) + 20;
                         int oppEloWidth = fm.stringWidth(entry.oppElo) + 6;
                         int oppHallWidth = fm.stringWidth(String.format("%3s", entry.oppHall)) + 6;
                         int oppEmojiWidth = fm.stringWidth(entry.oppEmoji);
@@ -881,12 +960,12 @@ public class ComparisonImageGenerator {
                 for (HallVictoryEntry entry : section.hallVictoryEntries) {
                     if (!entry.isNA) {
                         // Similar calculation for hall entries
-                        int roundWidth = fm.stringWidth("T16 ");
+                        int roundWidth = fm.stringWidth(entry.round != null && !entry.round.isEmpty() ? entry.round + " " : "T16 ");
                         int emojiWidth = fm.stringWidth(entry.hallEmoji) + 6;
                         int eloWidth = fm.stringWidth(entry.hallElo) + 20;
-                        int nameWidth = fm.stringWidth(shortenNameWithInitials(entry.hallName, 999, fm)) + 20;
+                        int nameWidth = fm.stringWidth(shortenNameWithInitials(entry.hallName, nameSizingEstimateWidth, fm)) + 20;
                         int scoreWidth = fm.stringWidth(entry.score) + 40;
-                        int oppNameWidth = fm.stringWidth(shortenNameWithInitials(entry.oppName, 999, fm)) + 20;
+                        int oppNameWidth = fm.stringWidth(shortenNameWithInitials(entry.oppName, nameSizingEstimateWidth, fm)) + 20;
                         int oppEloWidth = fm.stringWidth(entry.oppElo) + 6;
                         int oppEmojiWidth = fm.stringWidth(entry.oppEmoji);
                         
@@ -954,24 +1033,7 @@ public class ComparisonImageGenerator {
      * Loads a hall icon from resources/halls folder
      */
     private static BufferedImage loadHallIcon(String hallName) {
-        try {
-            String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
-            InputStream is = ComparisonImageGenerator.class.getResourceAsStream(iconPath);
-            
-            if (is != null) {
-                return ImageIO.read(is);
-            }
-            
-            // Try unknown.png as fallback
-            is = ComparisonImageGenerator.class.getResourceAsStream("/halls/unknown.png");
-            if (is != null) {
-                return ImageIO.read(is);
-            }
-            
-            return null;
-        } catch (IOException e) {
-            return null;
-        }
+        return HallIconLoader.loadRawIcon(hallName);
     }
     
     /**

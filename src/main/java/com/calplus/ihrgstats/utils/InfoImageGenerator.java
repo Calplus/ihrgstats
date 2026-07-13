@@ -5,10 +5,8 @@ import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -203,7 +201,10 @@ public class InfoImageGenerator {
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
         String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
-        Path outputPath = Paths.get(System.getProperty("java.io.tmpdir"), filename);
+        // Save to the shared, dedicated output directory (not the OS temp
+        // dir - nothing was ever cleaning that up, so images accumulated
+        // there indefinitely with no inspectable, intentional home).
+        Path outputPath = OutputPaths.getOutputDirectory().resolve(filename);
         ImageIO.write(image, "PNG", outputPath.toFile());
         
         return outputPath;
@@ -306,62 +307,25 @@ public class InfoImageGenerator {
                 int startX = (imageWidth - totalWidth) / 2;
                 
                 // Draw first hall icon
-                try {
-                    String iconPath1 = "/halls/" + hallIdentifier.toLowerCase() + ".png";
-                    InputStream iconStream1 = InfoImageGenerator.class.getResourceAsStream(iconPath1);
-                    
-                    if (iconStream1 == null) {
-                        iconPath1 = "/halls/unknown.png";
-                        iconStream1 = InfoImageGenerator.class.getResourceAsStream(iconPath1);
-                    }
-                    
-                    if (iconStream1 != null) {
-                        BufferedImage icon1 = ImageIO.read(iconStream1);
-                        g2d.drawImage(icon1, startX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
-                    }
-                } catch (Exception e) {
-                    // Icon not found, skip
+                BufferedImage icon1 = HallIconLoader.loadRawIcon(hallIdentifier);
+                if (icon1 != null) {
+                    g2d.drawImage(icon1, startX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
                 }
-                
+
                 // Draw second hall icon
-                try {
-                    String iconPath2 = "/halls/" + metadata.secondHallIdentifier.toLowerCase() + ".png";
-                    InputStream iconStream2 = InfoImageGenerator.class.getResourceAsStream(iconPath2);
-                    
-                    if (iconStream2 == null) {
-                        iconPath2 = "/halls/unknown.png";
-                        iconStream2 = InfoImageGenerator.class.getResourceAsStream(iconPath2);
-                    }
-                    
-                    if (iconStream2 != null) {
-                        BufferedImage icon2 = ImageIO.read(iconStream2);
-                        g2d.drawImage(icon2, startX + LARGE_ICON_SIZE + iconSpacing, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
-                    }
-                } catch (Exception e) {
-                    // Icon not found, skip
+                BufferedImage icon2 = HallIconLoader.loadRawIcon(metadata.secondHallIdentifier);
+                if (icon2 != null) {
+                    g2d.drawImage(icon2, startX + LARGE_ICON_SIZE + iconSpacing, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
                 }
-                
+
                 yOffset += LARGE_ICON_SIZE + 10;
             } else {
                 // Draw single icon (original behavior)
-                try {
-                    String iconPath = "/halls/" + hallIdentifier.toLowerCase() + ".png";
-                    InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
-                    
-                    // Try unknown.png fallback if icon not found
-                    if (iconStream == null) {
-                        iconPath = "/halls/unknown.png";
-                        iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
-                    }
-                    
-                    if (iconStream != null) {
-                        BufferedImage icon = ImageIO.read(iconStream);
-                        int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
-                        g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
-                        yOffset += LARGE_ICON_SIZE + 10;
-                    }
-                } catch (Exception e) {
-                    // Icon not found, skip
+                BufferedImage icon = HallIconLoader.loadRawIcon(hallIdentifier);
+                if (icon != null) {
+                    int iconX = (imageWidth - LARGE_ICON_SIZE) / 2;
+                    g2d.drawImage(icon, iconX, yOffset, LARGE_ICON_SIZE, LARGE_ICON_SIZE, null);
+                    yOffset += LARGE_ICON_SIZE + 10;
                 }
             }
         } else {
@@ -411,18 +375,9 @@ public class InfoImageGenerator {
         
         // Try to load and tile hall icon as watermark
         try {
-            String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
-            InputStream iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
-            
-            // Try unknown.png fallback if icon not found
-            if (iconStream == null) {
-                iconPath = "/halls/unknown.png";
-                iconStream = InfoImageGenerator.class.getResourceAsStream(iconPath);
-            }
-            
-            if (iconStream != null) {
-                BufferedImage icon = ImageIO.read(iconStream);
-                
+            BufferedImage icon = HallIconLoader.loadRawIcon(hallName);
+
+            if (icon != null) {
                 // Create semi-transparent version
                 BufferedImage tiledIcon = new BufferedImage(icon.getWidth(), icon.getHeight(), 
                                                             BufferedImage.TYPE_INT_ARGB);
@@ -516,8 +471,22 @@ public class InfoImageGenerator {
         }
         
         // Draw victory entries
+        // Round-column width must fit the WIDEST round label actually present
+        // in this section (Swiss rounds render as "Round 9", not just the
+        // short bracket-stage labels like "T16" this used to assume) - a
+        // fixed guess sized only for "T16 " lets the outcome icon get drawn
+        // straight on top of a longer label like "Round 1".
+        int roundColWidth = 0;
+        for (VictoryEntry e : section.victoryEntries) {
+            if (e.round != null && !e.round.isEmpty()) {
+                roundColWidth = Math.max(roundColWidth, fm.stringWidth(e.round));
+            }
+        }
+        if (roundColWidth > 0) {
+            roundColWidth += 6;
+        }
         for (VictoryEntry entry : section.victoryEntries) {
-            yOffset = drawVictoryEntry(g2d, entry, x, yOffset, width, fm, alternate);
+            yOffset = drawVictoryEntry(g2d, entry, x, yOffset, width, fm, alternate, roundColWidth);
             alternate = !alternate;
         }
         
@@ -527,7 +496,7 @@ public class InfoImageGenerator {
     /**
      * Draws a victory record entry
      */
-    private static int drawVictoryEntry(Graphics2D g2d, VictoryEntry entry, int x, int y, int width, FontMetrics fm, boolean alternate) {
+    private static int drawVictoryEntry(Graphics2D g2d, VictoryEntry entry, int x, int y, int width, FontMetrics fm, boolean alternate, int roundColWidth) {
         // Null-safe field initialization
         if (entry.score == null) entry.score = "";
         if (entry.hallEmoji == null) entry.hallEmoji = "";
@@ -562,20 +531,25 @@ public class InfoImageGenerator {
         int leftScoreWidth = fm.stringWidth(leftScore);
         int leftScoreX = dashX - leftScoreWidth;
         int rightScoreX = dashX + dashWidth;
-        
-        // Fixed width for round column to ensure vertical alignment
-        // If round is empty, don't reserve any space for it
-        int roundColWidth = entry.round.isEmpty() ? 0 : fm.stringWidth("T16 ");
-        
+
+        // Safe score-text boundary, used everywhere below (both the
+        // highlight background and the name placement) instead of the
+        // static scoreColStartX/scoreColEndX - a score wider than the
+        // "200.5-100.5" template fixedScoreColWidth was sized for would
+        // otherwise let a highlight box or a name get drawn directly
+        // against (or inside) the actual score text.
+        int scoreLeftEdge = Math.min(scoreColStartX, leftScoreX);
+        int scoreRightEdge = Math.max(scoreColEndX, rightScoreX + fm.stringWidth(rightScore));
+
         // Check if this is a hall victory entry (playerName is empty) or player victory entry
         boolean isHallEntry = (entry.playerName == null || entry.playerName.trim().isEmpty());
-        
+
         // Pre-calculate boundaries for highlighting
         if (isHallEntry) {
             // Hall entry: calculate left and right boundaries
             int leftX = x + roundColWidth;
-            int leftEndX = scoreColStartX - 8;
-            int rightStartX = scoreColEndX + 8;
+            int leftEndX = scoreLeftEdge - 8;
+            int rightStartX = scoreRightEdge + 8;
             int rightEndX = x + width;
             
             // Draw highlights
@@ -646,21 +620,23 @@ public class InfoImageGenerator {
             g2d.drawString("-", dashX, textY);
             g2d.drawString(rightScore, rightScoreX, textY);
             
-            // Draw hall names centered around fixed score column
-            int hallNameSpace = scoreColStartX - 8 - leftX;
-            int oppNameSpace = rightX - (scoreColEndX + 8);
-            
+            // Draw hall names, using the shared safe score-text boundary
+            // (scoreLeftEdge/scoreRightEdge, computed above) rather than the
+            // static scoreColStartX/EndX template.
+            int hallNameSpace = scoreLeftEdge - 8 - leftX;
+            int oppNameSpace = rightX - (scoreRightEdge + 8);
+
             // Hall name (right-justified before score column)
             if (hallNameSpace > 20) {
                 String displayName = shortenNameWithInitials(entry.playerHall, hallNameSpace, fm);
                 int nameWidth = fm.stringWidth(displayName);
-                g2d.drawString(displayName, scoreColStartX - 8 - nameWidth, textY);
+                g2d.drawString(displayName, scoreLeftEdge - 8 - nameWidth, textY);
             }
-            
+
             // Opponent name (left-justified after score column)
             if (oppNameSpace > 20) {
                 String displayName = shortenNameWithInitials(entry.opponentHall, oppNameSpace, fm);
-                g2d.drawString(displayName, scoreColEndX + 8, textY);
+                g2d.drawString(displayName, scoreRightEdge + 8, textY);
             }
         } else {
             // Player victory format: round emoji playerHall playerElo [playerName] score [oppName] oppElo oppHall emoji
@@ -699,48 +675,63 @@ public class InfoImageGenerator {
             g2d.drawString("-", dashX, textY);
             g2d.drawString(rightScore, rightScoreX, textY);
             
-            // Calculate available space for names relative to fixed score column
-            int playerNameSpace = scoreColStartX - 20 - leftX;
-            int oppNameSpace = rightX - (scoreColEndX + 20);
-            
+            // Calculate available space for names using the shared safe
+            // score-text boundary (scoreLeftEdge/scoreRightEdge, computed
+            // above) rather than the static scoreColStartX/EndX template.
+            int playerNameSpace = scoreLeftEdge - 20 - leftX;
+            int oppNameSpace = rightX - (scoreRightEdge + 20);
+
             // Draw player name (right-justified before score column)
             if (playerNameSpace > 20) {
                 String displayName = shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
                 int nameWidth = fm.stringWidth(displayName);
-                g2d.drawString(displayName, scoreColStartX - 20 - nameWidth, textY);
+                g2d.drawString(displayName, scoreLeftEdge - 20 - nameWidth, textY);
             }
-            
+
             // Draw opponent name (left-justified after score column)
             if (oppNameSpace > 20) {
                 String displayName = shortenNameWithInitials(entry.opponentName, oppNameSpace, fm);
-                g2d.drawString(displayName, scoreColEndX + 20, textY);
+                g2d.drawString(displayName, scoreRightEdge + 20, textY);
             }
         }
-        
+
         return y + ROW_HEIGHT;
     }
     
     /**
-     * Shortens a name by converting words to initials until it fits in the available width.
+     * Fraction of the truly available pixel width actually targeted when
+     * shortening/truncating a name - stops comfortably under the hard limit
+     * rather than at the exact last pixel, so font-metric rounding/hinting
+     * differences between environments can't tip a "just barely fits" name
+     * into overlapping the next element (A36).
+     */
+    private static final double NAME_WIDTH_SAFETY_MARGIN = 0.9;
+
+    /**
+     * Shortens a name by converting words to initials until it fits within
+     * availableWidth (measured in real pixels via fm, with a safety margin -
+     * see NAME_WIDTH_SAFETY_MARGIN), falling back to hard pixel-based
+     * truncation with an ellipsis if even every word reduced to an initial
+     * still doesn't fit.
      * Always shortens the longest word first.
      * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
      */
-    private static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+    static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+        int targetWidth = (int) (availableWidth * NAME_WIDTH_SAFETY_MARGIN);
+
+        if (fm.stringWidth(name) <= targetWidth) {
+            return name;
+        }
+
         // Split name into words
         String[] words = name.split("\\s+");
         if (words.length == 1) {
-            // Single word - return as-is if <= 20 chars, otherwise truncate
-            if (name.length() <= 20) {
-                return name;
-            }
-            // Truncate to 20 chars with ellipsis
-            return name.substring(0, 17) + "...";
+            return truncateToPixelWidth(name, targetWidth, fm);
         }
-        
+
         // Track which words are already initials
         boolean[] isInitial = new boolean[words.length];
-        
-        // Keep shortening one word at a time until name is <= 20 characters
+
         while (true) {
             // Build current name
             StringBuilder current = new StringBuilder();
@@ -748,14 +739,13 @@ public class InfoImageGenerator {
                 if (i > 0) current.append(" ");
                 current.append(words[i]);
             }
-            
+
             String currentName = current.toString();
-            
-            // If current name is 20 chars or less, we're done
-            if (currentName.length() <= 20) {
+
+            if (fm.stringWidth(currentName) <= targetWidth) {
                 return currentName;
             }
-            
+
             // Find longest non-initial word to shorten
             int longestIndex = -1;
             int longestLength = 0;
@@ -765,17 +755,44 @@ public class InfoImageGenerator {
                     longestIndex = i;
                 }
             }
-            
+
             if (longestIndex == -1) {
-                // All words are already initials, can't shorten more
-                // Return as-is even if > 20 chars
-                return currentName;
+                // All words are already initials and it still doesn't fit -
+                // fall back to hard pixel truncation rather than overflowing.
+                return truncateToPixelWidth(currentName, targetWidth, fm);
             }
-            
+
             // Shorten the longest word to initial
             words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
             isInitial[longestIndex] = true;
         }
+    }
+
+    /**
+     * Truncates text to the longest prefix (plus an ellipsis) whose real
+     * rendered width fits within targetWidth, binary-searching on actual
+     * pixel width rather than assuming a fixed character count. Returns an
+     * empty string in the (very cramped) case where even the ellipsis alone
+     * doesn't fit - drawing nothing is safer than drawing something that
+     * still overflows.
+     */
+    static String truncateToPixelWidth(String text, int targetWidth, FontMetrics fm) {
+        String ellipsis = "...";
+        int ellipsisWidth = fm.stringWidth(ellipsis);
+        if (ellipsisWidth > targetWidth) {
+            return "";
+        }
+
+        int lo = 0, hi = text.length();
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (fm.stringWidth(text.substring(0, mid)) + ellipsisWidth <= targetWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return text.substring(0, lo) + ellipsis;
     }
     
     /**
@@ -783,7 +800,15 @@ public class InfoImageGenerator {
      */
     private static int calculateMaxWidth(List<Section> sections, FontMetrics fm) {
         int maxWidth = 800;  // Minimum width
-        
+
+        // Assumed name budget for this canvas pre-sizing pass ONLY - not the
+        // real per-row draw-time constraint (drawVictoryEntry computes each
+        // row's true available space from actual layout geometry instead).
+        // Keeps the size estimate in roughly the same ballpark as before
+        // shortenNameWithInitials became pixel-aware, when every name was
+        // shortened toward ~20 characters for this estimate.
+        int nameSizingEstimateWidth = fm.stringWidth("M".repeat(20));
+
         for (Section section : sections) {
             for (Row row : section.rows) {
                 int rowWidth = fm.stringWidth(row.label) + fm.stringWidth(row.value) + 100;
@@ -796,13 +821,16 @@ public class InfoImageGenerator {
                     maxWidth = Math.max(maxWidth, entryWidth);
                 } else {
                     // Calculate width for new format: round + emoji + hall + elo + name + score + name + elo + hall + emoji + spacing
-                    int roundWidth = fm.stringWidth("T16 ");
+                    // Uses the entry's actual round label (e.g. "Round 9" is
+                    // wider than "T16 ") so the canvas is sized to fit what
+                    // will really be drawn, not an assumed bracket-stage label.
+                    int roundWidth = fm.stringWidth(entry.round != null && !entry.round.isEmpty() ? entry.round + " " : "T16 ");
                     int emojiWidth = fm.stringWidth(entry.hallEmoji != null ? entry.hallEmoji : "✅") + 6;
                     int hallWidth = fm.stringWidth(entry.playerHall != null ? entry.playerHall : "H1") + 6;
                     int eloWidth = fm.stringWidth(entry.playerElo != null ? entry.playerElo : "1500") + 20;
-                    int nameWidth = fm.stringWidth(entry.playerName != null ? shortenNameWithInitials(entry.playerName, 999, fm) : "") + 20;
+                    int nameWidth = fm.stringWidth(entry.playerName != null ? shortenNameWithInitials(entry.playerName, nameSizingEstimateWidth, fm) : "") + 20;
                     int scoreWidth = fm.stringWidth(entry.score != null ? entry.score : "1-0") + 40;
-                    int oppNameWidth = fm.stringWidth(entry.opponentName != null ? shortenNameWithInitials(entry.opponentName, 999, fm) : "") + 20;
+                    int oppNameWidth = fm.stringWidth(entry.opponentName != null ? shortenNameWithInitials(entry.opponentName, nameSizingEstimateWidth, fm) : "") + 20;
                     int oppEloWidth = fm.stringWidth(entry.opponentElo != null ? entry.opponentElo : "1500") + 6;
                     int oppHallWidth = fm.stringWidth(entry.opponentHall != null ? String.format("%3s", entry.opponentHall) : "H1") + 6;
                     int oppEmojiWidth = fm.stringWidth(entry.oppEmoji != null ? entry.oppEmoji : "❌");

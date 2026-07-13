@@ -7,6 +7,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.UUID;
 
 /**
  * Utility for downloading files from Telegram Bot API.
@@ -91,16 +92,25 @@ public class TelegramFileDownloader {
      */
     public Path downloadToTemp(String fileId, String filename) {
         try {
-            Path tempDir = Paths.get(System.getProperty("user.dir"), "temp");
+            // Each download gets its own UUID-named subdirectory rather than
+            // sharing one flat temp/ directory keyed only on the original
+            // filename - two concurrent uploads of the same filename (e.g. a
+            // re-upload of "2025_round_3.csv" moments after the first) would
+            // otherwise silently overwrite each other's file mid-processing,
+            // and one upload's cleanup (deleteTempFile) could delete the
+            // file the OTHER upload is still reading. Every upload now runs
+            // on its own thread (since the confirmation-deadlock fix), so
+            // this collision is reachable in practice, not just in theory.
+            Path tempDir = Paths.get(System.getProperty("user.dir"), "temp", UUID.randomUUID().toString());
             Files.createDirectories(tempDir);
-            
+
             Path tempFile = tempDir.resolve(filename);
-            
+
             if (downloadFile(fileId, tempFile.toString())) {
                 return tempFile;
             }
             return null;
-            
+
         } catch (Exception e) {
             System.err.println("Error creating temp directory: " + e.getMessage());
             return null;
@@ -139,6 +149,18 @@ public class TelegramFileDownloader {
             if (path != null && Files.exists(path)) {
                 Files.delete(path);
                 System.out.println("Temporary file deleted: " + path);
+                // Best-effort: remove the per-download UUID subdirectory
+                // downloadToTemp() created for this file, now that it's
+                // empty, so these don't accumulate indefinitely. Silently
+                // ignored if the parent isn't empty or isn't one of ours.
+                try {
+                    Path parent = path.getParent();
+                    if (parent != null) {
+                        Files.deleteIfExists(parent);
+                    }
+                } catch (Exception ignored) {
+                    // Non-empty, or some other reason it couldn't be removed - harmless either way.
+                }
             }
         } catch (Exception e) {
             System.err.println("Error deleting temporary file: " + e.getMessage());

@@ -109,6 +109,23 @@ public class B6_PlayerYearStatus {
         }
     }
 
+    /**
+     * Clears the capped flag for every currently-capped player in a year.
+     * Used by a full cappedlist.csv re-upload (itself full-replace semantics
+     * for the capped_imports staging table) so a player removed from the new
+     * list is actually un-capped, instead of permanently keeping whatever
+     * capped flag an earlier upload set.
+     */
+    public void clearCappedForYear(int year, String nowTimestamp) throws SQLException {
+        String sql = "UPDATE player_year_status SET capped = 0, updated_dttm = ? WHERE year = ? AND capped = 1";
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, nowTimestamp);
+            ps.setInt(2, year);
+            ps.executeUpdate();
+        }
+    }
+
     /** Replaces the legacy "WHERE active = 1" filter pattern. */
     public List<Status> getActiveStatusesForYear(int year) throws SQLException {
         String sql = "SELECT * FROM player_year_status WHERE year = ? AND active = 1";

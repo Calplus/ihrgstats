@@ -9,6 +9,7 @@ import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Command handler for /infomatchhall command.
@@ -26,7 +27,7 @@ public class CommandInfoMatchHall {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, MatchHallSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, MatchHallSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class MatchHallSelectionState extends SelectionState {
         int hallId;
@@ -102,7 +103,7 @@ public class CommandInfoMatchHall {
             labels.add("❌ Cancel");
             callbacks.add("infomatchhall_cancel");
 
-            String message = String.format("**🏛️ Hall Match Information**\n\nHall: **%s**\nSelect the **round**:", state.hallName);
+            String message = String.format("**🏛️ Hall Match Information**\n\nHall: **%s**\nSelect the **round**:", VictoryRecordCalculator.formatHallName(state.hallName));
             return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -169,7 +170,7 @@ public class CommandInfoMatchHall {
         List<HallPlayerData> players = fetchHallPlayersForRound(hallId, hallName, year, round, prevRound, trueEloTypeId);
 
         if (players.isEmpty()) {
-            return new InfoResponse(String.format("ℹ️ No players from %s found in %s.", hallName, round.roundLabel), (Path) null, null);
+            return new InfoResponse(String.format("ℹ️ No players from %s found in %s.", VictoryRecordCalculator.formatHallName(hallName), round.roundLabel), (Path) null, null);
         }
 
         players.sort(Comparator.comparingInt(p -> p.seat != null ? p.seat : 999));
@@ -297,7 +298,7 @@ public class CommandInfoMatchHall {
         String matchScore = calculateMatchScore(players);
 
         sb.append("**🏛️ Hall Match Information**\n\n");
-        sb.append(String.format("**Hall:** %s vs %s\n", hallName, opponentHall));
+        sb.append(String.format("**Hall:** %s vs %s\n", VictoryRecordCalculator.formatHallName(hallName), VictoryRecordCalculator.formatHallName(opponentHall)));
         sb.append(String.format("**Round:** %s\n", round.roundLabel));
         sb.append(String.format("**Score:** %s\n\n", matchScore));
 
@@ -368,7 +369,8 @@ public class CommandInfoMatchHall {
 
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Hall Match Information";
-        metadata.subtitle = String.format("%s vs %s - %s", hallName, opponentHall, round.roundLabel);
+        metadata.subtitle = String.format("%s vs %s - %s",
+                VictoryRecordCalculator.formatHallName(hallName), VictoryRecordCalculator.formatHallName(opponentHall), round.roundLabel);
         metadata.description = String.format("Score: %s", matchScore);
         metadata.lastRound = round.roundLabel;
         metadata.secondHallIdentifier = opponentHall.equalsIgnoreCase("WALKOVER") ? "unknown" : opponentHall;

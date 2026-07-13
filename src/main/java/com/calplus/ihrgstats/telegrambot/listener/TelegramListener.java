@@ -43,7 +43,6 @@ public class TelegramListener {
     private String devChatIdLog;  // The dev chat ID for log messages
     private String publicChatIdStatus;
     private String publicChatIdCommands;
-    private String adminUserId;
     private boolean allowNonAdminUploads;
     private boolean allowAllChannelsProcessing;
     
@@ -57,13 +56,45 @@ public class TelegramListener {
     
     private ScheduledExecutorService statusHeartbeatExecutor;
     private static final long STATUS_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-    
-    // Pending confirmations: using a single key for file processing confirmations
+
+    // Matches "cappedlist.csv" or "{year}_cappedlist.csv" - group(1) is the
+    // year digits, or null when the prefix is absent.
+    private static final Pattern CAPPEDLIST_FILENAME = Pattern.compile("^(?:(\\d{4})_)?cappedlist\\.csv$", Pattern.CASE_INSENSITIVE);
+
+    /** Result of {@link #parseCappedlistFilename(String)} - mirrors RoundCsvProcessor.ParsedFilename. */
+    static class ParsedCappedlistFilename {
+        final boolean matched;
+        final Integer year; // null when the filename has no {year}_ prefix
+
+        ParsedCappedlistFilename(boolean matched, Integer year) {
+            this.matched = matched;
+            this.year = year;
+        }
+    }
+
+    /**
+     * Parses "cappedlist.csv" or "{year}_cappedlist.csv". The year prefix,
+     * when present, must be honored exactly like round files - previously it
+     * was accepted by the filename pattern but silently ignored, always
+     * processing under the currently-configured year regardless of what the
+     * filename actually said.
+     */
+    static ParsedCappedlistFilename parseCappedlistFilename(String fileName) {
+        Matcher m = CAPPEDLIST_FILENAME.matcher(fileName);
+        if (!m.matches()) {
+            return new ParsedCappedlistFilename(false, null);
+        }
+        String yearGroup = m.group(1);
+        return new ParsedCappedlistFilename(true, yearGroup != null ? Integer.parseInt(yearGroup) : null);
+    }
+
+
+    // Pending confirmations, keyed per-user (not a single global slot) - so
+    // two different users' pending dialogs can't clobber each other, and only
+    // the user who was actually asked can answer their own dialog.
     private final Map<String, ConfirmationRequest> pendingConfirmations = new ConcurrentHashMap<>();
     private final Map<String, MultiChoiceConfirmationRequest> pendingMultiChoiceConfirmations = new ConcurrentHashMap<>();
-    private static final String FILE_PROCESSING_CONFIRMATION_KEY = "file_processing";
-    private static final String FILE_PROCESSING_MULTI_CHOICE_KEY = "file_processing_multi";
-    
+
     // User name cache: maps userId -> userName for logging purposes
     private static final Map<String, String> userNameCache = new ConcurrentHashMap<>();
     
@@ -147,7 +178,6 @@ public class TelegramListener {
             this.devChatIdLog = PropertyResolver.getProperty("telegram.devChatId.log", "");  // Load dev chat log ID
             this.publicChatIdStatus = PropertyResolver.getProperty("telegram.devChatId.status", "");
             this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
-            this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
             this.allowNonAdminUploads = Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowNonAdminUploads", "true"));
             this.allowAllChannelsProcessing = Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowAllChannelsProcessing", "false"));
             
@@ -441,8 +471,8 @@ public class TelegramListener {
                     if (updates.size() > 0) {
                         JsonObject lastUpdate = updates.get(0).getAsJsonObject();
                         lastUpdateId = lastUpdate.get("update_id").getAsLong();
-                        discordLog.logInfo("Skipping " + (lastUpdateId + 1) + " old messages. Only processing new files.");
-                        telegramLog.logInfo("Skipping " + (lastUpdateId + 1) + " old messages. Only processing new files.");
+                        discordLog.logInfo("Skipping all pending messages up to update_id " + lastUpdateId + ". Only processing new files from now on.");
+                        telegramLog.logInfo("Skipping all pending messages up to update_id " + lastUpdateId + ". Only processing new files from now on.");
                     }
                 }
             }
@@ -496,11 +526,11 @@ public class TelegramListener {
                 
                 if (!update.has("message")) continue;
                 JsonObject message = update.getAsJsonObject("message");
-                
+
                 // Check if it's from the right chat
                 JsonObject chat = message.getAsJsonObject("chat");
                 String chatId = chat.get("id").getAsString();
-            
+
             // If allowAllChannelsProcessing is true OR publicChatId is empty, accept messages from any channel
             if (allowAllChannelsProcessing || publicChatId.isEmpty()) {
                 // Accept message from any channel - no filtering needed
@@ -509,9 +539,13 @@ public class TelegramListener {
                 // Check chat match
                 boolean isPublicChat = chatId.equals(publicChatId);
                 boolean hasValidThread = false;
-                
-                // If we're waiting for a confirmation, accept ANY message from the correct chat
-                boolean waitingForConfirmation = pendingConfirmations.containsKey(FILE_PROCESSING_CONFIRMATION_KEY);
+
+                // If THIS SPECIFIC sender has a pending confirmation, accept ANY
+                // message from them in the correct chat (keyed per-user now, not
+                // a single global slot, so one user's pending dialog no longer
+                // relaxes validation for every other user's messages too).
+                String senderUserId = message.has("from") ? message.getAsJsonObject("from").get("id").getAsString() : null;
+                boolean waitingForConfirmation = senderUserId != null && pendingConfirmations.containsKey(senderUserId);
                 
                 if (waitingForConfirmation) {
                     // Accept any message from the correct chat while waiting for confirmation
@@ -843,32 +877,55 @@ public class TelegramListener {
                         // Remove buttons from original message
                         removeInlineKeyboard(chatId, messageId);
 
-                        com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase exportCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase();
+                        // Generating the export (especially the XLSX, which
+                        // reads the whole database) can take a while - run it
+                        // on its own thread so it doesn't stall the polling
+                        // thread (and therefore every other incoming update)
+                        // for its duration (A27).
+                        Thread exportThread = new Thread(() -> {
+                            try {
+                                com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase exportCommand =
+                                    new com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase();
 
-                        if (data.startsWith("export_db_xlsx_") || data.startsWith("export_db_confirm_")) {
-                            // Execute the chosen export format
-                            com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase.ExportResponse response =
-                                data.startsWith("export_db_xlsx_") ? exportCommand.executeXlsxExport(userId) : exportCommand.executeDbExport(userId);
+                                if (data.startsWith("export_db_xlsx_") || data.startsWith("export_db_confirm_")) {
+                                    // Execute the chosen export format
+                                    com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase.ExportResponse response =
+                                        data.startsWith("export_db_xlsx_") ? exportCommand.executeXlsxExport(userId) : exportCommand.executeDbExport(userId);
 
-                            if (response.success && response.exportedFilePath != null) {
-                                // Send file to user's DM
-                                sendFileToUser(userId, response.exportedFilePath.toString());
+                                    if (response.success && response.exportedFilePath != null) {
+                                        // Send file to user's DM
+                                        sendFileToUser(userId, response.exportedFilePath.toString());
 
-                                // Send success message to original chat/thread (where button was clicked)
-                                sendMessageToChat(chatId, response.message, threadId);
+                                        // Send success message to original chat/thread (where button was clicked)
+                                        sendMessageToChat(chatId, response.message, threadId);
 
-                                // Also send success message to commands channel
-                                sendMessageToCommandsChannel(response.message, message);
-                            } else {
-                                // Send error message to original chat/thread
-                                sendMessageToChat(chatId, response.message, threadId);
+                                        // Also send success message to commands channel
+                                        sendMessageToCommandsChannel(response.message, message);
+                                    } else {
+                                        // Send error message to original chat/thread
+                                        sendMessageToChat(chatId, response.message, threadId);
+                                    }
+                                } else {
+                                    // Cancel
+                                    String cancelMessage = exportCommand.handleCancel(userId);
+                                    sendMessageToChat(chatId, cancelMessage, threadId);
+                                }
+                            } catch (Exception e) {
+                                // Without this, an exception here (e.g. from the
+                                // export itself, or file sending) would escape as
+                                // an uncaught exception on a bare thread - unlike
+                                // before this ran on its own thread, when the
+                                // enclosing handleCallbackQuery's own catch below
+                                // would have logged it to Discord/Telegram.
+                                String errorMsg = "Error processing export database callback: " + e.getMessage();
+                                discordLog.logError(errorMsg);
+                                telegramLog.logError(errorMsg);
+                                e.printStackTrace();
+                                sendMessageToChat(chatId, formatStatusMessage("🔴", "ERROR", errorMsg), threadId);
                             }
-                        } else {
-                            // Cancel
-                            String cancelMessage = exportCommand.handleCancel(userId);
-                            sendMessageToChat(chatId, cancelMessage, threadId);
-                        }
+                        });
+                        exportThread.setDaemon(true);
+                        exportThread.start();
                     }
                 }
                 return;
@@ -933,9 +990,19 @@ public class TelegramListener {
                 handleMatchTypesCallback(callbackQuery, data, userId);
                 return;
             }
+
+            // Handle admins callbacks
+            if (data.startsWith("admins_")) {
+                handleAdminsCallback(callbackQuery, data, userId);
+                return;
+            }
             
-            // Handle multi-choice confirmation
-            MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(FILE_PROCESSING_MULTI_CHOICE_KEY);
+            // Handle multi-choice confirmation - keyed per-user (not a single
+            // global slot), so this inherently only resolves the CLICKING
+            // user's own pending dialog; another user's identical-looking
+            // dialog is untouched, and a user with nothing pending clicking
+            // a stale/expired button simply has no effect.
+            MultiChoiceConfirmationRequest request = pendingMultiChoiceConfirmations.get(userId);
             if (request != null) {
                 // Parse the callback data (format: "choice_0", "choice_1", etc.)
                 if (data.startsWith("choice_")) {
@@ -945,13 +1012,13 @@ public class TelegramListener {
                             String selectedOption = request.options[choice];
                             discordLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
                             telegramLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
-                            
+
                             // Send confirmation message to chat (use stored original message for routing)
                             String confirmMsg = String.format("✅ Selected: %s", selectedOption);
                             sendMessageToUploadChat(confirmMsg, request.originalMessage);
-                            
+
                             request.future.complete(choice);
-                            pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                            pendingMultiChoiceConfirmations.remove(userId, request);
                         } else {
                             sendMessageToUploadChat("❌ Invalid choice index", request.originalMessage);
                         }
@@ -959,8 +1026,15 @@ public class TelegramListener {
                         sendMessageToUploadChat("❌ Invalid callback data format", request.originalMessage);
                     }
                 }
+            } else if (data.startsWith("choice_")) {
+                // No pending dialog for this clicker - either it was never
+                // theirs to answer, or it already resolved/expired. Say so
+                // explicitly instead of silently no-oping (matches the
+                // export_db_* callbacks' existing "not for you" pattern).
+                telegramLog.logWarning(String.format("User %s clicked a choice button with no matching pending dialog", userId));
+                sendMessageToUploadChat("❌ This confirmation is not for you, or it already expired.", callbackQuery.getAsJsonObject("message"));
             }
-            
+
         } catch (Exception e) {
             discordLog.logError("Error handling callback query: " + e.getMessage());
             telegramLog.logError("Error handling callback query: " + e.getMessage());
@@ -1010,6 +1084,18 @@ public class TelegramListener {
             return;
         }
 
+        // Check if user is mid-wizard on /admins (add-admin text input)
+        com.calplus.ihrgstats.telegrambot.commands.CommandAdmins adminsCommand =
+            new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins();
+        if (adminsCommand.isAwaitingTextInput(userId)) {
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse adminsResponse =
+                adminsCommand.handleTextInput(userId, text);
+            if (adminsResponse != null) {
+                sendMessageToCommandsChannel(adminsResponse.message, message);
+                return;
+            }
+        }
+
         // Check if user is mid-wizard on /matchtypes (create/edit text input)
         com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
             new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
@@ -1022,20 +1108,23 @@ public class TelegramListener {
             }
         }
 
-        // Check for any pending confirmation (file processing uses global key)
-        ConfirmationRequest request = pendingConfirmations.get(FILE_PROCESSING_CONFIRMATION_KEY);
-        
+        // Check for a pending confirmation FOR THIS SPECIFIC USER - keyed per-user
+        // (not a single global slot) so two different users' pending yes/no
+        // dialogs no longer clobber each other, and only the person who was
+        // actually asked can answer their own dialog.
+        ConfirmationRequest request = pendingConfirmations.get(userId);
+
         if (request != null) {
             System.out.println("Pending confirmation found. User text: '" + text + "'");
             String lowerText = text.toLowerCase();
             if (lowerText.equals("yes") || lowerText.equals("y")) {
                 System.out.println("User confirmed YES - completing future with true");
                 request.future.complete(true);
-                pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+                pendingConfirmations.remove(userId, request);
             } else if (lowerText.equals("no") || lowerText.equals("n")) {
                 System.out.println("User confirmed NO - completing future with false");
                 request.future.complete(false);
-                pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+                pendingConfirmations.remove(userId, request);
             } else {
                 System.out.println("Text does not match yes/no: '" + lowerText + "'");
             }
@@ -1072,95 +1161,115 @@ public class TelegramListener {
     /**
      * Handles file upload
      */
+    /**
+     * Runs entirely on a background thread (like /recalculate's recalcThread)
+     * so the polling thread stays free to receive the "yes"/"no" confirmation
+     * reply for non-admin uploads. requestUserConfirmationViaChat blocks for
+     * up to 60 seconds - if that wait happened on the polling thread itself
+     * (as it previously did, since this method used to run synchronously from
+     * processUpdates and only spawned a thread AFTER the confirmation
+     * succeeded), the polling loop could never fetch the very reply it was
+     * waiting for, and the confirmation would always time out regardless of
+     * how fast the user answered.
+     */
     private void handleFileUpload(JsonObject message, JsonObject document) {
-        try {
-            String fileName = document.get("file_name").getAsString();
-            String fileId = document.get("file_id").getAsString();
-            
-            // Extract user information
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-            String username = from.has("username") ? from.get("username").getAsString() : "Unknown";
-            String userInfo = from.has("username") ? String.format("@%s (ID: %s)", username, userId) : String.format("User (ID: %s)", userId);
-            
-            discordLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
-            telegramLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
-            
-            // Additional safety check: validate file upload channel when allowAllChannelsProcessing is false
-            if (!allowAllChannelsProcessing && !publicChatId.isEmpty()) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                
-                boolean isValidChannel = false;
-                
-                // Check if message is from correct chat
-                if (chatId.equals(publicChatId)) {
-                    // Check thread ID
-                    if (!publicChatIdFileupload.isEmpty()) {
-                        // Must be in fileupload thread
-                        if (message.has("message_thread_id")) {
-                            String threadId = message.get("message_thread_id").getAsString();
-                            if (threadId.equals(publicChatIdFileupload)) {
-                                isValidChannel = true;
+        Thread uploadThread = new Thread(() -> {
+            try {
+                String fileName = document.get("file_name").getAsString();
+                String fileId = document.get("file_id").getAsString();
+
+                // Extract user information
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.get("id").getAsString();
+                String username = from.has("username") ? from.get("username").getAsString() : "Unknown";
+                String userInfo = from.has("username") ? String.format("@%s (ID: %s)", username, userId) : String.format("User (ID: %s)", userId);
+
+                discordLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
+                telegramLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
+
+                // Additional safety check: validate file upload channel when allowAllChannelsProcessing is false
+                if (!allowAllChannelsProcessing && !publicChatId.isEmpty()) {
+                    JsonObject chat = message.getAsJsonObject("chat");
+                    String chatId = chat.get("id").getAsString();
+
+                    boolean isValidChannel = false;
+
+                    // Check if message is from correct chat
+                    if (chatId.equals(publicChatId)) {
+                        // Check thread ID
+                        if (!publicChatIdFileupload.isEmpty()) {
+                            // Must be in fileupload thread
+                            if (message.has("message_thread_id")) {
+                                String threadId = message.get("message_thread_id").getAsString();
+                                if (threadId.equals(publicChatIdFileupload)) {
+                                    isValidChannel = true;
+                                }
                             }
+                        } else {
+                            // No specific fileupload thread configured, accept from base chat
+                            isValidChannel = !message.has("message_thread_id");
                         }
-                    } else {
-                        // No specific fileupload thread configured, accept from base chat
-                        isValidChannel = !message.has("message_thread_id");
+                    }
+
+                    if (!isValidChannel) {
+                        String errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
+                        String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+                        sendMessageToChat(chatId, errorMsg, msgThreadId);
+
+                        String logMsg = String.format("File upload rejected from wrong channel. User: %s, File: %s", username, fileName);
+                        discordLog.logWarning(logMsg);
+                        telegramLog.logWarning(logMsg);
+                        return;
                     }
                 }
-                
-                if (!isValidChannel) {
-                    String errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
-                    String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    sendMessageToChat(chatId, errorMsg, msgThreadId);
-                    
-                    String logMsg = String.format("File upload rejected from wrong channel. User: %s, File: %s", username, fileName);
-                    discordLog.logWarning(logMsg);
-                    telegramLog.logWarning(logMsg);
-                    return;
+
+                // Check admin status (via the admins table - see F16_Admins; the
+                // old single telegram.admin.userId comparison would silently
+                // stop recognizing an admin added via /admins).
+                boolean isAdmin = new com.calplus.ihrgstats.databasemanager.F16_Admins()
+                        .isAdminSafe(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
+
+                if (!isAdmin) {
+                    if (!allowNonAdminUploads) {
+                        String errorMsg = String.format("%s is not an admin. File upload rejected.", userInfo);
+                        discordLog.logError(errorMsg);
+                        telegramLog.logError(errorMsg);
+                        return;
+                    }
+
+                    // Request confirmation for non-admin upload. This is a
+                    // self-confirm dialog (the uploader confirms their own
+                    // intent), mirroring /recalculate's pattern - the pending
+                    // request is keyed on this same uploader's userId, so only
+                    // they can ever answer it, not some other admin watching
+                    // the chat. Logged to the dev channel too (in addition to
+                    // the actual chat prompt below) so admins monitoring only
+                    // that channel still see that a confirmation was requested.
+                    String confirmMsg = String.format("⚠️ %s, you are not an admin. Do you want us to process your file '%s'? Reply with 'yes' or 'no'.",
+                        userInfo, fileName);
+                    discordLog.logInfo(String.format("Requesting non-admin upload confirmation from %s for file %s", userInfo, fileName));
+                    telegramLog.logInfo(String.format("Requesting non-admin upload confirmation from %s for file %s", userInfo, fileName));
+                    boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg, message);
+
+                    if (!confirmed) {
+                        String cancelMsg = "File processing cancelled - user did not confirm.";
+                        discordLog.logWarning(cancelMsg);
+                        telegramLog.logWarning(cancelMsg);
+                        return;
+                    }
                 }
-            }
-            
-            // Check admin status
-            boolean isAdmin = userId.equals(adminUserId);
-            
-            if (!isAdmin) {
-                if (!allowNonAdminUploads) {
-                    String errorMsg = String.format("%s is not an admin. File upload rejected.", userInfo);
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
-                    return;
-                }
-                
-                // Request confirmation for non-admin upload
-                String confirmMsg = String.format("⚠️ %s is not an admin. Do you want to process their file '%s'? Reply with 'yes' or 'no'.", 
-                    userInfo, fileName);
-                boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg, message);
-                
-                if (!confirmed) {
-                    String cancelMsg = "File processing cancelled - user did not confirm.";
-                    discordLog.logWarning(cancelMsg);
-                    telegramLog.logWarning(cancelMsg);
-                    return;
-                }
-            }
-            
-            // Process file in a separate thread to avoid blocking the polling thread
-            // This is CRITICAL - if we process synchronously, the polling thread can't receive
-            // the "yes/no" confirmation responses!
-            Thread processingThread = new Thread(() -> {
+
                 processFile(fileId, fileName, userId, message);
-            });
-            processingThread.setDaemon(true);
-            processingThread.start();
-            
-        } catch (Exception e) {
-            String errorMsg = "Error handling file upload: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-            e.printStackTrace();
-        }
+
+            } catch (Exception e) {
+                String errorMsg = "Error handling file upload: " + e.getMessage();
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                e.printStackTrace();
+            }
+        });
+        uploadThread.setDaemon(true);
+        uploadThread.start();
     }
 
     /**
@@ -1168,21 +1277,37 @@ public class TelegramListener {
      */
     private boolean requestUserConfirmationViaChat(String userId, String message, JsonObject originalMessage) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
-        pendingConfirmations.put(FILE_PROCESSING_CONFIRMATION_KEY, new ConfirmationRequest(message, future, originalMessage));
-        
-        // Send confirmation request message
-        telegramLog.logInfo(message);
-        
+        ConfirmationRequest myRequest = new ConfirmationRequest(message, future, originalMessage);
+        // Keyed per-user (not a single global slot) so two different non-admin
+        // uploaders' pending confirmations can't clobber each other. Uses
+        // putIfAbsent (not put) + a compare-and-remove cleanup below, so if
+        // this SAME user already has a different pending confirmation (e.g.
+        // two uploads in quick succession), the new one is rejected outright
+        // instead of silently overwriting the map entry - which previously
+        // could let a stale/timed-out request delete a newer, still-valid
+        // one, or let an answer meant for one dialog resolve the other.
+        if (pendingConfirmations.putIfAbsent(userId, myRequest) != null) {
+            telegramLog.logWarning("User " + userId + " already has a pending confirmation - rejecting the new one.");
+            sendMessageToUploadChat("⚠️ You already have a pending confirmation - please answer that one first.", originalMessage);
+            return false;
+        }
+
+        // Send the actual yes/no question to the chat the file was uploaded
+        // in - previously this only logged to the internal dev log channel
+        // (batched, not the uploader's chat), so the uploader never actually
+        // saw the question and the confirmation just silently timed out.
+        sendMessageToUploadChat(message, originalMessage);
+
         try {
             // Wait up to 60 seconds for response
             return future.get(60, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+            pendingConfirmations.remove(userId, myRequest);
             telegramLog.logWarning("Confirmation timeout - no response received within 60 seconds.");
             sendMessageToUploadChat("⏱️ Confirmation timeout - processing cancelled.", originalMessage);
             return false;
         } catch (Exception e) {
-            pendingConfirmations.remove(FILE_PROCESSING_CONFIRMATION_KEY);
+            pendingConfirmations.remove(userId, myRequest);
             telegramLog.logError("Error waiting for confirmation: " + e.getMessage());
             return false;
         }
@@ -1225,12 +1350,17 @@ public class TelegramListener {
         
         try {
             // Accepts the plain literal or a {year}_-prefixed variant (e.g.
-            // "2025_cappedlist.csv") - CappedListProcessor's own doc comment
-            // has always claimed this variant is accepted; the year prefix,
-            // if present, is purely cosmetic here since the actual year used
-            // for processing always comes from YearContext.getCurrentYear().
-            if (fileName.matches("(\\d{4}_)?cappedlist\\.csv")) {
-                Integer year = YearContext.getCurrentYear();
+            // "2025_cappedlist.csv") - the year prefix, when present, is
+            // honored exactly like round files (parseFilename below) instead
+            // of being purely cosmetic; only a prefix-less "cappedlist.csv"
+            // falls back to YearContext.getCurrentYear(). Without this, an
+            // admin correcting a PAST year's list (e.g. "2024_cappedlist.csv"
+            // while currentYear=2025) would silently apply it to 2025 -
+            // clearing and re-flagging the CURRENT year's capped players
+            // from a list that was never about this year at all.
+            ParsedCappedlistFilename parsedCapped = parseCappedlistFilename(fileName);
+            if (parsedCapped.matched) {
+                Integer year = parsedCapped.year != null ? parsedCapped.year : YearContext.getCurrentYear();
                 if (year == null) {
                     String errorMsg = "Cannot process cappedlist.csv: no current year set. An admin must set settings.currentYear first.";
                     discordLog.logError(errorMsg);
@@ -1282,20 +1412,29 @@ public class TelegramListener {
                 // Set up multi-choice callback for Telegram with buttons (covers both
                 // reprocess confirmation and player-identity-resolution dialogs)
                 processor.setMultiChoiceCallback((msg, options) -> {
-                    sendMessageWithButtons(msg, options, originalMessage);
-
                     CompletableFuture<Integer> future = new CompletableFuture<>();
-                    pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY,
-                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage));
+                    MultiChoiceConfirmationRequest myRequest =
+                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage);
+                    // Keyed per-user (not a single global slot) - see the
+                    // matching handleCallbackQuery lookup. putIfAbsent + the
+                    // matching atomic remove(key, value) below guard against a
+                    // second concurrent dialog for the same user silently
+                    // clobbering this one's future.
+                    if (pendingMultiChoiceConfirmations.putIfAbsent(userId, myRequest) != null) {
+                        sendMessageToUploadChat("⚠️ You already have a pending selection - please answer that one first.", originalMessage);
+                        return -1;
+                    }
+
+                    sendMessageWithButtons(msg, options, originalMessage);
 
                     try {
                         return future.get(120, TimeUnit.SECONDS);
                     } catch (TimeoutException e) {
-                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        pendingMultiChoiceConfirmations.remove(userId, myRequest);
                         sendMessageToUploadChat("⏱️ Button selection timeout - processing cancelled.", originalMessage);
                         return -1;
                     } catch (Exception e) {
-                        pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                        pendingMultiChoiceConfirmations.remove(userId, myRequest);
                         telegramLog.logError("Error waiting for button selection: " + e.getMessage());
                         return -1;
                     }
@@ -1431,6 +1570,8 @@ public class TelegramListener {
             handleMatchTypesCommand(message);
         } else if (command.equalsIgnoreCase("/recalculate")) {
             handleRecalculateCommand(message);
+        } else if (command.equalsIgnoreCase("/admins")) {
+            handleAdminsCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -1456,19 +1597,48 @@ public class TelegramListener {
                 com.calplus.ihrgstats.telegrambot.commands.CommandRecalculate recalcCommand =
                     new com.calplus.ihrgstats.telegrambot.commands.CommandRecalculate();
 
+                if (!recalcCommand.isAdmin(userId)) {
+                    discordLog.logWarning(String.format("Non-admin %s attempted to use /recalculate", userInfo));
+                    telegramLog.logWarning(String.format("Non-admin %s attempted to use /recalculate", userInfo));
+                    sendMessageToCommandsChannel("❌ Access Denied: Only administrators can run /recalculate.", message);
+                    return;
+                }
+
                 String[] options = {"Start recalculation", "Cancel"};
-                sendMessageWithButtons(recalcCommand.buildConfirmationMessage(), options, message);
 
                 CompletableFuture<Integer> future = new CompletableFuture<>();
-                pendingMultiChoiceConfirmations.put(FILE_PROCESSING_MULTI_CHOICE_KEY,
-                    new MultiChoiceConfirmationRequest(recalcCommand.buildConfirmationMessage(), options, future, message));
+                MultiChoiceConfirmationRequest myRequest = new MultiChoiceConfirmationRequest(
+                    recalcCommand.buildConfirmationMessage(), options, future, message);
+                // Keyed per-user (not a single global slot) - see the matching
+                // handleCallbackQuery lookup. Also means only the admin who
+                // actually ran /recalculate can answer their own Start/Cancel
+                // buttons, not anyone else clicking in the same chat first.
+                // putIfAbsent + the matching atomic remove(key, value) below
+                // guard against a second concurrent /recalculate from the same
+                // admin silently clobbering this one's future.
+                if (pendingMultiChoiceConfirmations.putIfAbsent(userId, myRequest) != null) {
+                    sendMessageToCommandsChannel("⚠️ You already have a pending confirmation - please answer that one first.", message);
+                    return;
+                }
+
+                sendMessageWithButtons(recalcCommand.buildConfirmationMessage(), options, message);
 
                 int choice;
                 try {
                     choice = future.get(60, TimeUnit.SECONDS);
                 } catch (TimeoutException e) {
-                    pendingMultiChoiceConfirmations.remove(FILE_PROCESSING_MULTI_CHOICE_KEY);
+                    pendingMultiChoiceConfirmations.remove(userId, myRequest);
                     sendMessageToCommandsChannel("⏱️ Confirmation timeout - recalculation cancelled.", message);
+                    return;
+                } catch (Exception e) {
+                    // Without this, any non-timeout failure here (e.g. an
+                    // InterruptedException) would leak myRequest forever -
+                    // the outer catch below can't reach it since userId/
+                    // myRequest are out of scope there, permanently blocking
+                    // this admin's future /recalculate and file-upload dialogs.
+                    pendingMultiChoiceConfirmations.remove(userId, myRequest);
+                    telegramLog.logError("Error waiting for recalculation confirmation: " + e.getMessage());
+                    sendMessageToCommandsChannel("🔴 Error waiting for confirmation - recalculation cancelled.", message);
                     return;
                 }
 
@@ -1587,10 +1757,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
 
             sendMessagePayloadWithFallback(payload, "message to commands channel");
         } catch (Exception e) {
@@ -1675,10 +1848,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
 
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
@@ -1742,11 +1918,9 @@ public class TelegramListener {
                 threadId = chatAndThread[1];
             }
             
-            String url = String.format("https://api.telegram.org/bot%s/sendMessage", botToken);
-            
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
-            
+
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
                 try {
@@ -1755,25 +1929,26 @@ public class TelegramListener {
                     // Ignore if not a valid number
                 }
             }
-            
+
             // Add parse_mode for HTML if message contains HTML tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if ((message.contains("```") || message.contains("**") || message.contains("__")) 
-                && !message.contains("_") && !message.contains("[") && !message.contains("]")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
-            
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of this method), any remaining "**"/"```"/"__" is
+            // never legitimate markdown intent, only accidental content residue.
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
+
             // Don't use Markdown parse mode with buttons - it can cause conflicts
             // Send message as plain text to avoid parsing errors
             payload.addProperty("text", message);
-            
+
             // Create inline keyboard with buttons
             JsonObject replyMarkup = new JsonObject();
             JsonArray keyboard = new JsonArray();
-            
+
             for (int i = 0; i < options.length; i++) {
                 JsonArray row = new JsonArray();
                 JsonObject button = new JsonObject();
@@ -1782,26 +1957,12 @@ public class TelegramListener {
                 row.add(button);
                 keyboard.add(row);
             }
-            
+
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            if (response.statusCode() != 200) {
-                String errorMsg = String.format("Failed to send message with buttons. Status: %d, Response: %s", 
-                    response.statusCode(), response.body());
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
-                System.err.println("[Button Error] " + errorMsg);
-            }
-            
+
+            sendMessagePayloadWithFallback(payload, "message with buttons");
+
         } catch (Exception e) {
             discordLog.logError("Error sending message with buttons: " + e.getMessage());
             telegramLog.logError("Error sending message with buttons: " + e.getMessage());
@@ -1860,10 +2021,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
 
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
@@ -1961,10 +2125,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
 
             // Add thread ID if specified
             if (threadId != null && !threadId.isEmpty()) {
@@ -2221,81 +2388,16 @@ public class TelegramListener {
      * Telegram has a 4096 character limit per message
      */
     private void sendLongMessageToCommandsChannel(String message, JsonObject originalMessage) {
-        final int MAX_LENGTH = 4000; // Leave some buffer
-        
-        if (message.length() <= MAX_LENGTH) {
-            sendMessageToCommandsChannel(message, originalMessage);
-            return;
-        }
-        
-        // For very large tables, split into smaller chunks by lines within code blocks
-        int codeBlockStart = message.indexOf("```");
-        int codeBlockEnd = message.lastIndexOf("```");
-        
-        if (codeBlockStart >= 0 && codeBlockEnd > codeBlockStart) {
-            String prefix = message.substring(0, codeBlockStart);
-            String codeContent = message.substring(codeBlockStart + 3, codeBlockEnd);
-            String suffix = message.substring(codeBlockEnd + 3);
-            
-            // Send prefix (header text)
-            if (!prefix.trim().isEmpty()) {
-                sendMessageToCommandsChannel(prefix.trim(), originalMessage);
+        // Chunking is sized on the POST-conversion (HTML-escaped) length, not
+        // the raw text - see com.calplus.ihrgstats.utils.MessageChunker (A10).
+        List<String> chunks = com.calplus.ihrgstats.utils.MessageChunker.splitForTelegram(message);
+        for (int i = 0; i < chunks.size(); i++) {
+            sendMessageToCommandsChannel(chunks.get(i), originalMessage);
+            if (i < chunks.size() - 1) {
                 try {
                     Thread.sleep(100);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                }
-            }
-            
-            // Split code content by lines
-            String[] lines = codeContent.split("\n");
-            StringBuilder currentChunk = new StringBuilder("```\n");
-            
-            for (String line : lines) {
-                // Check if adding this line would exceed limit
-                if (currentChunk.length() + line.length() + 5 > MAX_LENGTH) { // +5 for \n and closing ```
-                    // Send current chunk
-                    currentChunk.append("```");
-                    sendMessageToCommandsChannel(currentChunk.toString(), originalMessage);
-                    currentChunk = new StringBuilder("```\n");
-                    
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                
-                currentChunk.append(line).append("\n");
-            }
-            
-            // Send remaining content
-            if (currentChunk.length() > 4) { // More than just ```\n
-                currentChunk.append("```");
-                sendMessageToCommandsChannel(currentChunk.toString(), originalMessage);
-            }
-            
-            // Send suffix if any
-            if (!suffix.trim().isEmpty()) {
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                sendMessageToCommandsChannel(suffix.trim(), originalMessage);
-            }
-        } else {
-            // Fallback: just split at arbitrary boundaries
-            for (int i = 0; i < message.length(); i += MAX_LENGTH) {
-                int end = Math.min(i + MAX_LENGTH, message.length());
-                sendMessageToCommandsChannel(message.substring(i, end), originalMessage);
-                
-                if (end < message.length()) {
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
                 }
             }
         }
@@ -2510,28 +2612,35 @@ public class TelegramListener {
     }
 
     /**
-     * Handles /about command
+     * Handles /about command. Runs on a background thread (A27) - fetching
+     * each admin's display name makes one synchronous Telegram getChat HTTP
+     * call per admin, which would otherwise stall the polling thread (and
+     * therefore all other incoming updates) for as long as those calls take.
      */
     private void handleAboutCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-            
-            com.calplus.ihrgstats.telegrambot.commands.CommandAbout aboutCommand = 
-                new com.calplus.ihrgstats.telegrambot.commands.CommandAbout(botToken);
-            
-            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = 
-                aboutCommand.handleCommand(userId);
-            
-            sendMessageToCommandsChannel(response.message, message);
+        Thread aboutThread = new Thread(() -> {
+            try {
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.get("id").getAsString();
 
-        } catch (Exception e) {
-            String errorMsg = "Error processing /about command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+                com.calplus.ihrgstats.telegrambot.commands.CommandAbout aboutCommand =
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandAbout(botToken);
+
+                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                    aboutCommand.handleCommand(userId);
+
+                sendMessageToCommandsChannel(response.message, message);
+
+            } catch (Exception e) {
+                String errorMsg = "Error processing /about command: " + e.getMessage();
+                discordLog.logError(errorMsg);
+                telegramLog.logError(errorMsg);
+                e.printStackTrace();
+                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+            }
+        });
+        aboutThread.setDaemon(true);
+        aboutThread.start();
     }
 
     /**
@@ -2734,6 +2843,85 @@ public class TelegramListener {
             telegramLog.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /admins command (admin-only)
+     */
+    private void handleAdminsCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+
+            com.calplus.ihrgstats.telegrambot.commands.CommandAdmins adminsCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                adminsCommand.handleCommand(userId);
+
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /admins command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles admins callback queries (admin-only)
+     */
+    private void handleAdminsCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandAdmins adminsCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
+
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+
+                removeInlineKeyboard(chatId, messageId);
+
+                if (data.equals("admins_cancel")) {
+                    response = adminsCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("admins_list")) {
+                    response = adminsCommand.handleList(userId);
+                    sendLongMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("admins_addstart")) {
+                    response = adminsCommand.handleAddStart(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.equals("admins_removeselect")) {
+                    response = adminsCommand.handleRemoveSelect(userId);
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("admins_remove_")) {
+                    int adminRowId = Integer.parseInt(data.substring("admins_remove_".length()));
+                    response = adminsCommand.handleRemoveConfirm(userId, adminRowId);
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing admins callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
         }
     }
 
@@ -3260,8 +3448,7 @@ public class TelegramListener {
             JsonObject originalMessage) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
             
             // Determine where to send
@@ -3288,10 +3475,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
             
             // Create inline keyboard with support for multiple columns
             JsonObject replyMarkup = new JsonObject();
@@ -3315,15 +3505,9 @@ public class TelegramListener {
             
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "settings buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending settings buttons: " + e.getMessage());
             telegramLog.logError("Error sending settings buttons: " + e.getMessage());
@@ -3339,8 +3523,7 @@ public class TelegramListener {
             JsonObject originalMessage, String userId) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
             
             // Determine where to send
@@ -3367,10 +3550,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
             
             // Create inline keyboard
             JsonObject replyMarkup = new JsonObject();
@@ -3384,18 +3570,12 @@ public class TelegramListener {
                 row.add(button);
             }
             keyboard.add(row);
-            
+
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "export buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending export buttons: " + e.getMessage());
             telegramLog.logError("Error sending export buttons: " + e.getMessage());
@@ -3439,10 +3619,12 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__") || message.contains("*")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of this method), any remaining "**"/"```"/"__"/"*"
+            // is never legitimate markdown intent, only accidental content residue.
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
 
             // Create inline keyboard with configurable columns per row
             JsonObject replyMarkup = new JsonObject();
@@ -3510,8 +3692,7 @@ public class TelegramListener {
             JsonObject originalMessage) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
             
             // Determine where to send
@@ -3538,10 +3719,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
             
             // Create inline keyboard with 4 columns
             JsonObject replyMarkup = new JsonObject();
@@ -3565,15 +3749,9 @@ public class TelegramListener {
             
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "compare halls buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending compare halls buttons: " + e.getMessage());
             telegramLog.logError("Error sending compare halls buttons: " + e.getMessage());
@@ -3598,8 +3776,7 @@ public class TelegramListener {
             JsonObject originalMessage, int columnsPerRow) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
             
             // Determine where to send
@@ -3626,10 +3803,13 @@ public class TelegramListener {
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
             
             // Create inline keyboard
             JsonObject replyMarkup = new JsonObject();
@@ -3652,15 +3832,9 @@ public class TelegramListener {
             
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "compare players buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending compare players buttons: " + e.getMessage());
             telegramLog.logError("Error sending compare players buttons: " + e.getMessage());
@@ -3676,70 +3850,66 @@ public class TelegramListener {
             JsonObject originalMessage) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
-            
+
             // Determine where to send
             if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
                 JsonObject chat = originalMessage.getAsJsonObject("chat");
                 payload.addProperty("chat_id", chat.get("id").getAsString());
-                
+
                 if (originalMessage.has("message_thread_id")) {
                     payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
                 if (chatAndThread == null || chatAndThread[0] == null) return;
-                
+
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
                     payload.addProperty("message_thread_id", chatAndThread[1]);
                 }
             }
-            
+
             payload.addProperty("text", message);
-            
+
             // Add parse_mode for HTML if message contains HTML tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
-            
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
+
             // Create inline keyboard with 4 columns
             JsonObject replyMarkup = new JsonObject();
             JsonArray keyboard = new JsonArray();
-            
+
             int columnsPerRow = 4;
             JsonArray currentRow = new JsonArray();
-            
+
             for (int i = 0; i < buttonConfig.labels.length; i++) {
                 JsonObject button = new JsonObject();
                 button.addProperty("text", buttonConfig.labels[i]);
                 button.addProperty("callback_data", buttonConfig.callbacks[i]);
                 currentRow.add(button);
-                
+
                 // Add row when we reach 4 columns or it's the last button
                 if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
                     keyboard.add(currentRow);
                     currentRow = new JsonArray();
                 }
             }
-            
+
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "rank players buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending rank players buttons: " + e.getMessage());
             telegramLog.logError("Error sending rank players buttons: " + e.getMessage());
@@ -3755,70 +3925,66 @@ public class TelegramListener {
             JsonObject originalMessage) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            
+
             JsonObject payload = new JsonObject();
-            
+
             // Determine where to send
             if (allowAllChannelsProcessing && originalMessage != null && originalMessage.has("chat")) {
                 JsonObject chat = originalMessage.getAsJsonObject("chat");
                 payload.addProperty("chat_id", chat.get("id").getAsString());
-                
+
                 if (originalMessage.has("message_thread_id")) {
                     payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
                 if (chatAndThread == null || chatAndThread[0] == null) return;
-                
+
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
                     payload.addProperty("message_thread_id", chatAndThread[1]);
                 }
             }
-            
+
             payload.addProperty("text", message);
-            
+
             // Add parse_mode for HTML if message contains HTML tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            // Otherwise check for markdown
-            else if (message.contains("```") || message.contains("**") || message.contains("__")) {
-                payload.addProperty("parse_mode", "Markdown");
-            }
-            
+            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
+            // (called at the top of every send method), any remaining "**"/"```"/"__"
+            // is never legitimate markdown intent, only accidental content residue
+            // (a stray unpaired sequence, or literal characters in a name/label).
+            // Sending as plain text is always safe; the fragile legacy "Markdown"
+            // parse mode used to be selected here on that same residue and could
+            // fail outright on a single unpaired "*"/"_" (A11).
+
             // Create inline keyboard with 4 columns
             JsonObject replyMarkup = new JsonObject();
             JsonArray keyboard = new JsonArray();
-            
+
             int columnsPerRow = 4;
             JsonArray currentRow = new JsonArray();
-            
+
             for (int i = 0; i < buttonConfig.labels.length; i++) {
                 JsonObject button = new JsonObject();
                 button.addProperty("text", buttonConfig.labels[i]);
                 button.addProperty("callback_data", buttonConfig.callbacks[i]);
                 currentRow.add(button);
-                
+
                 // Add row when we reach 4 columns or it's the last button
                 if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
                     keyboard.add(currentRow);
                     currentRow = new JsonArray();
                 }
             }
-            
+
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            sendMessagePayloadWithFallback(payload, "rank halls buttons message");
+
         } catch (Exception e) {
             discordLog.logError("Error sending rank halls buttons: " + e.getMessage());
             telegramLog.logError("Error sending rank halls buttons: " + e.getMessage());

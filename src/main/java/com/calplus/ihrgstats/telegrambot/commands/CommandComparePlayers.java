@@ -10,6 +10,7 @@ import com.calplus.ihrgstats.utils.TelegramHtml;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -27,7 +28,7 @@ public class CommandComparePlayers {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, PlayerCompareSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, PlayerCompareSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class PlayerCompareSelectionState extends SelectionState {
         int firstHallId;
@@ -100,7 +101,7 @@ public class CommandComparePlayers {
             List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(firstHallId, year);
             if (statuses.isEmpty()) {
                 userSelectionStates.remove(userId);
-                return new CompareResponse("\u2139\uFE0F No players found in hall " + state.firstHallName + ".", null, null);
+                return new CompareResponse("\u2139\uFE0F No players found in hall " + VictoryRecordCalculator.formatHallName(state.firstHallName) + ".", null, null);
             }
 
             List<String> labels = new ArrayList<>();
@@ -113,7 +114,7 @@ public class CommandComparePlayers {
             labels.add("\u274C Cancel");
             callbacks.add("compareplayers_cancel");
 
-            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player's hall: **%s**\nSelect the **first player**:", state.firstHallName);
+            String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player's hall: **%s**\nSelect the **first player**:", VictoryRecordCalculator.formatHallName(state.firstHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -146,7 +147,7 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSelect the **second player's hall**:",
-                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName);
+                    TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -173,7 +174,7 @@ public class CommandComparePlayers {
 
             if (statuses.isEmpty()) {
                 userSelectionStates.remove(userId);
-                return new CompareResponse("\u2139\uFE0F No other players available in hall " + state.secondHallName + ".", null, null);
+                return new CompareResponse("\u2139\uFE0F No other players available in hall " + VictoryRecordCalculator.formatHallName(state.secondHallName) + ".", null, null);
             }
 
             List<String> labels = new ArrayList<>();
@@ -187,7 +188,7 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player's hall: **%s**\nSelect the **second player**:",
-                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName, state.secondHallName);
+                    TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName), VictoryRecordCalculator.formatHallName(state.secondHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -226,7 +227,8 @@ public class CommandComparePlayers {
             callbacks.add("compareplayers_cancel");
 
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player: **%s** (%s)\n\nSelect rounds to compare:",
-                    TelegramHtml.escape(state.firstPlayerName), state.firstHallName, TelegramHtml.escape(state.secondPlayerName), state.secondHallName);
+                    TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName),
+                    TelegramHtml.escape(state.secondPlayerName), VictoryRecordCalculator.formatHallName(state.secondHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -363,7 +365,7 @@ public class CommandComparePlayers {
     private String generateTextOutput(PlayerData player1, List<Integer> orders1, PlayerData player2, List<Integer> orders2) {
         StringBuilder sb = new StringBuilder();
         sb.append("**\uD83D\uDC65 Player Comparison**\n\n");
-        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", TelegramHtml.escape(player1.name), player1.hall, TelegramHtml.escape(player2.name), player2.hall));
+        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", TelegramHtml.escape(player1.name), VictoryRecordCalculator.formatHallName(player1.hall), TelegramHtml.escape(player2.name), VictoryRecordCalculator.formatHallName(player2.hall)));
         sb.append(generatePlayerDetails(player1, orders1));
         sb.append("\n");
         sb.append(generatePlayerDetails(player2, orders2));
@@ -372,7 +374,7 @@ public class CommandComparePlayers {
 
     private String generatePlayerDetails(PlayerData player, List<Integer> roundOrders) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("\u2501\u2501\u2501 **%s (%s)** \u2501\u2501\u2501\n\n", TelegramHtml.escape(player.name), player.hall));
+        sb.append(String.format("\u2501\u2501\u2501 **%s (%s)** \u2501\u2501\u2501\n\n", TelegramHtml.escape(player.name), VictoryRecordCalculator.formatHallName(player.hall)));
 
         sb.append("**\uD83D\uDCCA Stats Per Round:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "\u0394Rank", "ELO", "\u0394ELO"));
@@ -456,7 +458,7 @@ public class CommandComparePlayers {
             }
         }
 
-        String description = String.format("%s (%s) vs %s (%s)", player1.name, player1.hall, player2.name, player2.hall);
+        String description = String.format("%s (%s) vs %s (%s)", player1.name, VictoryRecordCalculator.formatHallName(player1.hall), player2.name, VictoryRecordCalculator.formatHallName(player2.hall));
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Player Comparison", description, lastRoundLabel);
 
         List<ComparisonImageGenerator.Section> sections1 = buildSections(player1, orders1);

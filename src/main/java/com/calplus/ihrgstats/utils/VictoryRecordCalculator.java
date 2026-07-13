@@ -56,7 +56,7 @@ public class VictoryRecordCalculator {
     }
 
     /**
-     * Formats score value - shows as integer if .0, otherwise 1 decimal place
+     * Formats score value - shows as integer if .0, otherwise 2 decimal places
      */
     public static String formatScore(double score) {
         if (score == Math.floor(score)) {

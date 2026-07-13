@@ -24,12 +24,6 @@ public class CommandRankHalls {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, HallRankSelectionState> userSelectionStates = new HashMap<>();
-
-    private static class HallRankSelectionState extends SelectionState {
-        String selectedRound;
-    }
-
     public CommandRankHalls() {
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
@@ -104,13 +98,8 @@ public class CommandRankHalls {
     public RankResponse handleRoundSelection(String userId, String selectedRound) {
         logHelper.logInfo(com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId) + " selected round: " + selectedRound);
 
-        HallRankSelectionState state = new HallRankSelectionState();
-        state.selectedRound = selectedRound;
-        userSelectionStates.put(userId, state);
-
         Integer year = YearContext.getCurrentYear();
         if (year == null) {
-            userSelectionStates.remove(userId);
             return new RankResponse("⚠️ No current year set.", (Path) null);
         }
 
@@ -119,13 +108,11 @@ public class CommandRankHalls {
             players = fetchPlayerData(year, selectedRound);
         } catch (SQLException e) {
             logHelper.logError("Error fetching player data: " + e.getMessage());
-            userSelectionStates.remove(userId);
             return new RankResponse("❌ Database error fetching player data.", (Path) null);
         }
 
         if (players.isEmpty()) {
             String errorMsg = "ℹ️ No player data found for round " + selectedRound + ".";
-            userSelectionStates.remove(userId);
             return new RankResponse(errorMsg, (Path) null);
         }
 
@@ -155,14 +142,12 @@ public class CommandRankHalls {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
 
-        userSelectionStates.remove(userId);
         logHelper.logSuccess(String.format("Ranked %d halls", hallRankings.size()));
 
         return new RankResponse(message, imagePath);
     }
 
     public RankResponse handleCancel(String userId) {
-        userSelectionStates.remove(userId);
         return new RankResponse("❌ Hall ranking cancelled.", (Path) null);
     }
 

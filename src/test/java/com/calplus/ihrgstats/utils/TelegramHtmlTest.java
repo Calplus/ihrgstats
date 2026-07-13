@@ -3,6 +3,7 @@ package com.calplus.ihrgstats.utils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * Unit tests for {@link TelegramHtml}. These cover the compatibility layer
@@ -59,5 +60,23 @@ public class TelegramHtmlTest {
     void prepareForSending_plainTextMessageIsUnchanged() {
         String plain = "No formatting here, just plain text.";
         assertEquals(plain, TelegramHtml.prepareForSending(plain));
+    }
+
+    // --- A11: a "**" inside a ```-fenced block must never be converted to
+    // <b>, since Telegram's HTML parser rejects a nested entity inside <pre>.
+
+    @Test
+    void prepareForSending_doesNotBoldConvertAsterisksInsideAFencedBlock() {
+        String input = "```\nScore: **45**\n```";
+        String result = TelegramHtml.prepareForSending(input);
+        assertEquals("<pre>Score: **45**\n</pre>", result);
+        assertFalse(result.contains("<b>"), "A literal ** inside a <pre> block must stay literal, not become <b> (invalid nesting): " + result);
+    }
+
+    @Test
+    void prepareForSending_boldConvertsOutsideAFence_butNotInsideTheSameMessage() {
+        String input = "**Header**\n```\nRow **A** vs Row **B**\n```\n**Footer**";
+        String result = TelegramHtml.prepareForSending(input);
+        assertEquals("<b>Header</b>\n<pre>Row **A** vs Row **B**\n</pre>\n<b>Footer</b>", result);
     }
 }

@@ -280,4 +280,42 @@ public class EloCalculationTest {
                     "Volatility must stay strictly positive and well below 1.0 (round " + round + ": " + vol + ")");
         }
     }
+
+    /**
+     * Regression test for the historical volatility-scaling bug:
+     * calculateNewVolatility divided variance/delta by GLICKO2_SCALE a
+     * second time even though they arrive already on the internal scale, so
+     * the "surprise" term was ~174-30000x too small to ever meaningfully
+     * move sigma. A genuinely shocking upset must now raise volatility
+     * above its settled level - the fixed engine's whole point.
+     */
+    @Test
+    void volatility_risesAfterAMajorUpset_forAPreviouslyConvergedPlayer() {
+        Set<String> players = new HashSet<>(Arrays.asList("veteran", "sparring", "champion"));
+
+        List<EloCalculator.Game> games = new ArrayList<>();
+        // Rounds 1-5: veteran and sparring alternate wins against each
+        // other - an evenly-matched, fully-expected pattern, so RD
+        // converges and volatility settles near its 0.06 default.
+        for (int round = 1; round <= 5; round++) {
+            games.add(new EloCalculator.Game("veteran", "sparring", round % 2 == 0 ? 0.0 : 1.0, round));
+        }
+        // Round 6: veteran springs a massive upset against champion, seeded
+        // far above everyone else - a genuinely surprising result given
+        // veteran's settled, low-RD rating.
+        games.add(new EloCalculator.Game("veteran", "champion", 1.0, 6));
+
+        Map<String, EloCalculator.Glicko2Rating> initialRatings = defaultRatings(players);
+        initialRatings.put("champion", new EloCalculator.Glicko2Rating(1800, 60, 0.06));
+
+        EloCalculator.Glicko2Result result = EloCalculator.calculateGlicko2TrueElo(
+                games, players, initialRatings, Arrays.asList(1, 2, 3, 4, 5, 6));
+
+        double volatilityBeforeUpset = result.ratingsByRound.get(5).get("veteran").volatility;
+        double volatilityAfterUpset = result.ratingsByRound.get(6).get("veteran").volatility;
+
+        assertTrue(volatilityAfterUpset > volatilityBeforeUpset,
+                "A genuinely surprising upset should raise volatility above its settled level (round 5: "
+                        + volatilityBeforeUpset + ", round 6: " + volatilityAfterUpset + ")");
+    }
 }

@@ -9,6 +9,7 @@ import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -26,7 +27,7 @@ public class CommandCompareHalls {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, HallCompareSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, HallCompareSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class HallCompareSelectionState extends SelectionState {
         int firstHallId;
@@ -105,7 +106,7 @@ public class CommandCompareHalls {
             labels.add("❌ Cancel");
             callbacks.add("comparehalls_cancel");
 
-            String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSelect the **second hall** to compare:", state.firstHallName);
+            String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSelect the **second hall** to compare:", formatHallNameForImage(state.firstHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -147,7 +148,7 @@ public class CommandCompareHalls {
             callbacks.add("comparehalls_cancel");
 
             String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSecond hall: **%s**\n\nSelect rounds to compare:",
-                    state.firstHallName, state.secondHallName);
+                    formatHallNameForImage(state.firstHallName), formatHallNameForImage(state.secondHallName));
             return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -180,8 +181,10 @@ public class CommandCompareHalls {
         return new CompareResponse("ℹ️ Hall comparison cancelled.", null, null);
     }
 
-    /** Per-round player data within a hall, keyed by round_order for display. */
-    private static class PlayerData {
+    /** Per-round player data within a hall, keyed by round_order for display.
+     * Package-private (not private) so {@code calculateWinningProbability}
+     * can be exercised directly with hand-built rosters in tests. */
+    static class PlayerData {
         String name;
         boolean capped;
         int hallRank;
@@ -194,10 +197,11 @@ public class CommandCompareHalls {
         Map<Integer, String> oppHallByRound = new TreeMap<>();
     }
 
-    private static class HallData {
+    static class HallData {
         int hallId;
         String hallName;
         List<PlayerData> players = new ArrayList<>();
+        Integer lastRoundOrder;
         String lastRoundLabel;
         Map<Integer, Double> hallEloByRound = new TreeMap<>();
         Map<Integer, Integer> hallRankByRound = new TreeMap<>();
@@ -229,8 +233,8 @@ public class CommandCompareHalls {
         HallData data1 = fetchHallData(hall1Id, hall1Name, year, roundsToInclude, trueEloTypeId, top5AvgByRoundThenHall);
         HallData data2 = fetchHallData(hall2Id, hall2Name, year, roundsToInclude, trueEloTypeId, top5AvgByRoundThenHall);
 
-        if (data1.players.isEmpty()) throw new Exception("Hall " + hall1Name + " has no data for " + year);
-        if (data2.players.isEmpty()) throw new Exception("Hall " + hall2Name + " has no data for " + year);
+        if (data1.players.isEmpty()) throw new Exception(formatHallNameForImage(hall1Name) + " has no data for " + year);
+        if (data2.players.isEmpty()) throw new Exception(formatHallNameForImage(hall2Name) + " has no data for " + year);
 
         double winProbability = calculateWinningProbability(data1, data2);
 
@@ -295,7 +299,12 @@ public class CommandCompareHalls {
             calculateAvgSeat(player, roundsToInclude);
             hallData.players.add(player);
 
-            if (hallData.lastRoundLabel == null) {
+            // Track the TRUE latest round across the whole hall roster (max
+            // comparison), not just whichever player happened to be
+            // processed first - a player eliminated/absent early must not
+            // freeze this label if the hall itself played on longer.
+            if (lastRoundOrder != null && (hallData.lastRoundOrder == null || lastRoundOrder > hallData.lastRoundOrder)) {
+                hallData.lastRoundOrder = lastRoundOrder;
                 hallData.lastRoundLabel = lastRoundLabel;
             }
         }
@@ -376,8 +385,21 @@ public class CommandCompareHalls {
                     .collect(Collectors.toList());
             if (playingPlayers.isEmpty()) continue;
 
-            double hallScore = 0.0;
-            Map<String, Double> oppScores = new HashMap<>();
+            // Tally hall score AND opponent score PER OPPONENT HALL, not as
+            // one combined total for "us" against one combined total for
+            // "them" - a hall can face more than one opponent hall in the
+            // same round (boards paired independently) or pick up a bonus
+            // walkover win alongside a real match, and mixing those into a
+            // single pair of totals let the displayed score/outcome for
+            // "vs Hall X" reflect points that had nothing to do with Hall X.
+            // Same-hall pairings (two of this hall's own players paired
+            // together) are skipped entirely so a hall never appears as its
+            // own opponent.
+            Map<String, Double> myScoreByOpp = new HashMap<>();
+            Map<String, Double> oppScoreByOpp = new HashMap<>();
+            Map<String, Integer> boardsByOpp = new HashMap<>();
+            double walkoverScore = 0.0;
+            boolean anyWalkover = false;
 
             for (PlayerData player : playingPlayers) {
                 Integer outcome = player.outcomeByRound.get(roundOrder);
@@ -387,34 +409,42 @@ public class CommandCompareHalls {
 
                 Double points = VictoryRecordCalculator.outcomeToPoints(outcome);
                 if (points == null) continue;
-                hallScore += points;
 
-                if (oppHallName != null && !"WALKOVER".equalsIgnoreCase(oppHallName) && !"WALKOVER".equalsIgnoreCase(oppName)) {
-                    oppScores.merge(oppHallName, 1.0 - points, Double::sum);
+                if ("WALKOVER".equalsIgnoreCase(oppName)) {
+                    anyWalkover = true;
+                    walkoverScore += points;
+                    continue; // a walkover board isn't "against" any specific opponent hall
                 }
+                if (oppHallName == null || oppHallName.equalsIgnoreCase(hallData.hallName)) {
+                    continue; // unknown hall, or a same-hall pairing - never our own opponent
+                }
+
+                myScoreByOpp.merge(oppHallName, points, Double::sum);
+                oppScoreByOpp.merge(oppHallName, 1.0 - points, Double::sum);
+                boardsByOpp.merge(oppHallName, 1, Integer::sum);
             }
 
-            String primaryOppHall = null;
-            if (!oppScores.isEmpty()) {
-                primaryOppHall = oppScores.entrySet().stream()
-                        .max(Map.Entry.comparingByValue())
-                        .map(Map.Entry::getKey)
-                        .orElse(null);
-            }
-
-            boolean allWalkovers = playingPlayers.stream()
-                    .allMatch(p -> "WALKOVER".equalsIgnoreCase(p.oppNameByRound.get(roundOrder)));
-            if (allWalkovers) {
+            // Primary opponent = whichever hall we faced on the most boards
+            // this round (the normal case is exactly one opponent hall).
+            String primaryOppHall = boardsByOpp.entrySet().stream()
+                    .max(Map.Entry.comparingByValue())
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
+            if (primaryOppHall == null && anyWalkover) {
                 primaryOppHall = "WALKOVER";
             }
 
             if (primaryOppHall != null) {
-                double oppScore = oppScores.getOrDefault(primaryOppHall, 0.0);
                 HallVictoryRecord record = new HallVictoryRecord();
-                record.hallScore = hallScore;
-                record.oppScore = oppScore;
                 record.oppHallName = primaryOppHall;
-                record.outcome = hallScore > oppScore ? 1 : (hallScore < oppScore ? -1 : 0);
+                if ("WALKOVER".equalsIgnoreCase(primaryOppHall)) {
+                    record.hallScore = walkoverScore;
+                    record.oppScore = 0.0;
+                } else {
+                    record.hallScore = myScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+                    record.oppScore = oppScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+                }
+                record.outcome = record.hallScore > record.oppScore ? 1 : (record.hallScore < record.oppScore ? -1 : 0);
 
                 if (!"WALKOVER".equalsIgnoreCase(primaryOppHall)) {
                     Integer oppHallId = hallNameToId.get(primaryOppHall);
@@ -433,7 +463,8 @@ public class CommandCompareHalls {
      * Calculates winning probability with capped player filtering, via
      * exhaustive permutation of possible seatings between the two teams' top 5.
      */
-    private double calculateWinningProbability(HallData hall1, HallData hall2) {
+    /** Package-private (not private) so this can be unit-tested directly with hand-built rosters. */
+    double calculateWinningProbability(HallData hall1, HallData hall2) {
         List<PlayerData> team1 = selectTeamWithCappedFilter(hall1.players);
         List<PlayerData> team2 = selectTeamWithCappedFilter(hall2.players);
 
@@ -441,18 +472,30 @@ public class CommandCompareHalls {
 
         int totalPermutations = 0;
         int hall1Wins = 0;
+        int comparedBoards = Math.min(team1.size(), team2.size());
 
         List<int[]> permutations = generatePermutations(team2.size());
 
         for (int[] perm : permutations) {
-            int matchWins = 0;
-            for (int i = 0; i < Math.min(team1.size(), team2.size()); i++) {
-                if (team1.get(i).elo > team2.get(perm[i]).elo) {
-                    matchWins++;
+            // A tie in elo is a drawn board (0.5 credit), not a loss for
+            // team1 - the old strict `>` gave team1 zero credit for any
+            // board it merely matched, which is why two evenly-matched
+            // rosters could render as a flat 0%/100% split.
+            double matchWins = 0;
+            for (int i = 0; i < comparedBoards; i++) {
+                int cmp = Integer.compare(team1.get(i).elo, team2.get(perm[i]).elo);
+                if (cmp > 0) {
+                    matchWins += 1.0;
+                } else if (cmp == 0) {
+                    matchWins += 0.5;
                 }
             }
             totalPermutations++;
-            if (matchWins > team2.size() / 2.0) {
+            // Denominator must be the number of boards actually COMPARED
+            // (comparedBoards), not team2.size() - when the rosters differ
+            // in size, only comparedBoards boards are ever decided, so
+            // dividing by the larger roster's size set an unreachable bar.
+            if (matchWins > comparedBoards / 2.0) {
                 hall1Wins++;
             }
         }
@@ -545,8 +588,8 @@ public class CommandCompareHalls {
     private String generateTextOutput(HallData hall1, HallData hall2, List<A1_Rounds.Round> roundsToInclude, double winProbability, String selectedRound) {
         StringBuilder sb = new StringBuilder();
         sb.append("**🏛️ Hall Comparison**\n\n");
-        sb.append(String.format("**%s** vs **%s**\n\n", hall1.hallName, hall2.hallName));
-        sb.append(String.format("📊 **Winning Probability:** %s has **%.1f%%** chance to win\n", hall1.hallName, winProbability));
+        sb.append(String.format("**%s** vs **%s**\n\n", formatHallNameForImage(hall1.hallName), formatHallNameForImage(hall2.hallName)));
+        sb.append(String.format("📊 **Winning Probability:** %s has **%.1f%%** chance to win\n", formatHallNameForImage(hall1.hallName), winProbability));
         sb.append(String.format("📅 **Rounds:** %s\n\n", selectedRound.equalsIgnoreCase("all") ? "All" : selectedRound));
 
         sb.append(generateHallDetails(hall1, roundsToInclude));
@@ -558,7 +601,7 @@ public class CommandCompareHalls {
 
     private String generateHallDetails(HallData hall, List<A1_Rounds.Round> roundsToInclude) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("━━━ **%s** ━━━\n\n", hall.hallName));
+        sb.append(String.format("━━━ **%s** ━━━\n\n", formatHallNameForImage(hall.hallName)));
 
         sb.append("**🏛️ Hall Elo:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", "Rnd", "Rank", "ΔRank", "Elo", "ΔElo"));
@@ -643,7 +686,7 @@ public class CommandCompareHalls {
 
     private Path generateImage(HallData hall1, HallData hall2, List<A1_Rounds.Round> roundsToInclude, double winProbability) throws Exception {
         String lastRoundLabel = hall1.lastRoundLabel != null ? hall1.lastRoundLabel : hall2.lastRoundLabel;
-        String description = String.format("%s vs %s", hall1.hallName, hall2.hallName);
+        String description = String.format("%s vs %s", formatHallNameForImage(hall1.hallName), formatHallNameForImage(hall2.hallName));
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Hall Comparison", description, lastRoundLabel);
 
         List<ComparisonImageGenerator.Section> sections1 = buildSections(hall1, roundsToInclude, winProbability);

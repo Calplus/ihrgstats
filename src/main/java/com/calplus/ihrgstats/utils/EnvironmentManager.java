@@ -176,11 +176,16 @@ public class EnvironmentManager {
      * Sets a property value in memory and saves to file.
      * @param key The property key
      * @param value The property value
+     * @throws IllegalArgumentException if key or value contains a control
+     *         character (e.g. a newline, which would otherwise let a single
+     *         property write forge additional, attacker-chosen lines in the
+     *         env file)
      */
     public void setProperty(String key, String value) {
+        requireNoControlCharacters(key, value);
         envProperties.setProperty(key, value);
         saveEnvironmentFile();
-        
+
         // Also set as system property for immediate use
         System.setProperty(key, value);
     }
@@ -188,13 +193,39 @@ public class EnvironmentManager {
     /**
      * Sets multiple properties at once.
      * @param properties Map of key-value pairs
+     * @throws IllegalArgumentException if any key or value contains a control character
      */
     public void setProperties(Map<String, String> properties) {
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            requireNoControlCharacters(entry.getKey(), entry.getValue());
+        }
         for (Map.Entry<String, String> entry : properties.entrySet()) {
             envProperties.setProperty(entry.getKey(), entry.getValue());
             System.setProperty(entry.getKey(), entry.getValue());
         }
         saveEnvironmentFile();
+    }
+
+    /**
+     * Rejects control characters (e.g. \n, \r) in a property key/value pair.
+     * The env file is a plain key=value-per-line format, so an unescaped
+     * newline in either would let one property write silently inject a
+     * second, attacker-chosen property line.
+     */
+    private static void requireNoControlCharacters(String key, String value) {
+        if (containsControlCharacter(key) || containsControlCharacter(value)) {
+            throw new IllegalArgumentException("Property keys/values must not contain control characters (e.g. newlines)");
+        }
+    }
+
+    private static boolean containsControlCharacter(String s) {
+        if (s == null) return false;
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isISOControl(s.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -225,8 +256,12 @@ public class EnvironmentManager {
      * @param newProperties Map of new properties
      */
     public void overwriteEnvironmentFile(Map<String, String> newProperties) {
+        for (Map.Entry<String, String> entry : newProperties.entrySet()) {
+            requireNoControlCharacters(entry.getKey(), entry.getValue());
+        }
+
         envProperties.clear();
-        
+
         for (Map.Entry<String, String> entry : newProperties.entrySet()) {
             envProperties.setProperty(entry.getKey(), entry.getValue());
             System.setProperty(entry.getKey(), entry.getValue());

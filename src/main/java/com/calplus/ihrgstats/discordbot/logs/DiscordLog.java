@@ -65,7 +65,20 @@ public class DiscordLog {
         // Add shutdown hook to ensure all messages are sent before exit
         if (discordEnabled) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                flushInfoBatch(); // Send any pending INFO messages
+                // Send (not discard) any pending INFO messages - despite its
+                // comment, flushInfoBatch() only ever cleared the buffer and
+                // never sent anything, so INFO logs accumulated right up to
+                // shutdown (with no later SUCCESS/WARNING/ERROR to combine
+                // with) were silently lost at exactly the moment they'd be
+                // most useful for diagnosing why the app was shutting down.
+                String pendingInfo;
+                synchronized (infoBatchLock) {
+                    pendingInfo = infoBatchBuffer.length() > 0 ? infoBatchBuffer.toString() : null;
+                    infoBatchBuffer.setLength(0);
+                }
+                if (pendingInfo != null) {
+                    queueMessage(pendingInfo);
+                }
                 flushBatch(); // Send any pending batch messages
                 flush();
             }));
@@ -335,11 +348,14 @@ public class DiscordLog {
         }
         
         System.err.println(formattedMessage);
-        
-        // Flush any accumulated INFO messages before sending error
-        flushInfoBatch();
-        
-        return queueMessage(formattedMessage);
+
+        // Combine (not discard) any accumulated INFO messages leading up to
+        // this error - previously flushInfoBatch() threw this context away
+        // right when it mattered most for debugging, while SUCCESS/WARNING
+        // both correctly prepend it via combineInfoBatchWithMessage below.
+        String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
+
+        return queueMessage(combinedMessage);
     }
 
     /**
@@ -395,16 +411,6 @@ public class DiscordLog {
         return CompletableFuture.completedFuture(true);
     }
 
-    /**
-     * Flushes any accumulated INFO messages without sending them
-     * (Used internally when error occurs to clear the buffer)
-     */
-    private void flushInfoBatch() {
-        synchronized (infoBatchLock) {
-            infoBatchBuffer.setLength(0);
-        }
-    }
-    
     /**
      * Combines accumulated INFO messages with a terminal message (SUCCESS/ERROR/WARNING)
      * and clears the INFO buffer

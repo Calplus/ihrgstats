@@ -18,8 +18,20 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CommandSettings {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
-    private final String adminUserId;
+    private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private static final Map<String, SettingsSelectionState> userSelectionStates = new ConcurrentHashMap<>();
+
+    /**
+     * The only settings keys /settings' toggle buttons are allowed to flip.
+     * Every other settings.* key (homeHall, currentYear, timezone) is
+     * non-boolean and handled through its own dedicated flow - a toggle
+     * callback must never be allowed to write "true"/"false" into one of
+     * those, nor into any non-settings.* property.
+     */
+    private static final Set<String> TOGGLEABLE_SETTING_KEYS = Set.of(
+            "settings.allowNonAdminUploads",
+            "settings.allowAllChannelsProcessing"
+    );
 
     /**
      * Selection state for settings command
@@ -33,19 +45,25 @@ public class CommandSettings {
         // Load environment variables
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
-        
+
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
-        this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
     }
 
     /**
-     * Checks if a user is an admin
+     * Checks if a user is an admin. Fails closed (denies) on a database
+     * error rather than risking a false "admin".
      * @param userId The user ID to check
      * @return true if user is admin, false otherwise
      */
     public boolean isAdmin(String userId) {
-        return !adminUserId.isEmpty() && adminUserId.equals(userId);
+        try {
+            return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
+        } catch (java.sql.SQLException e) {
+            discordLog.logError("Database error checking admin status: " + e.getMessage());
+            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -133,13 +151,18 @@ public class CommandSettings {
             message.append(String.format("%s <b>%s</b>\n", statusEmoji, statusText));
             message.append(String.format("   %s\n\n", TelegramHtml.escape(description)));
 
-            // Create button label and callback
-            String toggleText = isEnabled ? "Disable" : "Enable";
-            String buttonLabel = String.format("%s %s", toggleText, extractSettingName(key));
-            String buttonCallback = String.format("setting_toggle_%s", key);
-            
-            buttonLabels.add(buttonLabel);
-            buttonCallbacks.add(buttonCallback);
+            // Only render a toggle button for keys handleToggle will actually
+            // accept - keeps this listing and TOGGLEABLE_SETTING_KEYS from
+            // being able to drift out of sync (an unlisted key is still
+            // displayed above, just without a button that would only fail).
+            if (TOGGLEABLE_SETTING_KEYS.contains(key)) {
+                String toggleText = isEnabled ? "Disable" : "Enable";
+                String buttonLabel = String.format("%s %s", toggleText, extractSettingName(key));
+                String buttonCallback = String.format("setting_toggle_%s", key);
+
+                buttonLabels.add(buttonLabel);
+                buttonCallbacks.add(buttonCallback);
+            }
         }
         
         // Add cancel button
@@ -188,7 +211,14 @@ public class CommandSettings {
         }
 
         String settingKey = callbackData.substring("setting_toggle_".length());
-        
+
+        if (!TOGGLEABLE_SETTING_KEYS.contains(settingKey)) {
+            String errorMsg = String.format("❌ Error: '%s' is not a valid toggleable setting.", settingKey);
+            discordLog.logWarning(String.format("Admin %s attempted to toggle a non-allowlisted key: %s", userInfo, settingKey));
+            telegramLog.logWarning(String.format("Admin %s attempted to toggle a non-allowlisted key: %s", userInfo, settingKey));
+            return errorMsg;
+        }
+
         discordLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
         telegramLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
 
@@ -367,18 +397,34 @@ public class CommandSettings {
         }
 
         String hallValue = callbackData.substring("setting_homeHall_".length());
-        
-        discordLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, hallValue));
-        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, hallValue));
+
+        String canonicalHallName;
+        try {
+            canonicalHallName = resolveHallNameOrNull(hallValue);
+        } catch (SQLException e) {
+            String errorMsg = "❌ Error: Failed to validate hall: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+        if (canonicalHallName == null) {
+            String errorMsg = String.format("❌ Error: '%s' is not a recognized hall.", hallValue);
+            discordLog.logWarning(String.format("Admin %s tried to set an unrecognized home hall: %s", userId, hallValue));
+            telegramLog.logWarning(String.format("Admin %s tried to set an unrecognized home hall: %s", userId, hallValue));
+            return errorMsg;
+        }
+
+        discordLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, canonicalHallName));
+        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, canonicalHallName));
 
         // Update property
-        boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
-        
-        if (success) {
-            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(hallValue));
+        boolean success = PropertyManager.updateProperty("settings.homeHall", canonicalHallName);
 
-            discordLog.logSuccess(String.format("Home hall set to %s", hallValue));
-            telegramLog.logSuccess(String.format("Home hall set to %s", hallValue));
+        if (success) {
+            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(canonicalHallName));
+
+            discordLog.logSuccess(String.format("Home hall set to %s", canonicalHallName));
+            telegramLog.logSuccess(String.format("Home hall set to %s", canonicalHallName));
 
             return successMsg;
         } else {
@@ -387,6 +433,17 @@ public class CommandSettings {
             telegramLog.logError(errorMsg);
             return errorMsg;
         }
+    }
+
+    /**
+     * Looks up a hall by its raw name (case-insensitive), returning the
+     * canonical hall_name value to store, or null if no such hall exists.
+     * Used to keep settings.homeHall constrained to a real hall instead of
+     * accepting arbitrary free text.
+     */
+    private String resolveHallNameOrNull(String hallValue) throws SQLException {
+        A3_Halls.Hall hall = new A3_Halls().getHallByName(hallValue);
+        return hall != null ? hall.hallName : null;
     }
 
     /**
@@ -494,19 +551,33 @@ public class CommandSettings {
         if (hallValue.isEmpty()) {
             return "❌ Invalid input: Hall value cannot be empty.";
         }
-        
-        discordLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, hallValue));
-        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, hallValue));
-        
-        // Update property
-        boolean success = PropertyManager.updateProperty("settings.homeHall", hallValue);
-        
-        if (success) {
-            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(hallValue));
 
-            discordLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
-            telegramLog.logSuccess(String.format("Home hall set to %s (manual input)", hallValue));
-            
+        String canonicalHallName;
+        try {
+            canonicalHallName = resolveHallNameOrNull(hallValue);
+        } catch (SQLException e) {
+            String errorMsg = "❌ Error: Failed to validate hall: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            return errorMsg;
+        }
+        if (canonicalHallName == null) {
+            return String.format("❌ Invalid input: '%s' is not a recognized hall. Use /settings and select a hall from the list.",
+                    TelegramHtml.escape(hallValue));
+        }
+
+        discordLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, canonicalHallName));
+        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, canonicalHallName));
+
+        // Update property
+        boolean success = PropertyManager.updateProperty("settings.homeHall", canonicalHallName);
+
+        if (success) {
+            String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(canonicalHallName));
+
+            discordLog.logSuccess(String.format("Home hall set to %s (manual input)", canonicalHallName));
+            telegramLog.logSuccess(String.format("Home hall set to %s (manual input)", canonicalHallName));
+
             return successMsg;
         } else {
             String errorMsg = "❌ Error: Failed to update home hall setting";

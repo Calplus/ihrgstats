@@ -8,6 +8,7 @@ import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -25,7 +26,7 @@ public class CommandInfoHall {
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
-    private static final Map<String, HallInfoSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, HallInfoSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class HallInfoSelectionState extends SelectionState {
         int hallId;
@@ -103,7 +104,7 @@ public class CommandInfoHall {
             labels.add("❌ Cancel");
             callbacks.add("infohall_cancel");
 
-            String message = String.format("**🏛️ Hall Information**\n\nHall: **%s**\n\nSelect a **round**:", state.hallName);
+            String message = String.format("**🏛️ Hall Information**\n\nHall: **%s**\n\nSelect a **round**:", formatHallNameForImage(state.hallName));
             return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
@@ -189,7 +190,7 @@ public class CommandInfoHall {
         HallData hallData = fetchHallData(hallId, hallName, year, roundsToInclude, trueEloTypeId);
 
         if (hallData.players.isEmpty()) {
-            throw new IllegalStateException("Hall " + hallName + " has no player data for " + year);
+            throw new IllegalStateException(formatHallNameForImage(hallName) + " has no player data for " + year);
         }
 
         String textOutput = generateTextOutput(hallData, roundsToInclude);
@@ -334,8 +335,21 @@ public class CommandInfoHall {
                     .collect(Collectors.toList());
             if (playingPlayers.isEmpty()) continue;
 
-            double hallScore = 0.0;
-            Map<String, Double> oppScores = new HashMap<>();
+            // Tally hall score AND opponent score PER OPPONENT HALL, not as
+            // one combined total for "us" against one combined total for
+            // "them" - a hall can face more than one opponent hall in the
+            // same round (boards paired independently) or pick up a bonus
+            // walkover win alongside a real match, and mixing those into a
+            // single pair of totals let the displayed score/outcome for
+            // "vs Hall X" reflect points that had nothing to do with Hall X.
+            // Same-hall pairings (two of this hall's own players paired
+            // together) are skipped entirely so a hall never appears as its
+            // own opponent.
+            Map<String, Double> myScoreByOpp = new HashMap<>();
+            Map<String, Double> oppScoreByOpp = new HashMap<>();
+            Map<String, Integer> boardsByOpp = new HashMap<>();
+            double walkoverScore = 0.0;
+            boolean anyWalkover = false;
 
             for (PlayerData player : playingPlayers) {
                 Integer outcome = player.outcomeByRound.get(roundOrder);
@@ -345,34 +359,42 @@ public class CommandInfoHall {
 
                 Double points = VictoryRecordCalculator.outcomeToPoints(outcome);
                 if (points == null) continue;
-                hallScore += points;
 
-                if (oppHallName != null && !"WALKOVER".equalsIgnoreCase(oppHallName) && !"WALKOVER".equalsIgnoreCase(oppName)) {
-                    oppScores.merge(oppHallName, 1.0 - points, Double::sum);
+                if ("WALKOVER".equalsIgnoreCase(oppName)) {
+                    anyWalkover = true;
+                    walkoverScore += points;
+                    continue; // a walkover board isn't "against" any specific opponent hall
                 }
+                if (oppHallName == null || oppHallName.equalsIgnoreCase(hallData.hallName)) {
+                    continue; // unknown hall, or a same-hall pairing - never our own opponent
+                }
+
+                myScoreByOpp.merge(oppHallName, points, Double::sum);
+                oppScoreByOpp.merge(oppHallName, 1.0 - points, Double::sum);
+                boardsByOpp.merge(oppHallName, 1, Integer::sum);
             }
 
-            String primaryOppHall = null;
-            if (!oppScores.isEmpty()) {
-                primaryOppHall = oppScores.entrySet().stream()
-                        .max(Map.Entry.comparingByValue())
-                        .map(Map.Entry::getKey)
-                        .orElse(null);
-            }
-
-            boolean allWalkovers = playingPlayers.stream()
-                    .allMatch(p -> "WALKOVER".equalsIgnoreCase(p.oppNameByRound.get(roundOrder)));
-            if (allWalkovers) {
+            // Primary opponent = whichever hall we faced on the most boards
+            // this round (the normal case is exactly one opponent hall).
+            String primaryOppHall = boardsByOpp.entrySet().stream()
+                    .max(Map.Entry.comparingByValue())
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
+            if (primaryOppHall == null && anyWalkover) {
                 primaryOppHall = "WALKOVER";
             }
 
             if (primaryOppHall != null) {
-                double oppScore = oppScores.getOrDefault(primaryOppHall, 0.0);
                 HallVictoryRecord record = new HallVictoryRecord();
-                record.hallScore = hallScore;
-                record.oppScore = oppScore;
                 record.oppHallName = primaryOppHall;
-                record.outcome = hallScore > oppScore ? 1 : (hallScore < oppScore ? -1 : 0);
+                if ("WALKOVER".equalsIgnoreCase(primaryOppHall)) {
+                    record.hallScore = walkoverScore;
+                    record.oppScore = 0.0;
+                } else {
+                    record.hallScore = myScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+                    record.oppScore = oppScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+                }
+                record.outcome = record.hallScore > record.oppScore ? 1 : (record.hallScore < record.oppScore ? -1 : 0);
 
                 if (!"WALKOVER".equalsIgnoreCase(primaryOppHall)) {
                     Integer oppHallId = hallNameToId.get(primaryOppHall);
@@ -389,7 +411,7 @@ public class CommandInfoHall {
 
     private String generateTextOutput(HallData hall, List<A1_Rounds.Round> roundsToInclude) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("**🏛️ Hall %s Information**\n\n", hall.hallName));
+        sb.append(String.format("**🏛️ %s Information**\n\n", formatHallNameForImage(hall.hallName)));
         sb.append(String.format("**Last Round:** %s\n\n", hall.lastRoundLabel != null ? hall.lastRoundLabel : "N/A"));
 
         sb.append("**🏛️ Hall Elo:**\n```\n");

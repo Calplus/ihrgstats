@@ -42,6 +42,7 @@ public class RoundCsvProcessorPipelineTest {
         new A3_Halls().seedDefaults(NOW);
         new B4_Players().seedDefaults(NOW);
         new D10_RatingTypes().seedDefaults(NOW);
+        new F16_Admins().seedDefaults(NOW);
     }
 
     @AfterEach
@@ -158,5 +159,115 @@ public class RoundCsvProcessorPipelineTest {
         assertTrue(newProcessor().processRound(r2Again.toString(), YEAR, 2, NOW),
                 "Reprocessing round 2 should succeed - the match type must be recovered from the round's "
                         + "existing matches (captured before they're deleted), not require re-prompting for it");
+    }
+
+    /**
+     * Regression test for A3: cancelling a LATER dialog during a reprocess
+     * (after already saying "yes" to the top-level reprocess warning) must
+     * leave the round's previously-stored data completely untouched. The
+     * bug: deleteFutureRounds/deleteMatchesForRound/deleteRatingsForRound/
+     * deleteSnapshotsForRound used to run BEFORE the match-type and
+     * player-identity-resolution dialogs, so a cancellation at either of
+     * those left the round emptied with nothing re-written, even though
+     * "Cancel" was presented as safe.
+     */
+    @Test
+    void reprocessCancelledAtALaterDialog_leavesPreviouslyStoredDataUntouched(@TempDir Path csvDir) throws Exception {
+        Integer trueEloTypeId = new D10_RatingTypes().getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        A1_Rounds rounds = new A1_Rounds();
+        C8_Matches matches = new C8_Matches();
+        D11_PlayerRatings playerRatings = new D11_PlayerRatings();
+
+        // --- Round 1: processed successfully the first time. ---
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Aurelia Nightshade,1,8,Bartholomew Krieger,2,2\n");
+        assertTrue(newProcessor().processRound(r1.toString(), YEAR, 1, NOW), "Round 1 should process successfully");
+
+        String playerA = resolvePlayerId("Aurelia Nightshade");
+        int round1Id = rounds.getRoundByYearAndOrder(YEAR, 1).id;
+        D11_PlayerRatings.Rating aRound1Baseline = playerRatings.getRating(playerA, round1Id, trueEloTypeId);
+        assertNotNull(aRound1Baseline, "Aurelia Nightshade should have a round-1 rating");
+        int matchCountBaseline = matches.getMatchesForRound(round1Id).size();
+        assertEquals(1, matchCountBaseline);
+
+        // --- Reprocess round 1: say "yes" to the top-level warning, but a
+        // fuzzy-name-match dialog fires deeper in (an intentional near-typo
+        // of an existing name) and the user cancels THAT one instead. ---
+        RoundCsvProcessor processor = new RoundCsvProcessor();
+        processor.setMultiChoiceCallback((message, options) -> {
+            if (message.contains("Round Already Processed")) {
+                for (int i = 0; i < options.length; i++) {
+                    if (options[i].startsWith("Continue and reprocess")) return i;
+                }
+            }
+            if (message.contains("Name Mismatch Detected")) {
+                for (int i = 0; i < options.length; i++) {
+                    if (options[i].startsWith("Cancel")) return i;
+                }
+            }
+            return options.length - 1;
+        });
+        Path r1Retry = writeRoundCsv(csvDir, "r1_retry.csv", "Aurelia Nightshde,1,9,Bartholomew Krieger,2,1\n");
+        boolean result = processor.processRound(r1Retry.toString(), YEAR, 1, NOW);
+
+        assertFalse(result, "Cancelling the fuzzy-name-match dialog must fail the reprocess");
+
+        D11_PlayerRatings.Rating aRound1AfterCancel = playerRatings.getRating(playerA, round1Id, trueEloTypeId);
+        assertNotNull(aRound1AfterCancel, "Round 1's rating must still exist after the cancelled reprocess");
+        assertEquals(aRound1Baseline.ratingValue, aRound1AfterCancel.ratingValue, 1e-9,
+                "Round 1's rating must be byte-for-byte unchanged - the cancelled reprocess must not have deleted anything");
+        assertEquals(matchCountBaseline, matches.getMatchesForRound(round1Id).size(),
+                "Round 1's matches must still be present - the delete must not have run before the cancellation");
+    }
+
+    @Test
+    void cancelledFirstTimeUpload_leavesNoRoundRowBehind(@TempDir Path csvDir) throws Exception {
+        // Regression test for A24: a round row used to be created via
+        // getOrCreateRound() BEFORE any cancellable dialog ran. Deliberately
+        // create NO match type here, so a walkover round's match-type dialog
+        // fails immediately ("must be assigned" - resolveMatchTypeInteractively
+        // returns null when no match types exist at all) - simulating a
+        // first-time upload that gets cancelled/fails before any data would
+        // ever be written.
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Someone,1,,WALKOVER,,\n");
+        boolean result = newProcessor().processRound(r1.toString(), YEAR, 1, NOW);
+
+        assertFalse(result, "Round should fail - no match type exists to score the walkover");
+        assertNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 1),
+                "A cancelled/failed FIRST-TIME upload must not leave a permanent empty round row behind");
+    }
+
+    @Test
+    void unknownHallName_failsCleanly_insteadOfCrashing(@TempDir Path csvDir) throws Exception {
+        // Regression test for A25: requireHall() throws IllegalArgumentException
+        // for a hall name that isn't seeded - previously uncaught by
+        // processRound's catch clauses, it propagated as an unhandled crash
+        // instead of the same clean "processing failed" notification every
+        // other expected validation failure gets.
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Someone,NoSuchHall99,10,Someone Else,2,5\n");
+        boolean result = newProcessor().processRound(r1.toString(), YEAR, 1, NOW);
+
+        assertFalse(result, "An unknown hall name must fail processing cleanly, not throw an uncaught exception");
+    }
+
+    @Test
+    void headlessInvocation_withMultipleMatchTypes_cancelsInsteadOfSilentlyPickingOne(@TempDir Path csvDir) throws Exception {
+        // Regression test for A14: requestMultiChoice's no-callback fallback
+        // returns options.length - 1, a convention that means "Cancel" for
+        // every OTHER multi-choice dialog in this app (which all append an
+        // explicit Cancel entry) - but resolveMatchTypeInteractively's
+        // options used to be built from real match types ONLY, so the same
+        // fallback silently selected the LAST REAL match type instead of
+        // cancelling. A trailing "Cancel" option now makes this fallback
+        // behave consistently with every other dialog.
+        new A2_MatchTypes().createMatchType("TypeA", 10.0, null, "First type", NOW);
+        new A2_MatchTypes().createMatchType("TypeB", 20.0, null, "Second type", NOW);
+
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Someone,1,,WALKOVER,,\n");
+        RoundCsvProcessor processor = new RoundCsvProcessor(); // no callback registered - headless
+        boolean result = processor.processRound(r1.toString(), YEAR, 1, NOW);
+
+        assertFalse(result, "A headless invocation with no callback must cancel the walkover match-type dialog, not silently pick a match type");
+        assertNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 1),
+                "A cancelled first-time upload must not leave a round row behind (A24)");
     }
 }

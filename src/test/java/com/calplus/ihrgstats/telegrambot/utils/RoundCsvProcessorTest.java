@@ -92,6 +92,48 @@ public class RoundCsvProcessorTest {
         assertEquals(false, games.get(0).isWalkover());
     }
 
+    // --- A8: WALKOVER+TIMEOUT mutual exclusion, NaN/Infinity score rejection ---
+
+    @Test
+    void walkoverRowWithTimeoutScore_isRejected_p1Walkover(@TempDir Path tempDir) {
+        // WALKOVER means a player never showed up - it cannot simultaneously
+        // mean their opponent ran out of time on the clock.
+        Path csv = writeCsv(tempDir, "WALKOVER,,,Player2,2,TIMEOUT\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("cannot be both WALKOVER and TIMEOUT"));
+    }
+
+    @Test
+    void walkoverRowWithTimeoutScore_isRejected_p2Walkover(@TempDir Path tempDir) {
+        Path csv = writeCsv(tempDir, "Player1,1,TIMEOUT,WALKOVER,,\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("cannot be both WALKOVER and TIMEOUT"));
+    }
+
+    @Test
+    void standardRow_nanScore_isRejected(@TempDir Path tempDir) {
+        // Double.parseDouble happily accepts "NaN" - without an explicit
+        // isFinite check, this would silently pass validation and then be
+        // recorded as a draw downstream (NaN fails every > and < comparison).
+        Path csv = writeCsv(tempDir, "Player1,1,NaN,Player2,2,50\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("finite"));
+    }
+
+    @Test
+    void standardRow_infiniteScore_isRejected(@TempDir Path tempDir) {
+        Path csv = writeCsv(tempDir, "Player1,1,Infinity,Player2,2,50\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("finite"));
+    }
+
+    @Test
+    void timeoutRow_winnerScoreInfinite_isRejected(@TempDir Path tempDir) {
+        Path csv = writeCsv(tempDir, "Player1,1,TIMEOUT,Player2,2,Infinity\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("finite"));
+    }
+
     private static Path writeCsv(Path tempDir, String dataRow) {
         try {
             Path csv = tempDir.resolve("round.csv");

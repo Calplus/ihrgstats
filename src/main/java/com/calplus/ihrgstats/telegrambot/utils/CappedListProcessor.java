@@ -72,6 +72,10 @@ public class CappedListProcessor {
         try {
             // Full replace semantics for this year, matching legacy's DELETE + re-INSERT.
             cappedImports.clearImportsForYear(year);
+            // Also clear any existing capped flags for the year first - otherwise a
+            // player removed from a corrected list stays capped forever, since the
+            // loop below only ever sets capped=true, never false.
+            playerYearStatus.clearCappedForYear(year, nowTimestamp);
 
             int mappedCount = 0;
             for (CappedEntry entry : entries) {
@@ -116,7 +120,7 @@ public class CappedListProcessor {
                 line = line.trim();
                 if (line.isEmpty()) continue;
 
-                String[] parts = line.split(",", -1);
+                String[] parts = CsvLineParser.parseLine(line);
 
                 if (isHeader) {
                     if (parts.length != 2) {

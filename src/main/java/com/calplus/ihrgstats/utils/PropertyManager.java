@@ -1,7 +1,6 @@
 package com.calplus.ihrgstats.utils;
 
 import java.io.*;
-import java.nio.file.*;
 import java.util.*;
 
 /**
@@ -10,56 +9,7 @@ import java.util.*;
  */
 public class PropertyManager {
     private static final String PROPERTIES_FILE = "application.properties";
-    private static final String CONFIG_DIR = "config";
-    
-    /**
-     * Gets the path to the application.properties file.
-     * For JAR execution, uses config/application.properties in working directory.
-     * For development, uses src/main/resources/application.properties.
-     */
-    private static Path getPropertiesPath() {
-        String userDir = System.getProperty("user.dir");
-        
-        // Check if running from JAR or if config directory exists
-        Path configPath = Paths.get(userDir, CONFIG_DIR, PROPERTIES_FILE);
-        Path devPath = Paths.get(userDir, "src", "main", "resources", PROPERTIES_FILE);
-        
-        // If config directory exists or dev path doesn't exist, use config path
-        if (Files.exists(configPath) || !Files.exists(devPath)) {
-            // Ensure config directory exists
-            try {
-                Files.createDirectories(configPath.getParent());
-                
-                // If config file doesn't exist, copy from classpath
-                if (!Files.exists(configPath)) {
-                    copyPropertiesFromClasspath(configPath);
-                }
-            } catch (IOException e) {
-                System.err.println("Error creating config directory: " + e.getMessage());
-            }
-            return configPath;
-        }
-        
-        // Development mode - use src/main/resources
-        return devPath;
-    }
-    
-    /**
-     * Copies application.properties from classpath to external config directory
-     */
-    private static void copyPropertiesFromClasspath(Path targetPath) {
-        try (InputStream is = PropertyManager.class.getClassLoader().getResourceAsStream(PROPERTIES_FILE)) {
-            if (is != null) {
-                Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("Created external config file: " + targetPath);
-            } else {
-                System.err.println("Could not find " + PROPERTIES_FILE + " in classpath");
-            }
-        } catch (IOException e) {
-            System.err.println("Error copying properties from classpath: " + e.getMessage());
-        }
-    }
-    
+
     /**
      * Gets all properties starting with a specific prefix
      * @param prefix The prefix to filter by (e.g., "settings.")
@@ -83,62 +33,27 @@ public class PropertyManager {
     }
     
     /**
-     * Updates a property value. For settings and internet properties that use environment variables,
-     * updates the .env.properties file. For other properties, updates application.properties directly.
-     * Preserves comments and formatting.
+     * Updates a settings.* or internet.* property by writing it to the
+     * .env.properties file (resolved back via system properties - see
+     * EnvironmentManager/PropertyResolver). This is the only kind of
+     * property this app's runtime UI (e.g. /settings) ever needs to change;
+     * application.properties itself is a compiled-in classpath resource,
+     * never intended to be edited live, so non-settings/internet keys are
+     * rejected rather than attempted (A12 - a prior "edit
+     * application.properties directly" branch here wrote to an external
+     * file PropertyResolver's classpath-only reader never read back, a
+     * silent no-op that was already confirmed to have no live caller).
      * @param key The property key to update (e.g., "settings.timezone")
      * @param value The new value
-     * @return true if successful, false otherwise
+     * @return true if successful, false otherwise (including for a
+     *         non-settings/internet key, which this method doesn't support)
      */
     public static boolean updateProperty(String key, String value) {
-        // Check if this is a settings or internet property that should go to .env.properties
-        if (key.startsWith("settings.") || key.startsWith("internet.")) {
-            return updateEnvironmentProperty(key, value);
-        }
-        
-        // For other properties, update application.properties directly
-        Path propsPath = getPropertiesPath();
-        
-        if (!Files.exists(propsPath)) {
-            System.err.println("Properties file not found: " + propsPath);
+        if (!key.startsWith("settings.") && !key.startsWith("internet.")) {
+            System.err.println("Cannot update non-settings/internet property at runtime: " + key);
             return false;
         }
-        
-        try {
-            // Read all lines
-            List<String> lines = Files.readAllLines(propsPath);
-            boolean found = false;
-            
-            // Find and update the property
-            for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i).trim();
-                
-                // Skip comments and empty lines
-                if (line.startsWith("#") || line.isEmpty()) {
-                    continue;
-                }
-                
-                // Check if this line contains our property
-                if (line.startsWith(key + "=")) {
-                    lines.set(i, key + "=" + value);
-                    found = true;
-                    break;
-                }
-            }
-            
-            if (!found) {
-                System.err.println("Property not found: " + key);
-                return false;
-            }
-            
-            // Write back to file
-            Files.write(propsPath, lines);
-            return true;
-            
-        } catch (IOException e) {
-            System.err.println("Error updating property: " + e.getMessage());
-            return false;
-        }
+        return updateEnvironmentProperty(key, value);
     }
     
     /**

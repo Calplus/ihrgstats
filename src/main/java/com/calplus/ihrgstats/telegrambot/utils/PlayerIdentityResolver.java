@@ -130,7 +130,7 @@ public class PlayerIdentityResolver {
         }
 
         if (resolvedPlayerId == null) {
-            FuzzyMatch fuzzy = tryFuzzyMatch(name, year);
+            FuzzyMatch fuzzy = tryFuzzyMatch(name);
             if (fuzzy != null) {
                 if (fuzzy.cancelled) {
                     return new ResolutionResult(null, hall.id, true);
@@ -175,11 +175,30 @@ public class PlayerIdentityResolver {
      * Fuzzy-matches a name against all known name records (typo/partial-name detection),
      * prompting the same-person-vs-different-person dialog on a plausible hit.
      */
-    private FuzzyMatch tryFuzzyMatch(String name, int year) throws SQLException {
-        List<B5_PlayerNames.NameRecord> allNames = playerNames.getAllNamesForYear(year);
-        if (allNames.isEmpty()) {
-            allNames = playerNames.getAllNames();
-        }
+    private FuzzyMatch tryFuzzyMatch(String name) throws SQLException {
+        // Match against every name ever recorded, not just this year's -
+        // matching only this year's names meant fuzzy detection was only
+        // ever reachable for the very first resolved row of a season (the
+        // one case where this year's list is still empty); from the second
+        // row onward, a typo'd RETURNING player (e.g. "Amara Whitloc" for last
+        // year's "Amara Whitlock" - a real case in this club's data) had no
+        // prior-year name to compare against and silently became a new
+        // player with no dialog at all - exactly the case this check exists
+        // to catch.
+        List<B5_PlayerNames.NameRecord> allNames = playerNames.getAllNames();
+
+        // getAllNames() has no ORDER BY and now spans every year (not just
+        // this one), so simply prompting on whichever candidate SQLite
+        // happens to return first could surface an unrelated, coincidentally
+        // typo-distance name ahead of the actual best match. Instead, scan
+        // every candidate and keep the single best one: a partial-name match
+        // (substring/word-overlap - a stronger signal) beats a spelling-only
+        // match, and within the same match strength, prefer whichever
+        // candidate was more RECENTLY active - a typo for a recently-active
+        // player is a far more likely real-world scenario than confusion
+        // with a long-dormant record.
+        B5_PlayerNames.NameRecord bestCandidate = null;
+        boolean bestIsPartial = false;
 
         for (B5_PlayerNames.NameRecord candidate : allNames) {
             if (candidate.name.equalsIgnoreCase(name)) {
@@ -190,26 +209,43 @@ public class PlayerIdentityResolver {
             if (!partial && !similar) {
                 continue;
             }
-            String type = partial ? "partial name" : "possible spelling";
-            int choice = requestMultiChoice(String.format(
-                "⚠️ Name Mismatch Detected\n\n%s: '%s' may match existing player '%s'.\n\n" +
-                "Please choose how to handle this:",
-                type, name, candidate.name),
-                new String[]{
-                    "Treat as same person (use existing record)",
-                    "Treat as different people",
-                    "Cancel processing"
-                });
-            FuzzyMatch result = new FuzzyMatch();
-            if (choice == 0) {
-                result.playerId = candidate.playerId;
-            } else if (choice == 2) {
-                result.cancelled = true;
+            if (bestCandidate == null
+                    || (partial && !bestIsPartial)
+                    || (partial == bestIsPartial && candidate.lastSeenYear > bestCandidate.lastSeenYear)) {
+                bestCandidate = candidate;
+                bestIsPartial = partial;
             }
-            // choice == 1 (different people): leave playerId null, fall through to new-player creation
-            return result;
         }
-        return null;
+
+        if (bestCandidate == null) {
+            return null;
+        }
+
+        String type = bestIsPartial ? "partial name" : "possible spelling";
+        int choice = requestMultiChoice(String.format(
+            "⚠️ Name Mismatch Detected\n\n%s: '%s' may match existing player '%s'.\n\n" +
+            "Please choose how to handle this:",
+            type, name, bestCandidate.name),
+            new String[]{
+                "Treat as same person (use existing record)",
+                "Treat as different people",
+                "Cancel processing"
+            });
+        FuzzyMatch result = new FuzzyMatch();
+        if (choice == 0) {
+            result.playerId = bestCandidate.playerId;
+        } else if (choice == 1) {
+            // different people: leave playerId null, fall through to new-player creation
+        } else {
+            // choice == 2 (explicit cancel), -1 (dialog timeout or a
+            // rejected concurrent dialog), or any other unexpected value -
+            // treat all of these as cancel. Previously only choice==2
+            // was recognized, so a timeout/rejection fell through to the
+            // SAME branch as "different people" and silently created a
+            // spurious new player instead of aborting.
+            result.cancelled = true;
+        }
+        return result;
     }
 
     /** Ported from legacy: checks for substring/partial name overlap (e.g. "John Smith" vs "John"). */

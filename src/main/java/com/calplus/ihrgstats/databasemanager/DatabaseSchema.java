@@ -300,6 +300,26 @@ public class DatabaseSchema {
             ")");
 
         // ====================================================================
+        // DOMAIN 6: ACCESS CONTROL
+        // ====================================================================
+
+        // Multi-admin, multi-platform admin registry - replaces the old
+        // single telegram.admin.userId property comparison. platform_user_id
+        // is always the platform's stable numeric ID (Telegram user ID /
+        // Discord snowflake), never a mutable @username - display_name is a
+        // friendly label only, never used for the actual admin check.
+        createTable(conn, "admins",
+            "CREATE TABLE IF NOT EXISTS admins (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    platform TEXT NOT NULL,\n" +
+            "    platform_user_id TEXT NOT NULL,\n" +
+            "    display_name TEXT,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL,\n" +
+            "    UNIQUE (platform, platform_user_id)\n" +
+            ")");
+
+        // ====================================================================
         // STRATEGIC INDEXES
         // ====================================================================
 
@@ -327,8 +347,8 @@ public class DatabaseSchema {
      * @param dbName The database filename
      */
     public void createDatabase(String dbName) {
-        Path dbDir = Paths.get(System.getProperty("user.dir"), "database", "core");
-        Path dbPath = dbDir.resolve(dbName);
+        Path dbPath = DatabaseHelper.getDatabasePath(dbName);
+        Path dbDir = dbPath.getParent();
         boolean dbExists = Files.exists(dbPath);
 
         // Log INFO: database is being created/running (initial message, send immediately)

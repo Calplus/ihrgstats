@@ -144,27 +144,25 @@ public class RoundCsvProcessor {
                     notify("🟡", String.format("Round %d reprocessing cancelled by user.", roundOrder));
                     return false;
                 }
-                rounds.deleteFutureRounds(year, roundOrder);
+                // NOTE: deleteFutureRounds() deliberately does NOT run here -
+                // see the single deletion block below, after every remaining
+                // interactive step has a chance to cancel.
             }
 
-            A1_Rounds.Round round = rounds.getOrCreateRound(year, roundOrder, nowTimestamp);
-
-            // Capture any match_type already assigned to this round's matches
-            // BEFORE clearing them below - match_type_id lives on the matches
-            // rows themselves, so once they're deleted this lookup can never
-            // recover it again (a previously-fixed bug: the lookup used to run
-            // after the delete and always returned null on reprocess).
-            Integer matchTypeId = matches.getMatchTypeIdForRound(round.id);
-
-            if (isReprocess) {
-                // Clear this round's OWN data (keep the round row so admin-set
-                // metadata like round_datetime survives). Snapshots are cleared
-                // too - the underlying match data is changing, so this round's
-                // point-in-time record legitimately gets re-taken.
-                matches.deleteMatchesForRound(round.id);
-                playerRatings.deleteRatingsForRound(round.id);
-                ratingSnapshots.deleteSnapshotsForRound(round.id);
-            }
+            // For a reprocess, the round row is GUARANTEED to already exist
+            // (that's what "reprocess" means) - fetching (never creating) it
+            // now is safe even before the remaining cancellable dialogs
+            // below, and is needed to look up any already-assigned
+            // match_type_id before it's cleared by the delete block further
+            // down (a previously-fixed bug: that lookup used to run after
+            // the delete and always returned null on reprocess). For a
+            // FIRST-TIME upload, the round row must NOT be created yet -
+            // creating it here and then cancelling a later dialog would
+            // leave a permanent, empty round row with nothing ever written
+            // to it (the actual creation happens further down, once every
+            // cancellable step has succeeded).
+            A1_Rounds.Round existingRound = isReprocess ? rounds.getRoundByYearAndOrder(year, roundOrder) : null;
+            Integer matchTypeId = existingRound != null ? matches.getMatchTypeIdForRound(existingRound.id) : null;
 
             // Only urgently needed if this round has a walkover (walkover
             // default scoring needs max_score). Otherwise fully deferrable.
@@ -215,6 +213,56 @@ public class RoundCsvProcessor {
                     player2Ids.put(game, res.playerId);
                     player2HallIds.put(game, res.hallId);
                 }
+            }
+
+            // Reject a round where the same REAL player appears more than
+            // once this round - whether that's one row's two names both
+            // resolving to the same player (a same-cell typo), or the same
+            // player appearing in two separate rows (a duplicate CSV row).
+            // Without this, a duplicate write hits the (match_id, player_id)
+            // primary key on the SECOND insertParticipant call and throws
+            // mid-write - on a reprocess, that happens AFTER the destructive
+            // deletes below have already run, so the round would be left
+            // emptied with a half-written replacement. Checked here (after
+            // resolution, before any delete) so a rejection is always safe -
+            // nothing has been destroyed yet. The WALKOVER sentinel is exempt
+            // since it legitimately repeats once per walkover row.
+            Map<String, Integer> firstRowOfPlayer = new LinkedHashMap<>();
+            int rowNumber = 0;
+            for (GameRow game : games) {
+                rowNumber++;
+                for (String playerId : new String[]{player1Ids.get(game), player2Ids.get(game)}) {
+                    if (B4_Players.WALKOVER_PLAYER_ID.equals(playerId)) continue;
+                    Integer priorRow = firstRowOfPlayer.putIfAbsent(playerId, rowNumber);
+                    if (priorRow != null) {
+                        notify("🔴", String.format(
+                            "Round processing cancelled - the same player appears more than once this round (row %d and row %d). This is likely a data entry error and must be fixed manually.",
+                            priorRow, rowNumber));
+                        return false;
+                    }
+                }
+            }
+
+            // Every interactive step above (the reprocess confirmation, the
+            // match-type dialog, and every player-identity-resolution dialog)
+            // has now succeeded without cancellation - only now is it safe to
+            // create the round row (first-time upload) or run the destructive
+            // deletes (reprocess). Previously the round row was created (and
+            // deletes ran) BEFORE the match-type/identity dialogs, so
+            // cancelling one of those left either a permanent empty round
+            // row (first-time upload) or the round emptied and all later
+            // rounds already gone with nothing re-written (reprocess), even
+            // though "Cancel" was presented as safe both times.
+            A1_Rounds.Round round = existingRound != null ? existingRound : rounds.getOrCreateRound(year, roundOrder, nowTimestamp);
+            if (isReprocess) {
+                rounds.deleteFutureRounds(year, roundOrder);
+                // Clear this round's OWN data (keep the round row so admin-set
+                // metadata like round_datetime survives). Snapshots are cleared
+                // too - the underlying match data is changing, so this round's
+                // point-in-time record legitimately gets re-taken.
+                matches.deleteMatchesForRound(round.id);
+                playerRatings.deleteRatingsForRound(round.id);
+                ratingSnapshots.deleteSnapshotsForRound(round.id);
             }
 
             // Seating: a running per-hall counter across the whole round (skips WALKOVER side, matching legacy).
@@ -400,6 +448,13 @@ public class RoundCsvProcessor {
         } catch (PlayerIdentityResolver.HallMismatchException e) {
             notify("🔴", e.getMessage());
             return false;
+        } catch (IllegalArgumentException e) {
+            // requireHall() throws this for a hall name that doesn't exist -
+            // previously uncaught here, it propagated all the way out as a
+            // generic crash instead of the same clean "processing failed"
+            // notification every other expected validation failure gets.
+            notify("🔴", "Round processing failed: " + e.getMessage());
+            return false;
         } catch (SQLException e) {
             notify("🔴", "Database update failed: " + e.getMessage());
             return false;
@@ -446,10 +501,11 @@ public class RoundCsvProcessor {
         if (allTypes.isEmpty()) {
             return null; // caller reports the "must create a match type first" error
         }
-        String[] options = new String[allTypes.size()];
+        String[] options = new String[allTypes.size() + 1];
         for (int i = 0; i < allTypes.size(); i++) {
             options[i] = allTypes.get(i).typeName + " (max_score=" + allTypes.get(i).maxScore + ")";
         }
+        options[allTypes.size()] = "Cancel";
         int choice = requestMultiChoice(
             "⚠️ This round contains a WALKOVER, which needs a match type's max_score to compute a default score.\n\n" +
             "Select a match type for this round:", options);
@@ -495,7 +551,7 @@ public class RoundCsvProcessor {
                 lineNumber++;
                 if (line.trim().isEmpty()) continue;
 
-                String[] parts = parseCSVLine(line);
+                String[] parts = CsvLineParser.parseLine(line);
 
                 if (isHeader) {
                     if (parts.length != 6) {
@@ -538,9 +594,15 @@ public class RoundCsvProcessor {
                     if (game.hall2.isEmpty()) {
                         throw new Exception(String.format("Invalid CSV format at line %d: Non-WALKOVER player must have a hall", lineNumber));
                     }
+                    if (game.isTimeout()) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: A row cannot be both WALKOVER and TIMEOUT", lineNumber));
+                    }
                 } else if (p2Walkover) {
                     if (game.hall1.isEmpty()) {
                         throw new Exception(String.format("Invalid CSV format at line %d: Non-WALKOVER player must have a hall", lineNumber));
+                    }
+                    if (game.isTimeout()) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: A row cannot be both WALKOVER and TIMEOUT", lineNumber));
                     }
                 } else if (game.isTimeout()) {
                     if (game.hall1.isEmpty() || game.hall2.isEmpty()) {
@@ -553,10 +615,14 @@ public class RoundCsvProcessor {
                     }
                     String winnerScore = s1Timeout ? game.score2 : game.score1;
                     if (!winnerScore.isEmpty()) {
+                        double parsedWinnerScore;
                         try {
-                            Double.parseDouble(winnerScore);
+                            parsedWinnerScore = Double.parseDouble(winnerScore);
                         } catch (NumberFormatException e) {
                             throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be numeric or TIMEOUT", lineNumber));
+                        }
+                        if (!Double.isFinite(parsedWinnerScore)) {
+                            throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be a finite number", lineNumber));
                         }
                     }
                 } else {
@@ -566,11 +632,16 @@ public class RoundCsvProcessor {
                     if (game.score1.isEmpty() || game.score2.isEmpty()) {
                         throw new Exception(String.format("Invalid CSV format at line %d: Both score1 and score2 are required for standard games", lineNumber));
                     }
+                    double parsedScore1;
+                    double parsedScore2;
                     try {
-                        Double.parseDouble(game.score1);
-                        Double.parseDouble(game.score2);
+                        parsedScore1 = Double.parseDouble(game.score1);
+                        parsedScore2 = Double.parseDouble(game.score2);
                     } catch (NumberFormatException e) {
                         throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be numeric", lineNumber));
+                    }
+                    if (!Double.isFinite(parsedScore1) || !Double.isFinite(parsedScore2)) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be finite numbers", lineNumber));
                     }
                 }
 
@@ -586,39 +657,6 @@ public class RoundCsvProcessor {
         }
 
         return games;
-    }
-
-    /** RFC 4180-ish CSV line parser (handles quoted fields with embedded commas, matching legacy). */
-    private String[] parseCSVLine(String line) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (inQuotes) {
-                if (c == '"') {
-                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                        current.append('"');
-                        i++;
-                    } else {
-                        inQuotes = false;
-                    }
-                } else {
-                    current.append(c);
-                }
-            } else {
-                if (c == '"') {
-                    inQuotes = true;
-                } else if (c == ',') {
-                    fields.add(current.toString());
-                    current.setLength(0);
-                } else {
-                    current.append(c);
-                }
-            }
-        }
-        fields.add(current.toString());
-        return fields.toArray(new String[0]);
     }
 
     private int requestMultiChoice(String message, String[] options) {

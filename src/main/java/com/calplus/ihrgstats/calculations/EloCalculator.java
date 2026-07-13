@@ -133,52 +133,63 @@ public class EloCalculator {
     /**
      * Updates volatility using Illinois algorithm
      * This is the complex part of Glicko-2 that prevents rating from changing too quickly
+     *
+     * @param phi The player's CLIENT-scale rating deviation (the only input
+     *            here not already on the Glicko-2 internal scale - it alone
+     *            needs dividing by GLICKO2_SCALE). {@code variance} and
+     *            {@code delta} are already internal-scale: both are derived
+     *            via {@link #g}, which divides its own input RD by
+     *            GLICKO2_SCALE internally, so re-dividing them again here
+     *            (the historical bug, inherited unchanged from the pre-v2.0
+     *            engine) shrank them by another factor of ~174-30000x,
+     *            silently neutering the "volatility rises after a surprising
+     *            result" mechanism Glicko-2 depends on.
      */
     private static double calculateNewVolatility(double phi, double sigma, double variance, double delta) {
-        // Convert to Glicko-2 scale
         double phiScaled = phi / GLICKO2_SCALE;
-        double varianceScaled = variance / (GLICKO2_SCALE * GLICKO2_SCALE);
-        double deltaScaled = delta / GLICKO2_SCALE;
-        
+
         double alpha = Math.log(sigma * sigma);
         double phiSquared = phiScaled * phiScaled;
-        double deltaSquared = deltaScaled * deltaScaled;
+        double deltaSquared = delta * delta;
         double tauSquared = TAU * TAU;
-        
+
         // Define function f(x)
         java.util.function.DoubleFunction<Double> f = (x) -> {
             double eX = Math.exp(x);
-            double phiSq_plus_v_plus_eX = phiSquared + varianceScaled + eX;
-            double term1 = eX * (deltaSquared - phiSquared - varianceScaled - eX) / (2.0 * phiSq_plus_v_plus_eX * phiSq_plus_v_plus_eX);
+            double phiSq_plus_v_plus_eX = phiSquared + variance + eX;
+            double term1 = eX * (deltaSquared - phiSquared - variance - eX) / (2.0 * phiSq_plus_v_plus_eX * phiSq_plus_v_plus_eX);
             double term2 = (x - alpha) / tauSquared;
             return term1 - term2;
         };
-        
+
         // Illinois algorithm to find root
         double a = alpha;
-        double b = alpha;
-        
-        // Find initial bracket with safety limit
-        int bracketIterations = 0;
-        final int MAX_BRACKET_ITERATIONS = 100;
-        
+        double b;
+
         if (deltaSquared > phiSquared + variance) {
-            b = alpha + TAU;
-            while (f.apply(b) < 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
-                b += TAU;
-                bracketIterations++;
-            }
+            // f(alpha) is guaranteed positive here and f(B) at this closed-form
+            // B is guaranteed negative (its (deltaSquared-phiSquared-variance-e^B)
+            // factor is exactly 0 by construction, leaving only the strictly
+            // negative -(B-alpha)/tau^2 term) - a valid opposite-signed bracket.
+            // The previous stepwise search (b = alpha+TAU, +TAU, +TAU...) could
+            // overshoot straight past this root and land on a second,
+            // same-signed crossing further out, degenerating the Illinois
+            // iteration below back to returning the input sigma unchanged -
+            // exactly the "volatility never moves" bug this fixes.
+            b = Math.log(deltaSquared - phiSquared - variance);
         } else {
             b = alpha - TAU;
+            int bracketIterations = 0;
+            final int MAX_BRACKET_ITERATIONS = 100;
             while (f.apply(b) > 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
                 b -= TAU;
                 bracketIterations++;
             }
         }
-        
+
         double fa = f.apply(a);
         double fb = f.apply(b);
-        
+
         // Iterate to find root with safety limits
         int iterations = 0;
         final int MAX_ITERATIONS = 1000;
@@ -258,13 +269,13 @@ public class EloCalculator {
 
         // Step 1: Calculate variance v
         double v = calculateVariance(currentRating.rating, opponents);
-        
+
         // Step 2: Calculate delta Δ
         double delta = calculateDelta(currentRating.rating, v, opponents);
-        
+
         // Step 3: Calculate new volatility σ'
         double newVolatility = calculateNewVolatility(currentRating.rd, currentRating.volatility, v, delta);
-        
+
         // Step 4: Calculate new RD φ* (convert to Glicko-2 scale)
         double rdScaled = currentRating.rd / GLICKO2_SCALE;
         double phiStar = Math.sqrt(rdScaled * rdScaled + newVolatility * newVolatility);

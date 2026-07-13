@@ -2,7 +2,9 @@ package com.calplus.ihrgstats.utils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -13,6 +15,17 @@ import java.util.regex.Pattern;
 public class PropertyResolver {
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([^:}]+):([^}]*)\\}");
 
+    // Cache of the RAW (unresolved) properties read from each classpath
+    // resource - the resource itself (e.g. application.properties) is a
+    // compiled-in file that never changes during a running process, so
+    // parsing it once and re-resolving ${VAR:default} placeholders fresh on
+    // every call (cheap - a regex plus System.getProperty, no file I/O)
+    // avoids reopening/reparsing the same resource stream on every single
+    // property lookup throughout the app's lifetime (A12). Runtime changes
+    // made via /settings still take effect immediately, since only the
+    // RAW template is cached - placeholder resolution is never cached.
+    private static final Map<String, Properties> rawPropertiesCache = new ConcurrentHashMap<>();
+
     /**
      * Loads properties from a resource file and resolves ${} placeholders.
      * @param resourceName The name of the resource file (e.g., "application.properties")
@@ -20,23 +33,34 @@ public class PropertyResolver {
      * @throws IOException if the resource cannot be read
      */
     public static Properties loadAndResolve(String resourceName) throws IOException {
-        Properties properties = new Properties();
-        
-        try (InputStream inputStream = PropertyResolver.class.getClassLoader().getResourceAsStream(resourceName)) {
-            if (inputStream == null) {
-                throw new IOException("Resource not found: " + resourceName);
-            }
-            properties.load(inputStream);
-        }
-        
+        Properties properties = loadRawProperties(resourceName);
+
         // Resolve all placeholders
         Properties resolved = new Properties();
         for (String key : properties.stringPropertyNames()) {
             String value = properties.getProperty(key);
             resolved.setProperty(key, resolvePlaceholders(value));
         }
-        
+
         return resolved;
+    }
+
+    private static synchronized Properties loadRawProperties(String resourceName) throws IOException {
+        Properties cached = rawPropertiesCache.get(resourceName);
+        if (cached != null) {
+            return cached;
+        }
+
+        Properties properties = new Properties();
+        try (InputStream inputStream = PropertyResolver.class.getClassLoader().getResourceAsStream(resourceName)) {
+            if (inputStream == null) {
+                throw new IOException("Resource not found: " + resourceName);
+            }
+            properties.load(inputStream);
+        }
+
+        rawPropertiesCache.put(resourceName, properties);
+        return properties;
     }
 
     /**

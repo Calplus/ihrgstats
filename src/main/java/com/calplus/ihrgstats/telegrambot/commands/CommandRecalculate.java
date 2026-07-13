@@ -1,9 +1,12 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
+import com.calplus.ihrgstats.databasemanager.F16_Admins;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
+
+import java.sql.SQLException;
 
 /**
  * Command handler for the /recalculate admin command.
@@ -23,9 +26,20 @@ import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
  */
 public class CommandRecalculate {
     private final LogHelper logHelper;
+    private final F16_Admins admins = new F16_Admins();
 
     public CommandRecalculate() {
         this.logHelper = new LogHelper();
+    }
+
+    /** Fails closed (denies) on a database error rather than risking a false "admin". */
+    public boolean isAdmin(String userId) {
+        try {
+            return admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, userId);
+        } catch (SQLException e) {
+            logHelper.logError("Database error checking admin status: " + e.getMessage());
+            return false;
+        }
     }
 
     /** Confirmation prompt shown with Start/Cancel buttons. Plain text (button messages skip parse modes). */
@@ -42,6 +56,12 @@ public class CommandRecalculate {
     /** Runs the recalculation and formats the outcome for the commands channel. */
     public CommandResponse execute(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
+
+        if (!isAdmin(userId)) {
+            logHelper.logWarning(String.format("Non-admin %s attempted to run /recalculate", userInfo));
+            return new CommandResponse("❌ Access Denied: Only administrators can run /recalculate.", (java.nio.file.Path) null);
+        }
+
         logHelper.logInfo(String.format("%s started /recalculate", userInfo));
 
         try {

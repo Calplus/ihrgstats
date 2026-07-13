@@ -12,9 +12,9 @@ import com.calplus.ihrgstats.utils.TelegramHtml;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Command handler for /matchtypes command (admin-only).
@@ -26,12 +26,12 @@ import java.util.Map;
 public class CommandMatchTypes {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
-    private final String adminUserId;
+    private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private final A2_MatchTypes matchTypes = new A2_MatchTypes();
     private final A1_Rounds rounds = new A1_Rounds();
     private final C8_Matches matches = new C8_Matches();
 
-    private static final Map<String, MatchTypeSelectionState> userSelectionStates = new HashMap<>();
+    private static final Map<String, MatchTypeSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
     private static class MatchTypeSelectionState extends SelectionState {
         String step; // "typeName", "maxScore", "timeLimitMinutes", "description", "assignRound"
@@ -48,11 +48,17 @@ public class CommandMatchTypes {
 
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
-        this.adminUserId = PropertyResolver.getProperty("telegram.admin.userId", "");
     }
 
+    /** Fails closed (denies) on a database error rather than risking a false "admin". */
     public boolean isAdmin(String userId) {
-        return !adminUserId.isEmpty() && adminUserId.equals(userId);
+        try {
+            return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
+        } catch (java.sql.SQLException e) {
+            discordLog.logError("Database error checking admin status: " + e.getMessage());
+            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            return false;
+        }
     }
 
     public CommandResponse handleCommand(String userId) {

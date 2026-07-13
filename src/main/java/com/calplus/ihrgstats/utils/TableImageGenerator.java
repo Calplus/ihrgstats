@@ -4,10 +4,8 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -179,10 +177,53 @@ public class TableImageGenerator {
         
         // Bottom padding
         height += Math.max(20, metadataFm.getHeight() / 2);
-        
+
         return height;
     }
-    
+
+    /**
+     * Computes the pixel width of the widest line {@code drawHeaderMetadata}
+     * actually draws (title, each description line, "Last Round: X",
+     * "Generated: ..."). The title/description used to be centered on the
+     * full image width while the final image got cropped down to just the
+     * table's own (possibly narrower) width, clipping the header text at
+     * both edges for a narrow table (A37) - both the canvas width and the
+     * final crop bounds now account for this too, not just the table.
+     * @param metadata Image metadata (can be null)
+     * @return Required width in pixels, or 0 if no metadata
+     */
+    static int calculateHeaderContentWidth(ImageMetadata metadata) {
+        if (metadata == null) {
+            return 0;
+        }
+
+        BufferedImage tempImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        Graphics2D tempG2d = tempImage.createGraphics();
+
+        tempG2d.setFont(TITLE_FONT);
+        FontMetrics titleFm = tempG2d.getFontMetrics();
+        tempG2d.setFont(METADATA_FONT);
+        FontMetrics metadataFm = tempG2d.getFontMetrics();
+
+        tempG2d.dispose();
+
+        int maxWidth = titleFm.stringWidth(metadata.title);
+
+        if (metadata.description != null && !metadata.description.isEmpty()) {
+            for (String line : metadata.description.split("\n")) {
+                maxWidth = Math.max(maxWidth, metadataFm.stringWidth(line));
+            }
+        }
+
+        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+            maxWidth = Math.max(maxWidth, metadataFm.stringWidth("Last Round: " + metadata.lastRound));
+        }
+
+        maxWidth = Math.max(maxWidth, metadataFm.stringWidth("Generated: " + TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss")));
+
+        return maxWidth;
+    }
+
     private static final Color GREEN_HIGHLIGHT = new Color(144, 238, 144);  // LightGreen for home hall
     
     /**
@@ -231,28 +272,32 @@ public class TableImageGenerator {
         
         // Calculate total table width including spacing
         int tableWidth = calculateTableWidth(actualColumnWidths, fm);
-        int imageWidth = Math.max(tableWidth + 40, 600); // Minimum 600px width, add margin
-        
+        // The canvas must be wide enough for the header text too, not just
+        // the table - otherwise a short table with a long title/description
+        // gets clipped, either off-canvas or by the crop below (A37).
+        int headerContentWidth = calculateHeaderContentWidth(metadata);
+        int imageWidth = Math.max(Math.max(tableWidth, headerContentWidth) + 40, 600);
+
         // Calculate dynamic header height based on metadata
         int headerOffset = calculateHeaderHeight(metadata);
         int totalRows = rows.size() + 1; // +1 for header
         int imageHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
-        
+
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = image.createGraphics();
-        
+
         // Enable anti-aliasing
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        
+
         // Fill background
         g2d.setColor(Color.WHITE);
         g2d.fillRect(0, 0, imageWidth, imageHeight);
-        
+
         // Draw header metadata if provided
         if (metadata != null) {
             drawHeaderMetadata(g2d, metadata, imageWidth);
         }
-        
+
         // Calculate table starting position (centered)
         int tableStartX = (imageWidth - tableWidth) / 2;
         int tableStartY = headerOffset + PADDING;
@@ -286,26 +331,31 @@ public class TableImageGenerator {
         }
         
         g2d.dispose();
-        
-        // Crop image to content bounds
-        int contentX = tableStartX;
+
+        // Crop image to content bounds - wide enough for the header text as
+        // well as the table, so a short table with a long title/description
+        // doesn't get its header clipped at both edges (A37).
+        int croppedContentWidth = Math.min(imageWidth, Math.max(tableWidth, headerContentWidth));
+        int contentX = (imageWidth - croppedContentWidth) / 2;
         int contentY = 0;  // Include header from top
-        int contentWidth = tableWidth;
+        int contentWidth = croppedContentWidth;
         int contentHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
         BufferedImage croppedImage = cropImage(image, contentX, contentY, contentWidth, contentHeight);
-        
+
         // Generate filename with convention: {command}_{name}_{date}_{time}.png
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
         String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
-        
-        // Save to temp file
-        Path tempFile = Paths.get(System.getProperty("java.io.tmpdir"), filename);
+
+        // Save to the shared, dedicated output directory (not the OS temp
+        // dir - nothing was ever cleaning that up, so images accumulated
+        // there indefinitely with no inspectable, intentional home).
+        Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
-        
+
         return tempFile;
     }
-    
+
     /**
      * Generates a table image for hall rankings with hall icons
      * @param headers Column headers
@@ -356,7 +406,11 @@ public class TableImageGenerator {
         
         // Calculate total table width including spacing and icon
         int tableWidth = calculateTableWidth(actualColumnWidths, fm) + ICON_SIZE;
-        int imageWidth = Math.max(tableWidth + 40, 600); // Minimum 600px width, add margin
+        // The canvas must be wide enough for the header text too, not just
+        // the table - otherwise a short table with a long title/description
+        // gets clipped, either off-canvas or by the crop below (A37).
+        int headerContentWidth = calculateHeaderContentWidth(metadata);
+        int imageWidth = Math.max(Math.max(tableWidth, headerContentWidth) + 40, 600);
         
         // Calculate dynamic header height based on metadata
         int headerOffset = calculateHeaderHeight(metadata);
@@ -418,21 +472,26 @@ public class TableImageGenerator {
         }
         
         g2d.dispose();
-        
-        // Crop image to content bounds
-        int contentX = tableStartX;
+
+        // Crop image to content bounds - wide enough for the header text as
+        // well as the table, so a short table with a long title/description
+        // doesn't get its header clipped at both edges (A37).
+        int croppedContentWidth = Math.min(imageWidth, Math.max(tableWidth, headerContentWidth));
+        int contentX = (imageWidth - croppedContentWidth) / 2;
         int contentY = 0;  // Include header from top
-        int contentWidth = tableWidth;
+        int contentWidth = croppedContentWidth;
         int contentHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
         BufferedImage croppedImage = cropImage(image, contentX, contentY, contentWidth, contentHeight);
-        
+
         // Generate filename with convention: {command}_{name}_{date}_{time}.png
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
         String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
         
-        // Save to temp file
-        Path tempFile = Paths.get(System.getProperty("java.io.tmpdir"), filename);
+        // Save to the shared, dedicated output directory (not the OS temp
+        // dir - nothing was ever cleaning that up, so images accumulated
+        // there indefinitely with no inspectable, intentional home).
+        Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
         
         return tempFile;
@@ -556,33 +615,19 @@ public class TableImageGenerator {
      * Loads a hall icon image from resources
      */
     private static BufferedImage loadHallIcon(String hallName) {
-        try {
-            // Load from resources using getResourceAsStream (JAR-compatible)
-            String iconPath = "/halls/" + hallName.toLowerCase() + ".png";
-            InputStream is = TableImageGenerator.class.getResourceAsStream(iconPath);
-            
-            if (is == null) {
-                // Try loading unknown.png as fallback
-                is = TableImageGenerator.class.getResourceAsStream("/halls/unknown.png");
-                if (is == null) {
-                    return null;
-                }
-            }
-            
-            BufferedImage original = ImageIO.read(is);
-            
-            // Resize to ICON_SIZE x ICON_SIZE
-            BufferedImage resized = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2d = resized.createGraphics();
-            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g2d.drawImage(original, 0, 0, ICON_SIZE, ICON_SIZE, null);
-            g2d.dispose();
-            
-            return resized;
-        } catch (IOException e) {
-            System.err.println("Failed to load hall icon for " + hallName + ": " + e.getMessage());
+        BufferedImage original = HallIconLoader.loadRawIcon(hallName);
+        if (original == null) {
             return null;
         }
+
+        // Resize to ICON_SIZE x ICON_SIZE
+        BufferedImage resized = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.drawImage(original, 0, 0, ICON_SIZE, ICON_SIZE, null);
+        g2d.dispose();
+
+        return resized;
     }
     
     /**
