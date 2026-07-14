@@ -684,13 +684,37 @@ public class CommandCompareHalls {
         return sb.toString();
     }
 
+    /**
+     * The TRUE latest round label across BOTH halls (max comparison), not
+     * just whichever hall happened to be passed as hall1 - a hall that
+     * stopped playing earlier must not freeze this label if the OTHER hall
+     * played on longer (the same drift {@link MatchScoreUtils#latestRoundLabel}
+     * was extracted to eliminate for the rank commands). Package-private so
+     * this can be unit-tested directly with hand-built HallData instances.
+     */
+    static String latestRoundLabelAcrossBothHalls(HallData hall1, HallData hall2) {
+        if (hall1.lastRoundOrder == null) return hall2.lastRoundLabel;
+        if (hall2.lastRoundOrder == null) return hall1.lastRoundLabel;
+        return hall1.lastRoundOrder >= hall2.lastRoundOrder ? hall1.lastRoundLabel : hall2.lastRoundLabel;
+    }
+
     private Path generateImage(HallData hall1, HallData hall2, List<A1_Rounds.Round> roundsToInclude, double winProbability) throws Exception {
-        String lastRoundLabel = hall1.lastRoundLabel != null ? hall1.lastRoundLabel : hall2.lastRoundLabel;
+        String lastRoundLabel = latestRoundLabelAcrossBothHalls(hall1, hall2);
         String description = String.format("%s vs %s", formatHallNameForImage(hall1.hallName), formatHallNameForImage(hall2.hallName));
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Hall Comparison", description, lastRoundLabel);
 
+        // hall2's own win probability is computed independently (not
+        // 100 - winProbability) - calculateWinningProbability only counts
+        // permutations hall1 STRICTLY wins, so an exact-tie permutation
+        // (possible whenever comparedBoards is even) counts toward neither
+        // hall; treating "100 - P(hall1 wins)" as "P(hall2 wins)" silently
+        // folded every tied permutation into hall2's side, so the two
+        // displayed percentages were not a symmetric, honest pair of
+        // measures (they need not sum to 100 - the gap is the tie chance).
+        double hall2WinProbability = calculateWinningProbability(hall2, hall1);
+
         List<ComparisonImageGenerator.Section> sections1 = buildSections(hall1, roundsToInclude, winProbability);
-        List<ComparisonImageGenerator.Section> sections2 = buildSections(hall2, roundsToInclude, 100.0 - winProbability);
+        List<ComparisonImageGenerator.Section> sections2 = buildSections(hall2, roundsToInclude, hall2WinProbability);
 
         ComparisonImageGenerator.ComparisonData data1 = new ComparisonImageGenerator.ComparisonData(hall1.hallName, hall1.hallName, sections1);
         ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(hall2.hallName, hall2.hallName, sections2);

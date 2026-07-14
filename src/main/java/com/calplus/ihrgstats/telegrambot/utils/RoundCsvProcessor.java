@@ -107,6 +107,19 @@ public class RoundCsvProcessor {
      * @return true on success, false on validation failure or user cancellation
      */
     public boolean processRound(String csvFilePath, int year, int roundOrder, String nowTimestamp) {
+        if (roundOrder < 1) {
+            // round_order is never 0 or negative for a real round (A1_Rounds
+            // starts numbering at 1) - without this guard, round_0.csv passes
+            // the "isReprocess = roundOrder <= latestRoundOrder" check below
+            // for ANY already-processed year, and since no round 0 actually
+            // exists, existingRound stays null and the interactive dialog
+            // wrongly claims round 0 "has already been processed". Continuing
+            // then calls deleteFutureRounds(year, 0), which deletes EVERY
+            // round of the year (round_order > 0 matches all of them).
+            notify("🔴", String.format("Invalid round number %d - round numbers must start at 1.", roundOrder));
+            return false;
+        }
+
         File csvFile = new File(csvFilePath);
         if (!csvFile.exists()) {
             notify("🔴", String.format("round_%d.csv file not found at: %s", roundOrder, csvFilePath));

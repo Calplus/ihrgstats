@@ -30,10 +30,10 @@ public final class MessageChunker {
     /**
      * Splits {@code message} into one or more chunks, each guaranteed to
      * have a post-conversion length within {@link #TELEGRAM_MESSAGE_LIMIT}
-     * (and to be non-empty). Prefers splitting along a single ``` -fenced
-     * block's lines (preserving the surrounding prefix/suffix text as their
-     * own chunks) when present; otherwise falls back to a plain, safely-sized
-     * split. Returns an empty list for a null/empty input.
+     * (and to be non-empty). Prefers splitting along each ``` -fenced
+     * block's lines (preserving the surrounding/interleaved plain-text
+     * segments as their own chunks) when present; otherwise falls back to a
+     * plain, safely-sized split. Returns an empty list for a null/empty input.
      */
     public static List<String> splitForTelegram(String message) {
         List<String> chunks = new ArrayList<>();
@@ -47,52 +47,72 @@ public final class MessageChunker {
             return chunks;
         }
 
-        int codeBlockStart = message.indexOf("```");
-        int codeBlockEnd = message.lastIndexOf("```");
-
-        if (codeBlockStart >= 0 && codeBlockEnd > codeBlockStart) {
-            String prefix = message.substring(0, codeBlockStart).trim();
-            String codeContent = message.substring(codeBlockStart + 3, codeBlockEnd);
-            String suffix = message.substring(codeBlockEnd + 3).trim();
-
-            addSafely(chunks, prefix, PLAIN);
-
-            String[] lines = codeContent.split("\n");
-            StringBuilder currentChunk = new StringBuilder("```\n");
-            for (String line : lines) {
-                // Would closing the chunk right now (with this line included)
-                // exceed the real limit once converted? Check before
-                // appending, so every emitted chunk is already safe.
-                String candidateClosed = currentChunk + line + "\n```";
-                if (currentChunk.length() > "```\n".length()
-                        && TelegramHtml.prepareForSending(candidateClosed).length() > TELEGRAM_MESSAGE_LIMIT) {
-                    currentChunk.append("```");
-                    chunks.add(currentChunk.toString());
-                    currentChunk = new StringBuilder("```\n");
-                }
-
-                // A single line can be long enough to exceed the limit even
-                // entirely on its own (fenced by itself, nothing else in the
-                // chunk) - split the line itself in that case, bypassing
-                // currentChunk entirely for it, rather than letting an
-                // over-limit chunk ride along unsplit.
-                if (TelegramHtml.prepareForSending(FENCED.apply(line)).length() > TELEGRAM_MESSAGE_LIMIT) {
-                    addSafely(chunks, line, FENCED);
-                } else {
-                    currentChunk.append(line).append("\n");
-                }
-            }
-            if (currentChunk.length() > "```\n".length()) {
-                currentChunk.append("```");
-                chunks.add(currentChunk.toString());
-            }
-
-            addSafely(chunks, suffix, PLAIN);
-        } else {
-            addSafely(chunks, message, PLAIN);
+        // Walk every ```...``` fence pair in the message, not just "first ```
+        // to last ```" - the latter treated everything between a 2nd fence
+        // pair and beyond (including the plain text between them, and their
+        // own ``` markers) as one giant, wrongly-delimited code block.
+        List<int[]> fenceRanges = new ArrayList<>(); // [start, end) index pairs, pointing at each ``` marker itself
+        int searchFrom = 0;
+        while (true) {
+            int start = message.indexOf("```", searchFrom);
+            if (start < 0) break;
+            int end = message.indexOf("```", start + 3);
+            if (end < 0) break; // unterminated trailing fence - leave it as plain text below
+            fenceRanges.add(new int[]{start, end});
+            searchFrom = end + 3;
         }
 
+        if (fenceRanges.isEmpty()) {
+            addSafely(chunks, message, PLAIN);
+            return chunks;
+        }
+
+        int cursor = 0;
+        for (int[] range : fenceRanges) {
+            addSafely(chunks, message.substring(cursor, range[0]).trim(), PLAIN);
+            addFencedContent(chunks, message.substring(range[0] + 3, range[1]));
+            cursor = range[1] + 3;
+        }
+        addSafely(chunks, message.substring(cursor).trim(), PLAIN);
+
         return chunks;
+    }
+
+    /**
+     * Splits one ```-fenced block's content into one or more safely-sized
+     * fenced chunks, line by line (extracted from {@link #splitForTelegram}
+     * so it applies identically to every fence pair found, not just one).
+     */
+    private static void addFencedContent(List<String> chunks, String codeContent) {
+        String[] lines = codeContent.split("\n");
+        StringBuilder currentChunk = new StringBuilder("```\n");
+        for (String line : lines) {
+            // Would closing the chunk right now (with this line included)
+            // exceed the real limit once converted? Check before
+            // appending, so every emitted chunk is already safe.
+            String candidateClosed = currentChunk + line + "\n```";
+            if (currentChunk.length() > "```\n".length()
+                    && TelegramHtml.prepareForSending(candidateClosed).length() > TELEGRAM_MESSAGE_LIMIT) {
+                currentChunk.append("```");
+                chunks.add(currentChunk.toString());
+                currentChunk = new StringBuilder("```\n");
+            }
+
+            // A single line can be long enough to exceed the limit even
+            // entirely on its own (fenced by itself, nothing else in the
+            // chunk) - split the line itself in that case, bypassing
+            // currentChunk entirely for it, rather than letting an
+            // over-limit chunk ride along unsplit.
+            if (TelegramHtml.prepareForSending(FENCED.apply(line)).length() > TELEGRAM_MESSAGE_LIMIT) {
+                addSafely(chunks, line, FENCED);
+            } else {
+                currentChunk.append(line).append("\n");
+            }
+        }
+        if (currentChunk.length() > "```\n".length()) {
+            currentChunk.append("```");
+            chunks.add(currentChunk.toString());
+        }
     }
 
     /**

@@ -142,6 +142,38 @@ public class PlayerIdentityResolverPipelineTest {
                 "The long-dormant candidate must not win over the more recently active one");
     }
 
+    // --- Fuzzy-match "same person" resolution must be held to the same
+    // this-year hall-mismatch guard the exact-name path already enforces ---
+
+    @Test
+    void fuzzyMatch_sameYearHallMismatch_isRejected_insteadOfSilentlyUsingTheNewHall(@TempDir Path csvDir) throws Exception {
+        // Round 1: "Player Xanthe" registers and plays in hall 1 this year.
+        Path round1 = writeRoundCsv(csvDir, "r1.csv", "Player Xanthe,1,10,Opponent A,2,5\n");
+        RoundCsvProcessor processor1 = new RoundCsvProcessor();
+        processor1.setMultiChoiceCallback((message, options) -> 0);
+        assertTrue(processor1.processRound(round1.toString(), 2026, 1, NOW), "Round 1 should process");
+
+        // Round 2, SAME year: a near-typo of "Player Xanthe" appears under a
+        // DIFFERENT hall. Answer "Treat as same person" for the fuzzy
+        // dialog - before the fix, this silently resolved under hall 3 with
+        // no error, even though the exact-name path would hard-error on this
+        // exact scenario (a this-year hall change is a data-entry error,
+        // never user-resolvable).
+        Path round2 = writeRoundCsv(csvDir, "r2.csv", "Player Xanth,3,5,Opponent B,2,10\n");
+        RoundCsvProcessor processor2 = new RoundCsvProcessor();
+        processor2.setMultiChoiceCallback((message, options) -> {
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].startsWith("Treat as same person")) {
+                    return i;
+                }
+            }
+            return 0;
+        });
+        boolean result = processor2.processRound(round2.toString(), 2026, 2, NOW);
+
+        assertFalse(result, "A fuzzy-matched same-year hall change must be rejected, just like an exact-name match would be");
+    }
+
     // --- A18: a fuzzy-match dialog timeout/rejection (-1) must cancel, not silently create a new player ---
 
     @Test
@@ -168,9 +200,14 @@ public class PlayerIdentityResolverPipelineTest {
     @Test
     void duplicatePlayerAcrossTwoRows_inSameRound_isRejected(@TempDir Path csvDir) throws Exception {
         // "Same Guy" appears as player1 in both rows of the same round.
+        // The two opponents deliberately do NOT resemble each other (unlike
+        // "Opponent A"/"Opponent B", which are Levenshtein distance 1 apart
+        // and would otherwise fuzzy-match each other and trigger the
+        // this-year hall-mismatch guard first, masking the duplicate-player
+        // check this test actually exercises).
         Path csv = writeRoundCsv(csvDir, "r1.csv",
-                "Same Guy,1,10,Opponent A,2,5\n" +
-                "Same Guy,1,3,Opponent B,3,10\n");
+                "Same Guy,1,10,Opponent Alpha,2,5\n" +
+                "Same Guy,1,3,Third Player,3,10\n");
         RoundCsvProcessor processor = new RoundCsvProcessor();
         processor.setMultiChoiceCallback((message, options) -> 0);
 

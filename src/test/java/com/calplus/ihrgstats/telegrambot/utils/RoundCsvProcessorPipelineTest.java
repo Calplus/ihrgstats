@@ -270,4 +270,30 @@ public class RoundCsvProcessorPipelineTest {
         assertNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 1),
                 "A cancelled first-time upload must not leave a round row behind (A24)");
     }
+
+    @Test
+    void roundZero_isRejected_insteadOfWipingTheWholeYear(@TempDir Path csvDir) throws Exception {
+        // Regression test: round_order is never 0 or negative for a real
+        // round (A1_Rounds numbers rounds starting at 1). Without an
+        // explicit guard, round_order=0 satisfies "isReprocess = 0 <=
+        // latestRoundOrder" for ANY year that already has round 1+
+        // processed, even though round 0 never existed - existingRound
+        // stays null, a bogus round 0 gets created, and
+        // deleteFutureRounds(year, 0) deletes EVERY already-processed round
+        // of the year (round_order > 0 matches all of them).
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Aurelia Nightshade,1,8,Bartholomew Krieger,2,2\n");
+        assertTrue(newProcessor().processRound(r1.toString(), YEAR, 1, NOW), "Round 1 should process successfully");
+
+        Path r2 = writeRoundCsv(csvDir, "r2.csv", "Aurelia Nightshade,1,7,Bartholomew Krieger,2,3\n");
+        assertTrue(newProcessor().processRound(r2.toString(), YEAR, 2, NOW), "Round 2 should process successfully");
+
+        Path r0 = writeRoundCsv(csvDir, "r0.csv", "Someone,1,10,Someone Else,2,5\n");
+        boolean result = newProcessor().processRound(r0.toString(), YEAR, 0, NOW);
+
+        assertFalse(result, "Round 0 must be rejected outright, not treated as an already-processed round to reprocess");
+        assertEquals(2, new A1_Rounds().getRoundsForYear(YEAR).size(),
+                "Rounds 1 and 2 must both still exist - a rejected round_0.csv must not delete any real round");
+        assertNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 0),
+                "No round 0 row should have been created");
+    }
 }

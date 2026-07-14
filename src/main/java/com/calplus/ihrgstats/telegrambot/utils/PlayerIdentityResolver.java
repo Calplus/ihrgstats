@@ -136,8 +136,26 @@ public class PlayerIdentityResolver {
                     return new ResolutionResult(null, hall.id, true);
                 }
                 if (fuzzy.playerId != null) {
+                    // The exact-name loop above hard-errors when a candidate
+                    // already has a THIS-YEAR status row under a different
+                    // hall (a same-season hall change is almost always a data
+                    // entry error, never user-resolvable). A fuzzy "treat as
+                    // same person" match must be held to the same guard -
+                    // without it, a typo'd name for a player already active
+                    // this year in another hall silently resolved under the
+                    // CSV row's hall instead, corrupting that player's
+                    // this-year hall/stats.
+                    B6_PlayerYearStatus.Status thisYearStatus = playerYearStatus.getStatus(fuzzy.playerId, year);
+                    if (thisYearStatus != null && thisYearStatus.hallId != hall.id) {
+                        A3_Halls.Hall existingHall = halls.getHallById(thisYearStatus.hallId);
+                        throw new HallMismatchException(String.format(
+                            "Active player hall mismatch: '%s' is already registered in hall '%s' for %d, " +
+                            "but this row lists hall '%s'. Active players should not have hall changes within the " +
+                            "same year - this is likely a data entry error and must be fixed manually.",
+                            name, existingHall != null ? existingHall.hallName : "?", year, hall.hallName));
+                    }
                     resolvedPlayerId = fuzzy.playerId;
-                    resolvedHallId = hall.id;
+                    resolvedHallId = thisYearStatus != null ? thisYearStatus.hallId : hall.id;
                 }
             }
         }
@@ -154,9 +172,21 @@ public class PlayerIdentityResolver {
         // Ensure a player_year_status row exists for this year (only created once, on first
         // observation this year - never bridges across a year boundary automatically).
         if (playerYearStatus.getStatus(resolvedPlayerId, year) == null) {
-            boolean capped = !cappedImports.findByYearAndName(year, name).isEmpty();
+            List<B7_CappedImports.ImportRow> cappedRows = cappedImports.findByYearAndName(year, name);
+            // A row counts toward THIS player only if it's still unclaimed,
+            // or already claimed by this exact player_id - a row already
+            // mapped to a DIFFERENT player_id (a distinct, same-named person
+            // - B5_PlayerNames' own javadoc calls this a legitimate case)
+            // must not also flag this player as capped.
+            boolean capped = false;
+            for (B7_CappedImports.ImportRow row : cappedRows) {
+                if (!row.mapped || resolvedPlayerId.equals(row.playerId)) {
+                    capped = true;
+                    break;
+                }
+            }
             playerYearStatus.upsertStatus(resolvedPlayerId, year, resolvedHallId, capped, true, nowTimestamp);
-            for (B7_CappedImports.ImportRow row : cappedImports.findByYearAndName(year, name)) {
+            for (B7_CappedImports.ImportRow row : cappedRows) {
                 if (!row.mapped) {
                     cappedImports.markMapped(row.id, resolvedPlayerId, nowTimestamp);
                 }

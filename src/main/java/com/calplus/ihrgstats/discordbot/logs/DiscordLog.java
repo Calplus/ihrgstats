@@ -9,6 +9,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -322,6 +324,61 @@ public class DiscordLog {
     }
 
     /**
+     * Queues {@code content}, splitting it into multiple queued messages
+     * first if it exceeds Discord's character limit. The accumulated INFO
+     * batch (unbounded - see {@link #logInfo}) gets prepended to every
+     * terminal (SUCCESS/ERROR/WARNING) message via
+     * {@link #combineInfoBatchWithMessage}, so the combined text can exceed
+     * the (much smaller, 2000-char) Discord limit even when neither piece
+     * alone would - sending it through {@link #queueMessage} directly got a
+     * failed response from Discord and silently dropped the whole message
+     * (including the terminal log it was meant to decorate). Reuses the
+     * same char-limit/newline-preferring split {@link #flushBatchInternal}
+     * already applies to the separate batch buffer.
+     * @return CompletableFuture that resolves to true only if every chunk sent successfully
+     */
+    private CompletableFuture<Boolean> queueMessageSplit(String content) {
+        List<String> chunks = splitForLimit(content, DISCORD_CHARACTER_LIMIT);
+        CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
+        for (String chunk : chunks) {
+            CompletableFuture<Boolean> chunkResult = queueMessage(chunk);
+            result = result.thenCombine(chunkResult, (a, b) -> a && b);
+        }
+        return result;
+    }
+
+    /**
+     * Splits {@code content} into chunks each within {@code limit} characters,
+     * preferring to break at the last newline before the limit when one
+     * exists (so a chunk doesn't cut a line in half). Returns a single
+     * one-element list unchanged if {@code content} is already within limit.
+     * Package-private for testing.
+     */
+    static List<String> splitForLimit(String content, int limit) {
+        List<String> chunks = new ArrayList<>();
+        if (content.length() <= limit) {
+            chunks.add(content);
+            return chunks;
+        }
+        int start = 0;
+        while (start < content.length()) {
+            int end = Math.min(start + limit, content.length());
+            if (end < content.length()) {
+                int lastNewline = content.lastIndexOf('\n', end);
+                if (lastNewline > start) {
+                    end = lastNewline;
+                }
+            }
+            chunks.add(content.substring(start, end));
+            start = end;
+            if (start < content.length() && content.charAt(start) == '\n') {
+                start++; // Skip the newline we broke at
+            }
+        }
+        return chunks;
+    }
+
+    /**
      * Sends a log message with timestamp to the Discord channel
      * @param message The log message to send
      * @return CompletableFuture that resolves to true if successful, false otherwise
@@ -355,7 +412,7 @@ public class DiscordLog {
         // both correctly prepend it via combineInfoBatchWithMessage below.
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
 
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -371,7 +428,7 @@ public class DiscordLog {
         // Combine accumulated INFO messages with success message
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
         
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -387,7 +444,7 @@ public class DiscordLog {
         // Combine accumulated INFO messages with warning message
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
         
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -529,35 +586,11 @@ public class DiscordLog {
         String batchContent = batchBuffer.toString();
         batchBuffer.setLength(0);
         batchStartTime = 0;
-        
-        // Split message if it exceeds Discord's character limit
-        if (batchContent.length() <= DISCORD_CHARACTER_LIMIT) {
-            return queueMessage(batchContent);
-        } else {
-            // Split into multiple messages
-            CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
-            int start = 0;
-            while (start < batchContent.length()) {
-                int end = Math.min(start + DISCORD_CHARACTER_LIMIT, batchContent.length());
-                
-                // Try to break at newline if possible
-                if (end < batchContent.length()) {
-                    int lastNewline = batchContent.lastIndexOf('\n', end);
-                    if (lastNewline > start) {
-                        end = lastNewline;
-                    }
-                }
-                
-                String chunk = batchContent.substring(start, end);
-                CompletableFuture<Boolean> chunkResult = queueMessage(chunk);
-                result = result.thenCombine(chunkResult, (a, b) -> a && b);
-                start = end;
-                if (start < batchContent.length() && batchContent.charAt(start) == '\n') {
-                    start++; // Skip the newline we broke at
-                }
-            }
-            return result;
-        }
+
+        // Split message if it exceeds Discord's character limit - shares the
+        // same split helper queueMessageSplit uses for combined
+        // INFO+terminal messages, so this logic only lives in one place.
+        return queueMessageSplit(batchContent);
     }
 
     /**

@@ -90,4 +90,35 @@ public class CappedListProcessorTest {
         assertFalse(playerYearStatus.getStatus(playerId, YEAR).capped,
                 "Player removed from the corrected list must be un-capped, not left capped forever");
     }
+
+    @Test
+    void processCappedList_twoSameNamedPlayers_capsOnlyTheHallMatchingOne(@TempDir Path csvDir) throws Exception {
+        // Regression test: two DISTINCT players sharing an exact name (a real
+        // case per B5_PlayerNames' own javadoc), each already active this
+        // year in a different hall. Before the fix, the capped-list match
+        // always took the first candidate found (an arbitrary/most-recently-
+        // active pick), capping the wrong player whenever the entry's own
+        // hall column could have disambiguated them correctly.
+        B4_Players players = new B4_Players();
+        B5_PlayerNames playerNames = new B5_PlayerNames();
+        B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
+        A3_Halls halls = new A3_Halls();
+
+        String playerIdHall4 = players.generateNewPlayerId(halls.getHallByName("4").hallCode, NOW);
+        playerNames.addOrUpdateName(playerIdHall4, "Same Name", YEAR, NOW);
+        playerYearStatus.upsertStatus(playerIdHall4, YEAR, halls.getHallByName("4").id, false, true, NOW);
+
+        String playerIdHall5 = players.generateNewPlayerId(halls.getHallByName("5").hallCode, NOW);
+        playerNames.addOrUpdateName(playerIdHall5, "Same Name", YEAR, NOW);
+        playerYearStatus.upsertStatus(playerIdHall5, YEAR, halls.getHallByName("5").id, false, true, NOW);
+
+        CappedListProcessor processor = new CappedListProcessor();
+        Path csv = writeCsv(csvDir, "cappedlist.csv", "Same Name,5\n");
+        assertTrue(processor.processCappedList(csv.toString(), YEAR, NOW));
+
+        assertTrue(playerYearStatus.getStatus(playerIdHall5, YEAR).capped,
+                "The hall-5 player, matching the capped list's stated hall, should be capped");
+        assertFalse(playerYearStatus.getStatus(playerIdHall4, YEAR).capped,
+                "The hall-4 player must NOT be capped just because they share a name with the hall-5 player");
+    }
 }

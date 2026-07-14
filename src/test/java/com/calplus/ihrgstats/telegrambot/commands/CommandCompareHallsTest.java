@@ -184,4 +184,58 @@ public class CommandCompareHallsTest {
         assertEquals(50.0, winProbability, 0.001,
                 "Counting a tied board as half-credit should give hall 1 a real win chance, not the old code's flat 0%");
     }
+
+    // --- "Last Round" label must reflect the true latest round across BOTH halls ---
+
+    @Test
+    void latestRoundLabel_picksTheHallThatPlayedLonger_regardlessOfArgumentOrder() {
+        // Hall 1 stopped at round 3; hall 2 played on to round 5. The label
+        // must reflect round 5 - the true latest round overall - not just
+        // whichever hall happened to be passed as the first argument.
+        CommandCompareHalls.HallData hall1 = hallOf(1000);
+        hall1.lastRoundOrder = 3;
+        hall1.lastRoundLabel = "Round 3";
+
+        CommandCompareHalls.HallData hall2 = hallOf(1000);
+        hall2.lastRoundOrder = 5;
+        hall2.lastRoundLabel = "Round 5";
+
+        assertEquals("Round 5", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hall1, hall2),
+                "Hall 2 played later - its round must be shown, not hall 1's earlier one");
+        assertEquals("Round 5", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hall2, hall1),
+                "The result must not depend on which hall is passed first");
+    }
+
+    @Test
+    void winProbability_hall2SideIsComputedIndependently_notAsOneHundredMinusHall1() {
+        // Every board is an exact tie (identical elos) - NO permutation
+        // gives either hall a strict win, so both halls' OWN win
+        // probability must independently be 0%. The old code instead
+        // rendered hall2's displayed percentage as "100 - hall1's 0%" =
+        // 100%, falsely showing hall2 as a certain winner in a dead-even
+        // tie scenario, because it silently folded every drawn permutation
+        // into hall2's side instead of computing hall2's chance on its own.
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        CommandCompareHalls.HallData hall1 = hallOf(1000, 1000);
+        CommandCompareHalls.HallData hall2 = hallOf(1000, 1000);
+
+        double hall1WinProbability = compareHalls.calculateWinningProbability(hall1, hall2);
+        double hall2WinProbability = compareHalls.calculateWinningProbability(hall2, hall1);
+
+        assertEquals(0.0, hall1WinProbability, 0.001, "An all-tied roster gives hall 1 no strict wins");
+        assertEquals(0.0, hall2WinProbability, 0.001,
+                "Hall 2's own win chance must independently be 0% too - not 100% from '100 - hall1's 0%'");
+    }
+
+    @Test
+    void latestRoundLabel_fallsBackToTheOtherHall_whenOneHasNoData() {
+        CommandCompareHalls.HallData hallWithData = hallOf(1000);
+        hallWithData.lastRoundOrder = 4;
+        hallWithData.lastRoundLabel = "Round 4";
+
+        CommandCompareHalls.HallData hallWithoutData = hallOf(); // no rounds played - lastRoundOrder stays null
+
+        assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithData, hallWithoutData));
+        assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithoutData, hallWithData));
+    }
 }

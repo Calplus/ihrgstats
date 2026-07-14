@@ -155,4 +155,44 @@ public class MessageChunkerTest {
         String rejoined = String.join("", chunks).replace("```", "").replace("\n", "");
         assertTrue(rejoined.contains("x".repeat(100)), "The oversized line's content must not be lost, just split");
     }
+
+    @Test
+    void twoSeparateFencedBlocks_areEachTreatedAsTheirOwnCodeBlock_notMergedIntoOne() {
+        // Regression test: splitting used to find only the FIRST and LAST
+        // ``` markers in the whole message and treat everything between
+        // them as one combined code block - swallowing the prose between
+        // two separate fenced blocks (and the inner ``` markers themselves)
+        // into what should have stayed a plain-text chunk.
+        StringBuilder firstBlock = new StringBuilder();
+        for (int i = 0; i < 150; i++) {
+            firstBlock.append("First block row ").append(i).append(" padding text\n");
+        }
+        StringBuilder secondBlock = new StringBuilder();
+        for (int i = 0; i < 150; i++) {
+            secondBlock.append("Second block row ").append(i).append(" padding text\n");
+        }
+        String message = "Intro text\n```\n" + firstBlock + "```\n"
+                + "MIDDLE_PROSE_MARKER should stay plain text, not be swallowed as code\n"
+                + "```\n" + secondBlock + "```\nOutro text";
+
+        List<String> chunks = MessageChunker.splitForTelegram(message);
+
+        assertTrue(chunks.size() > 1, "This message is large enough that it must actually be split");
+
+        boolean middleProseIsPlain = chunks.stream()
+                .anyMatch(chunk -> chunk.contains("MIDDLE_PROSE_MARKER") && !chunk.startsWith("```"));
+        assertTrue(middleProseIsPlain,
+                "The prose between two separate fenced blocks must remain its own plain-text chunk, "
+                        + "not be swallowed into a merged code block: " + chunks);
+
+        assertTrue(chunks.stream().anyMatch(c -> c.startsWith("```") && c.contains("First block row 0")),
+                "The first fenced block's content must still be present and fenced");
+        assertTrue(chunks.stream().anyMatch(c -> c.startsWith("```") && c.contains("Second block row 0")),
+                "The second fenced block's content must still be present and fenced");
+
+        for (String chunk : chunks) {
+            assertFalse(chunk.isEmpty());
+            assertTrue(TelegramHtml.prepareForSending(chunk).length() <= MessageChunker.TELEGRAM_MESSAGE_LIMIT);
+        }
+    }
 }

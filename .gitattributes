@@ -1,2 +1,22 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Explicit binary declarations for the asset types actually bundled/tracked
+# in this repo (fonts, hall/outcome icons, screenshots, sample exports) -
+# not strictly required (Git's own content-sniffing already classifies these
+# correctly today), but pins that classification instead of depending on the
+# heuristic succeeding, and documents intent for anyone editing this file.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ttf binary
+*.xlsx binary
+*.db binary
+
+# Shell scripts must always check out with LF, even on a Windows client with
+# core.autocrlf=true - a CRLF line ending in a script's shebang/body breaks
+# execution under bash/WSL/CI ("bad interpreter" / "$'\r': command not
+# found"). No .sh files are tracked today, but this is cheap insurance
+# against that classic Windows-Git gotcha if one ever is.
+*.sh text eol=lf

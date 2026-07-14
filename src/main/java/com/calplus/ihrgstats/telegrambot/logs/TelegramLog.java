@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.logs;
 
+import com.calplus.ihrgstats.utils.TelegramHtml;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
 import java.io.IOException;
@@ -11,6 +12,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -166,9 +169,18 @@ public class TelegramLog {
      * @param filename The calling file
      * @return Formatted message
      */
-    private String formatMessage(String emote, String type, String message, String filename) {
+    String formatMessage(String emote, String type, String message, String filename) {
         String timestamp = getTimestamp();
-        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, filename, type, message);
+        // message/filename are escaped here, before entering the batch/info
+        // buffers - every send in this class uses parse_mode=HTML, but
+        // exception text and file paths are arbitrary content that can
+        // contain "&"/"<"/">" (e.g. a SQL error, a stack trace fragment). An
+        // unescaped one breaks Telegram's HTML parser and the whole message
+        // silently fails to send (no fallback retry exists in this class).
+        // Escaping here (not at send time) also means every length check
+        // downstream (batch char-limit splitting) already measures the real
+        // wire-format text, so there's no separate raw-vs-escaped mismatch.
+        return String.format("%s [%s] [%s] %s: %s", emote, timestamp, TelegramHtml.escape(filename), type, TelegramHtml.escape(message));
     }
 
     /**
@@ -327,6 +339,60 @@ public class TelegramLog {
     }
 
     /**
+     * Queues {@code content}, splitting it into multiple queued messages
+     * first if it exceeds Telegram's character limit. The accumulated INFO
+     * batch (unbounded - see {@link #logInfo}) gets prepended to every
+     * terminal (SUCCESS/ERROR/WARNING) message via
+     * {@link #combineInfoBatchWithMessage}, so the combined text can exceed
+     * the limit even when neither piece alone would - sending it through
+     * {@link #queueMessage} directly got a 400 from Telegram and silently
+     * dropped the whole message (including the terminal log it was meant to
+     * decorate). Reuses the same char-limit/newline-preferring split
+     * {@link #flushBatchInternal} already applies to the separate batch buffer.
+     * @return CompletableFuture that resolves to true only if every chunk sent successfully
+     */
+    private CompletableFuture<Boolean> queueMessageSplit(String content) {
+        List<String> chunks = splitForLimit(content, TELEGRAM_CHARACTER_LIMIT);
+        CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
+        for (String chunk : chunks) {
+            CompletableFuture<Boolean> chunkResult = queueMessage(chunk);
+            result = result.thenCombine(chunkResult, (a, b) -> a && b);
+        }
+        return result;
+    }
+
+    /**
+     * Splits {@code content} into chunks each within {@code limit} characters,
+     * preferring to break at the last newline before the limit when one
+     * exists (so a chunk doesn't cut a line in half). Returns a single
+     * one-element list unchanged if {@code content} is already within limit.
+     * Package-private for testing.
+     */
+    static List<String> splitForLimit(String content, int limit) {
+        List<String> chunks = new ArrayList<>();
+        if (content.length() <= limit) {
+            chunks.add(content);
+            return chunks;
+        }
+        int start = 0;
+        while (start < content.length()) {
+            int end = Math.min(start + limit, content.length());
+            if (end < content.length()) {
+                int lastNewline = content.lastIndexOf('\n', end);
+                if (lastNewline > start) {
+                    end = lastNewline;
+                }
+            }
+            chunks.add(content.substring(start, end));
+            start = end;
+            if (start < content.length() && content.charAt(start) == '\n') {
+                start++; // Skip the newline we broke at
+            }
+        }
+        return chunks;
+    }
+
+    /**
      * Sends a log message with timestamp to the Telegram chat
      * @param message The log message to send
      * @return CompletableFuture that resolves to true if successful, false otherwise
@@ -366,7 +432,7 @@ public class TelegramLog {
         // both correctly prepend it via combineInfoBatchWithMessage below.
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
 
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -382,7 +448,7 @@ public class TelegramLog {
         // Combine accumulated INFO messages with success message
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
         
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -398,7 +464,7 @@ public class TelegramLog {
         // Combine accumulated INFO messages with warning message
         String combinedMessage = combineInfoBatchWithMessage(formattedMessage);
         
-        return queueMessage(combinedMessage);
+        return queueMessageSplit(combinedMessage);
     }
 
     /**
@@ -522,35 +588,11 @@ public class TelegramLog {
         String batchContent = batchBuffer.toString();
         batchBuffer.setLength(0);
         batchStartTime = 0;
-        
-        // Split message if it exceeds Telegram's character limit
-        if (batchContent.length() <= TELEGRAM_CHARACTER_LIMIT) {
-            return queueMessage(batchContent);
-        } else {
-            // Split into multiple messages
-            CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
-            int start = 0;
-            while (start < batchContent.length()) {
-                int end = Math.min(start + TELEGRAM_CHARACTER_LIMIT, batchContent.length());
-                
-                // Try to break at newline if possible
-                if (end < batchContent.length()) {
-                    int lastNewline = batchContent.lastIndexOf('\n', end);
-                    if (lastNewline > start) {
-                        end = lastNewline;
-                    }
-                }
-                
-                String chunk = batchContent.substring(start, end);
-                CompletableFuture<Boolean> chunkResult = queueMessage(chunk);
-                result = result.thenCombine(chunkResult, (a, b) -> a && b);
-                start = end;
-                if (start < batchContent.length() && batchContent.charAt(start) == '\n') {
-                    start++; // Skip the newline we broke at
-                }
-            }
-            return result;
-        }
+
+        // Split message if it exceeds Telegram's character limit - shares
+        // the same split helper queueMessageSplit uses for combined
+        // INFO+terminal messages, so this logic only lives in one place.
+        return queueMessageSplit(batchContent);
     }
 
     /**

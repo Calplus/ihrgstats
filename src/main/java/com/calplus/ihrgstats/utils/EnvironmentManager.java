@@ -126,7 +126,7 @@ public class EnvironmentManager {
                     String key = line.substring(0, equalsIndex).trim();
                     
                     if (newValues.containsKey(key)) {
-                        updatedLines.add(key + "=" + newValues.get(key));
+                        updatedLines.add(formatPropertyLine(key, newValues.get(key)));
                         processedKeys.add(key);
                     } else {
                         updatedLines.add(line);
@@ -139,7 +139,7 @@ public class EnvironmentManager {
             // Add new keys that weren't in the original file
             for (Map.Entry<String, String> entry : newValues.entrySet()) {
                 if (!processedKeys.contains(entry.getKey())) {
-                    updatedLines.add(entry.getKey() + "=" + entry.getValue());
+                    updatedLines.add(formatPropertyLine(entry.getKey(), entry.getValue()));
                 }
             }
 
@@ -151,6 +151,37 @@ public class EnvironmentManager {
             System.err.println("Error saving environment file: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Formats a single "key=value" line the same way {@link Properties#store}
+     * would - escaping backslashes and other Properties-special characters
+     * in the value. This file is hand-written line-by-line (not via
+     * Properties.store()) specifically to preserve comments/formatting on
+     * update, but that means a value written as a raw, unescaped literal
+     * (e.g. a Windows path containing backslashes) would round-trip
+     * correctly through Files.write() yet come back mangled the next time
+     * {@link #loadEnvironmentFile()} parses it via Properties.load(), which
+     * treats a bare "\" as an escape character. Delegating just the
+     * escaping to a throwaway Properties/StringWriter guarantees the exact
+     * same escaping rules the loader expects, without reimplementing them
+     * by hand or giving up the comment-preserving line-by-line rewrite.
+     */
+    private static String formatPropertyLine(String key, String value) {
+        try {
+            Properties temp = new Properties();
+            temp.setProperty(key, value);
+            java.io.StringWriter sw = new java.io.StringWriter();
+            temp.store(sw, null);
+            for (String line : sw.toString().split("\\r?\\n")) {
+                if (!line.isEmpty() && !line.startsWith("#")) {
+                    return line;
+                }
+            }
+        } catch (IOException e) {
+            // StringWriter never actually throws - fall through to the raw form below.
+        }
+        return key + "=" + value;
     }
 
     /**

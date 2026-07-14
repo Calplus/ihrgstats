@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.utils;
 
+import com.calplus.ihrgstats.databasemanager.A3_Halls;
 import com.calplus.ihrgstats.databasemanager.B5_PlayerNames;
 import com.calplus.ihrgstats.databasemanager.B6_PlayerYearStatus;
 import com.calplus.ihrgstats.databasemanager.B7_CappedImports;
@@ -32,6 +33,7 @@ public class CappedListProcessor {
     private final B5_PlayerNames playerNames = new B5_PlayerNames();
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
     private final B7_CappedImports cappedImports = new B7_CappedImports();
+    private final A3_Halls halls = new A3_Halls();
 
     private UploadChatMessageCallback uploadChatCallback;
 
@@ -82,14 +84,34 @@ public class CappedListProcessor {
                 int importId = cappedImports.insertImportRow(year, entry.name, entry.prevHall, nowTimestamp);
 
                 List<B5_PlayerNames.NameRecord> candidates = playerNames.findCandidatesByExactName(entry.name);
+                A3_Halls.Hall entryHall = halls.getHallByName(entry.prevHall);
+
+                String matchedPlayerId = null;
+                B6_PlayerYearStatus.Status matchedStatus = null;
                 for (B5_PlayerNames.NameRecord candidate : candidates) {
                     B6_PlayerYearStatus.Status status = playerYearStatus.getStatus(candidate.playerId, year);
-                    if (status != null) {
-                        playerYearStatus.setCapped(candidate.playerId, year, true, nowTimestamp);
-                        cappedImports.markMapped(importId, candidate.playerId, nowTimestamp);
-                        mappedCount++;
+                    if (status == null) continue;
+                    // When two distinct players share this exact name (a real
+                    // case per B5_PlayerNames' own javadoc) and are BOTH
+                    // already active this year, prefer whichever one's
+                    // current hall matches this entry's stated hall instead
+                    // of always capping whichever was most recently active -
+                    // that previously capped the wrong player whenever their
+                    // halls actually disambiguate them.
+                    if (entryHall != null && status.hallId == entryHall.id) {
+                        matchedPlayerId = candidate.playerId;
+                        matchedStatus = status;
                         break;
                     }
+                    if (matchedStatus == null) {
+                        matchedPlayerId = candidate.playerId;
+                        matchedStatus = status;
+                    }
+                }
+                if (matchedStatus != null) {
+                    playerYearStatus.setCapped(matchedPlayerId, year, true, nowTimestamp);
+                    cappedImports.markMapped(importId, matchedPlayerId, nowTimestamp);
+                    mappedCount++;
                 }
             }
 

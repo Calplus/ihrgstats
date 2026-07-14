@@ -241,52 +241,76 @@ public class CommandInfoMatchHall {
         return players;
     }
 
-    /** Returns the first non-WALKOVER opponent hall found, or "WALKOVER" if all opponents were walkovers. */
-    private String getOpponentHall(List<HallPlayerData> players) {
-        for (HallPlayerData player : players) {
-            if (player.oppHall != null && !player.oppHall.equalsIgnoreCase("WALKOVER")) {
-                return player.oppHall;
-            }
-        }
-        return "WALKOVER";
+    /** Per-opponent-hall board tally result: the PRIMARY opponent (the hall actually faced on the most boards this round) and that pairing's own score. */
+    private static class OpponentTally {
+        String primaryOppHall;
+        double hallScore;
+        double oppScore;
     }
 
     /**
-     * Aggregates +1 win / +0.5 draw per player into a "X-Y" match score
-     * string. If EVERY player faced a WALKOVER this round (a full-team
-     * sweep, not just some boards), normalizes to the "3-2" convention -
-     * derived from the hall's actual observed board count, matching
-     * CommandInfoMatch.calculateCumulativeScores. Partial-team walkovers
-     * (some boards real, some walkover) are left as a raw sum.
+     * Tallies this round's players PER OPPONENT HALL, not as one combined
+     * total - a hall can face more than one opponent hall in the same round
+     * (boards paired independently) or pick up a bonus walkover win
+     * alongside a real match, and mixing those into a single pair of totals
+     * let the displayed "vs Hall X" score/opponent reflect points that had
+     * nothing to do with Hall X (the same bug already fixed in
+     * CommandInfoHall/CommandCompareHalls's calculateHallVictoryRecords -
+     * this is that identical fix, ported to this single-round view). The
+     * primary opponent is whichever hall was faced on the most boards (the
+     * normal case is exactly one opponent hall). If every scored board was a
+     * walkover (a full-team sweep, not just some boards), the score is
+     * normalized to the "3-2" convention, matching
+     * CommandInfoMatch.calculateCumulativeScores.
      */
-    private String calculateMatchScore(List<HallPlayerData> players) {
-        double hallScore = 0.0;
-        double oppScore = 0.0;
-        int countedPlayers = 0;
+    private OpponentTally tallyByOpponent(List<HallPlayerData> players) {
+        Map<String, Double> myScoreByOpp = new HashMap<>();
+        Map<String, Double> oppScoreByOpp = new HashMap<>();
+        Map<String, Integer> boardsByOpp = new HashMap<>();
         int walkoverCount = 0;
+        boolean anyWalkover = false;
 
         for (HallPlayerData player : players) {
             if (player.outcome == null) continue;
-            countedPlayers++;
+            Double points = VictoryRecordCalculator.outcomeToPoints(player.outcome);
+            if (points == null) continue;
+
             if ("WALKOVER".equalsIgnoreCase(player.oppName)) {
+                anyWalkover = true;
                 walkoverCount++;
+                continue; // a walkover board isn't "against" any specific opponent hall
             }
-            if (player.outcome == 1) {
-                hallScore += 1.0;
-            } else if (player.outcome == 0) {
-                hallScore += 0.5;
-                oppScore += 0.5;
-            } else if (player.outcome == -1) {
-                oppScore += 1.0;
-            }
+            if (player.oppHall == null) continue;
+
+            myScoreByOpp.merge(player.oppHall, points, Double::sum);
+            oppScoreByOpp.merge(player.oppHall, 1.0 - points, Double::sum);
+            boardsByOpp.merge(player.oppHall, 1, Integer::sum);
         }
 
-        if (walkoverCount > 0 && walkoverCount == countedPlayers) {
+        String primaryOppHall = boardsByOpp.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(null);
+
+        OpponentTally tally = new OpponentTally();
+        if (primaryOppHall != null) {
+            tally.primaryOppHall = primaryOppHall;
+            tally.hallScore = myScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+            tally.oppScore = oppScoreByOpp.getOrDefault(primaryOppHall, 0.0);
+        } else if (anyWalkover) {
             double winner = MatchScoreUtils.computeWalkoverDefaultScore(walkoverCount);
-            hallScore = winner;
-            oppScore = walkoverCount - winner;
+            tally.primaryOppHall = "WALKOVER";
+            tally.hallScore = winner;
+            tally.oppScore = walkoverCount - winner;
+        } else {
+            tally.primaryOppHall = "WALKOVER";
+            tally.hallScore = 0.0;
+            tally.oppScore = 0.0;
         }
+        return tally;
+    }
 
+    private String formatScore(double hallScore, double oppScore) {
         String hallScoreStr = (hallScore % 1 == 0) ? String.format("%.0f", hallScore) : String.format("%.1f", hallScore);
         String oppScoreStr = (oppScore % 1 == 0) ? String.format("%.0f", oppScore) : String.format("%.1f", oppScore);
         return hallScoreStr + "-" + oppScoreStr;
@@ -294,8 +318,9 @@ public class CommandInfoMatchHall {
 
     private String generateTextOutput(String hallName, A1_Rounds.Round round, List<HallPlayerData> players) {
         StringBuilder sb = new StringBuilder();
-        String opponentHall = getOpponentHall(players);
-        String matchScore = calculateMatchScore(players);
+        OpponentTally tally = tallyByOpponent(players);
+        String opponentHall = tally.primaryOppHall;
+        String matchScore = formatScore(tally.hallScore, tally.oppScore);
 
         sb.append("**🏛️ Hall Match Information**\n\n");
         sb.append(String.format("**Hall:** %s vs %s\n", VictoryRecordCalculator.formatHallName(hallName), VictoryRecordCalculator.formatHallName(opponentHall)));
@@ -364,8 +389,9 @@ public class CommandInfoMatchHall {
     }
 
     private Path generateImage(String hallName, A1_Rounds.Round round, List<HallPlayerData> players) throws Exception {
-        String opponentHall = getOpponentHall(players);
-        String matchScore = calculateMatchScore(players);
+        OpponentTally tally = tallyByOpponent(players);
+        String opponentHall = tally.primaryOppHall;
+        String matchScore = formatScore(tally.hallScore, tally.oppScore);
 
         InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
         metadata.title = "Hall Match Information";

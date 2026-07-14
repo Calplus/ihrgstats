@@ -22,6 +22,7 @@ public class CommandRankPlayers {
     private final A3_Halls halls = new A3_Halls();
     private final B5_PlayerNames playerNames = new B5_PlayerNames();
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
+    private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
@@ -148,6 +149,14 @@ public class CommandRankPlayers {
             return new ArrayList<>();
         }
 
+        // Rounds at or before the selected limit, most recent first - used
+        // below to find each player's actual last-PLAYED round (see
+        // findLastRoundLabelActuallyPlayed), rather than relying on the
+        // round their latest RATING row happens to belong to.
+        List<A1_Rounds.Round> roundsDescending = new ArrayList<>(rounds.getRoundsForYear(year));
+        roundsDescending.removeIf(r -> r.roundOrder > roundOrderLimit);
+        roundsDescending.sort((a, b) -> Integer.compare(b.roundOrder, a.roundOrder));
+
         Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsUpToRound(year, roundOrderLimit, trueEloTypeId);
 
         List<PlayerRankData> players = new ArrayList<>();
@@ -159,18 +168,40 @@ public class CommandRankPlayers {
             if (status == null) continue;
 
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
-            A1_Rounds.Round round = rounds.getRoundById(rating.roundId);
+            String lastPlayedLabel = findLastRoundLabelActuallyPlayed(playerId, roundsDescending);
             String name = playerNames.getNameForYear(playerId, year);
 
             players.add(new PlayerRankData(
                 name != null ? name : playerId,
                 hall != null ? hall.hallName : "?",
-                round != null ? round.roundLabel : "?",
+                lastPlayedLabel != null ? lastPlayedLabel : "-",
                 rating.ratingValue,
                 status.capped));
         }
 
         return players;
+    }
+
+    /**
+     * The label of the most recent round (from roundsDescending, already
+     * newest-first) this player actually PLAYED - has a match_participants
+     * row for - rather than merely the round their latest rating row
+     * belongs to. A rating row is written for every round a player's hall
+     * played even when the player personally sat out that round (a real
+     * Glicko-2 RD-growth requirement, not evidence of having played), so
+     * using it directly as "last round" mislabelled a carried-forward,
+     * non-playing player as having played their hall's most recent round -
+     * contradicting the /help text's own "last round the player actually
+     * competed" description of this column. Returns null if the player
+     * never played any round within roundsDescending.
+     */
+    private String findLastRoundLabelActuallyPlayed(String playerId, List<A1_Rounds.Round> roundsDescending) throws SQLException {
+        for (A1_Rounds.Round round : roundsDescending) {
+            if (participants.getParticipantForPlayerAndRound(playerId, round.id) != null) {
+                return round.roundLabel;
+            }
+        }
+        return null;
     }
 
     private String formatPlayersTable(List<PlayerRankData> players, String homeHall) {

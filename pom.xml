@@ -115,6 +115,17 @@
                                     <mainClass>com.calplus.ihrgstats.Main</mainClass>
                                 </transformer>
                             </transformers>
+                            <!-- Populates Implementation-Version in the shaded jar's manifest
+                                 from this pom's own <version> - CommandAbout reads it via
+                                 Package.getImplementationVersion() so /about's displayed
+                                 version can never drift from the pom (previously a separate
+                                 hardcoded literal, kept in sync only by remembering to edit
+                                 both places). -->
+                            <archive>
+                                <manifest>
+                                    <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                                </manifest>
+                            </archive>
                         </configuration>
                     </execution>
                 </executions>

@@ -238,17 +238,17 @@ public class InfoImageGenerator {
             height += metaFm.getHeight() + 10;
         }
         
-        // For hall/player images: add subtitle and icon
-        // For match info: no subtitle or icon
+        // Subtitle - drawn for any image (hall/player or match info) whose
+        // metadata sets one, so this budget always matches what
+        // drawHeaderSection actually draws; not gated on hallIdentifier.
+        if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
+            tempG2d.setFont(HEADER_FONT);
+            FontMetrics subtitleFm = tempG2d.getFontMetrics();
+            height += subtitleFm.getHeight() + 10;
+        }
+
+        // Icon size - hall/player images only (match info has no hall icon)
         if (hallIdentifier != null) {
-            // Subtitle
-            if (metadata.subtitle != null && !metadata.subtitle.isEmpty()) {
-                tempG2d.setFont(HEADER_FONT);
-                FontMetrics subtitleFm = tempG2d.getFontMetrics();
-                height += subtitleFm.getHeight() + 10;
-            }
-            
-            // Icon size
             height += LARGE_ICON_SIZE + 10;
         }
         
@@ -351,6 +351,7 @@ public class InfoImageGenerator {
                 String roundText = "Last Round: " + metadata.lastRound;
                 int roundWidth = metaFm.stringWidth(roundText);
                 g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
+                yOffset += metaFm.getHeight() + 10;
             }
         }
 

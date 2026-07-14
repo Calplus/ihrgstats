@@ -132,7 +132,22 @@ public class CommandExportDatabase {
             // per export) - nothing was ever cleaning those up either.
             Path exportPath = OutputPaths.getOutputDirectory().resolve(exportFileName);
 
-            Files.copy(dbPath, exportPath, StandardCopyOption.REPLACE_EXISTING);
+            // VACUUM INTO (not Files.copy) produces a consistent, defragmented
+            // snapshot even while another connection is mid-write (e.g. a
+            // round upload or /recalculate running concurrently) - a plain
+            // file copy of a live SQLite database can capture a torn,
+            // internally-inconsistent state and doesn't pick up an in-flight
+            // -journal/-wal file, which is disqualifying for a file explicitly
+            // advertised as the recommended disaster-recovery path. The
+            // destination must not already exist - the timestamp + unique
+            // suffix in exportFileName already guarantees that. VACUUM INTO
+            // takes its destination as a string literal, not a bind
+            // parameter, so single-quotes in the path are escaped by hand.
+            String escapedPath = exportPath.toString().replace("'", "''");
+            try (Connection conn = DatabaseHelper.getDefaultConnection();
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("VACUUM INTO '" + escapedPath + "'");
+            }
 
             String successMsg = "✅ Database file exported successfully!\n\n" +
                     "The database file has been sent to your Direct Message.\n\n" +
@@ -144,7 +159,7 @@ public class CommandExportDatabase {
 
             return new ExportResponse(successMsg, null, true, exportPath);
 
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             String errorMsg = "❌ Error: Failed to export database file: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);

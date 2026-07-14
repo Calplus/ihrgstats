@@ -4,8 +4,8 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Utility class for rendering outcome icons (win/lose/draw) in generated images.
@@ -13,12 +13,17 @@ import java.util.Map;
  * across different platforms, especially Linux servers.
  */
 public class OutcomeIconRenderer {
-    
+
     private static final String ICON_PATH = "/icons/";
     private static final int DEFAULT_ICON_SIZE = 24; // Default size for outcome icons
-    
-    // Cache for loaded icons at different sizes
-    private static final Map<String, BufferedImage> iconCache = new HashMap<>();
+
+    // Cache for loaded icons at different sizes. ConcurrentHashMap (not
+    // HashMap) - the rank/info/compare commands that render these icons now
+    // run on background threads (see TelegramListener's threading of the
+    // heavy commands), so concurrent reads/writes from multiple threads are
+    // a real, not just theoretical, possibility (matches HallIconLoader's
+    // cache, which already used ConcurrentHashMap for the same reason).
+    private static final Map<String, BufferedImage> iconCache = new ConcurrentHashMap<>();
     
     /**
      * Loads an outcome icon from resources
@@ -139,8 +144,19 @@ public class OutcomeIconRenderer {
             FontMetrics fm = g2d.getFontMetrics(font);
             return fm.stringWidth("?");
         }
-        
-        // Icons are always DEFAULT_ICON_SIZE width
-        return DEFAULT_ICON_SIZE;
+
+        // Must mirror drawOutcomeIcon's own icon-vs-emoji-fallback decision -
+        // if the icon resource fails to load, drawOutcomeIcon falls back to
+        // drawing the emoji at its own (different) width, but this method
+        // used to always report DEFAULT_ICON_SIZE regardless, so a caller
+        // reserving column space from this value could get less room than
+        // the fallback emoji actually needs.
+        BufferedImage icon = loadOutcomeIcon(outcome, DEFAULT_ICON_SIZE);
+        if (icon != null) {
+            return DEFAULT_ICON_SIZE;
+        }
+        String emoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
+        FontMetrics fm = g2d.getFontMetrics(font);
+        return fm.stringWidth(emoji);
     }
 }

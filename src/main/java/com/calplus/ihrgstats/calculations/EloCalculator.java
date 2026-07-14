@@ -181,7 +181,18 @@ public class EloCalculator {
             b = alpha - TAU;
             int bracketIterations = 0;
             final int MAX_BRACKET_ITERATIONS = 100;
-            while (f.apply(b) > 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
+            // Glickman's step 5.2: keep decrementing while f(a-k*tau) < 0;
+            // stop at the first k where it's non-negative, which - together
+            // with f(a) < 0, guaranteed by this branch's condition - gives a
+            // valid opposite-signed bracket. The previous "> 0" condition was
+            // inverted: since f(alpha-tau) is virtually always already >= 0
+            // in this app's parameter regime (the -(x-alpha)/tau^2 term
+            // dominates), that inverted check kept looping anyway, burning
+            // all 100 iterations and returning a needlessly ~120-unit-wide
+            // bracket instead of stopping immediately at k=1. Illinois still
+            // converges to the same root either way (f(a)<0/f(b)>0 remained
+            // a valid bracket throughout), so this is a performance-only fix.
+            while (f.apply(b) < 0 && bracketIterations < MAX_BRACKET_ITERATIONS) {
                 b -= TAU;
                 bracketIterations++;
             }

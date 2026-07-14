@@ -997,7 +997,10 @@ public class ComparisonImageGenerator {
         FontMetrics headerFm = tempG2d.getFontMetrics();
         
         for (Section section : data.sections) {
-            height += headerFm.getHeight() + 5;
+            // Must match drawSide's actual advance exactly (headerFm.getHeight() + 10,
+            // not + 5) - otherwise this budget undercounts by 5px per section and the
+            // canvas is sized too short once enough sections are stacked.
+            height += headerFm.getHeight() + 10;
             
             // Get size based on section type
             int sectionSize = 0;

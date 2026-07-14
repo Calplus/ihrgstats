@@ -40,37 +40,42 @@ public class FontManager {
      */
     private static void loadAllFonts() {
         try {
-            fontCache.put(FontType.MONO, loadFontFromResource(MONO_FONT, "Monospaced"));
-            fontCache.put(FontType.SANS_REGULAR, loadFontFromResource(SANS_REGULAR_FONT, "SansSerif"));
-            fontCache.put(FontType.SANS_BOLD, loadFontFromResource(SANS_BOLD_FONT, "SansSerif"));
+            fontCache.put(FontType.MONO, loadFontFromResource(MONO_FONT, "Monospaced", Font.PLAIN));
+            fontCache.put(FontType.SANS_REGULAR, loadFontFromResource(SANS_REGULAR_FONT, "SansSerif", Font.PLAIN));
+            fontCache.put(FontType.SANS_BOLD, loadFontFromResource(SANS_BOLD_FONT, "SansSerif", Font.BOLD));
         } catch (Exception e) {
             System.err.println("Failed to preload fonts: " + e.getMessage());
             e.printStackTrace();
         }
     }
-    
+
     /**
      * Loads a TrueType font from JAR resources
      * @param fontFileName Name of the font file in resources/fonts/
      * @param fallbackName Logical font name to use if resource loading fails
+     * @param fallbackStyle Font.PLAIN/BOLD/ITALIC to use for the fallback -
+     *   must match the FontType being loaded (e.g. Font.BOLD for
+     *   SANS_BOLD_FONT), otherwise getFont(type, size)'s deriveFont(size)
+     *   (which preserves the base font's own style) would silently carry
+     *   PLAIN through for a caller that specifically asked for bold.
      * @return Loaded Font object
      */
-    private static Font loadFontFromResource(String fontFileName, String fallbackName) {
+    static Font loadFontFromResource(String fontFileName, String fallbackName, int fallbackStyle) {
         String resourcePath = FONT_RESOURCE_PATH + fontFileName;
         try (InputStream fontStream = FontManager.class.getResourceAsStream(resourcePath)) {
             if (fontStream == null) {
                 System.err.println("Font resource not found: " + resourcePath + ", using fallback: " + fallbackName);
-                return new Font(fallbackName, Font.PLAIN, 12);
+                return new Font(fallbackName, fallbackStyle, 12);
             }
-            
+
             Font font = Font.createFont(Font.TRUETYPE_FONT, fontStream);
             System.out.println("Successfully loaded font: " + fontFileName);
             return font;
-            
+
         } catch (Exception e) {
             System.err.println("Failed to load font: " + fontFileName + ", using fallback: " + fallbackName);
             e.printStackTrace();
-            return new Font(fallbackName, Font.PLAIN, 12);
+            return new Font(fallbackName, fallbackStyle, 12);
         }
     }
     

@@ -27,21 +27,35 @@ import java.util.List;
  */
 public class CommandAbout {
     private final LogHelper logHelper;
-    private final String version = "Beta 2 Update 11";
+    private final String version;
     private final String author = "Calplus";
     private final String lastUpdated = "05 Jan 2026";
     private final String botToken;
     private final HttpClient httpClient;
     private final Gson gson;
-    
+
     public CommandAbout(String botToken) {
         EnvironmentManager envManager = new EnvironmentManager();
         envManager.loadIntoSystemProperties();
-        
+
         this.logHelper = new LogHelper();
+        this.version = loadVersion();
         this.botToken = botToken;
         this.httpClient = HttpClient.newHttpClient();
         this.gson = new Gson();
+    }
+
+    /**
+     * Reads the running build's version from the shaded jar's manifest
+     * (Implementation-Version, populated from this pom's own &lt;version&gt;
+     * by the shade plugin's addDefaultImplementationEntries - see pom.xml) so
+     * this can't independently drift from the pom the way a separate
+     * hardcoded literal previously did. Falls back to a fixed label when run
+     * unpackaged (IDE/test runs have no jar manifest to read).
+     */
+    private static String loadVersion() {
+        String implVersion = CommandAbout.class.getPackage().getImplementationVersion();
+        return implVersion != null && !implVersion.isEmpty() ? implVersion : "Development Build";
     }
     
     /**
