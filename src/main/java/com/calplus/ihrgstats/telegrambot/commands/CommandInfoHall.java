@@ -97,6 +97,8 @@ public class CommandInfoHall {
             List<String> callbacks = new ArrayList<>();
             labels.add("All Rounds");
             callbacks.add("infohall_round_all");
+            labels.add("🌐 All Years");
+            callbacks.add("infohall_round_allyears");
             for (A1_Rounds.Round round : availableRounds) {
                 labels.add(round.roundLabel);
                 callbacks.add("infohall_round_" + round.roundOrder);
@@ -117,14 +119,21 @@ public class CommandInfoHall {
         if (state == null || state.hallName == null) {
             return new InfoResponse("❌ Session expired. Please run /infohall again.", (Path) null, null);
         }
-        Integer year = YearContext.getCurrentYear();
         userSelectionStates.remove(userId);
-        if (year == null) {
-            return new InfoResponse("⚠️ No current year set.", (Path) null, null);
+
+        boolean allYears = selectedRound.equalsIgnoreCase("allyears");
+        Integer year = null;
+        if (!allYears) {
+            year = YearContext.getCurrentYear();
+            if (year == null) {
+                return new InfoResponse("⚠️ No current year set.", (Path) null, null);
+            }
         }
 
         try {
-            return generateHallInfo(state.hallId, state.hallName, year, selectedRound);
+            return allYears
+                ? generateHallInfoAllYears(state.hallId, state.hallName)
+                : generateHallInfo(state.hallId, state.hallName, year, selectedRound);
         } catch (Exception e) {
             logHelper.logError("Failed to generate hall info: " + e.getMessage());
             e.printStackTrace();
@@ -198,6 +207,207 @@ public class CommandInfoHall {
 
         logHelper.logSuccess(String.format("Generated hall info: %s (rounds: %s)", hallName, selectedRound));
         return new InfoResponse(textOutput, imagePath, null);
+    }
+
+    /** One year's collapsed summary row, for the "All Years" view. */
+    private static class YearSummary {
+        int year;
+        Double finalHallElo;
+        Integer finalHallRank;
+        double totalHallScore;
+        double totalOppScore;
+        Map<String, Double> avgSeatByPlayerId = new HashMap<>();
+        Map<String, String> playerNameById = new HashMap<>();
+    }
+
+    /**
+     * All-time view: reuses fetchHallData's existing per-round computation
+     * once per year (rather than re-deriving new aggregation math), then
+     * collapses each year down to a single summary row per section - the
+     * round axis becomes the year axis, avoiding the per-round width/height
+     * budgets exploding once a hall has multiple years of history.
+     */
+    private InfoResponse generateHallInfoAllYears(int hallId, String hallName) throws Exception {
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
+        }
+
+        List<Integer> allYears = rounds.getAllYears();
+        List<YearSummary> yearSummaries = new ArrayList<>();
+        HallData latestYearData = null;
+
+        for (int year : allYears) {
+            List<A1_Rounds.Round> yearRounds = rounds.getRoundsForYear(year);
+            HallData yearData = fetchHallData(hallId, hallName, year, yearRounds, trueEloTypeId);
+            if (yearData.players.isEmpty()) continue;
+
+            YearSummary summary = new YearSummary();
+            summary.year = year;
+            if (yearData.lastRoundOrder != null) {
+                summary.finalHallElo = yearData.hallEloByRound.get(yearData.lastRoundOrder);
+                summary.finalHallRank = yearData.hallRankByRound.get(yearData.lastRoundOrder);
+            }
+            for (HallVictoryRecord record : yearData.victoryRecords.values()) {
+                summary.totalHallScore += record.hallScore;
+                summary.totalOppScore += record.oppScore;
+            }
+            for (PlayerData p : yearData.players) {
+                summary.avgSeatByPlayerId.put(p.playerId, p.avgSeat);
+                summary.playerNameById.put(p.playerId, p.name);
+            }
+            yearSummaries.add(summary);
+            latestYearData = yearData; // getAllYears() is ascending, so the last iteration is the most recent
+        }
+
+        if (latestYearData == null) {
+            throw new IllegalStateException(formatHallNameForImage(hallName) + " has no player data for any year");
+        }
+
+        String textOutput = generateTextOutputAllYears(hallName, yearSummaries, latestYearData);
+        Path imagePath = generateImageAllYears(hallName, yearSummaries, latestYearData);
+
+        logHelper.logSuccess(String.format("Generated hall info: %s (All Years)", hallName));
+        return new InfoResponse(textOutput, imagePath, null);
+    }
+
+    private String generateTextOutputAllYears(String hallName, List<YearSummary> yearSummaries, HallData latestYearData) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("**🏛️ %s Information (All Years)**\n\n", formatHallNameForImage(hallName)));
+
+        sb.append("**🏛️ Hall Elo (by year):**\n```\n");
+        sb.append(String.format("%-6s %-6s %-10s %-8s %-10s\n", "Year", "Rank", "ΔRank", "Elo", "ΔElo"));
+        sb.append(String.format("%-6s %-6s %-10s %-8s %-10s\n", "------", "------", "----------", "--------", "----------"));
+        Double prevElo = null;
+        Integer prevRank = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalHallElo == null || s.finalHallRank == null) {
+                sb.append(String.format("%-6d %-6s %-10s %-8s %-10s\n", s.year, "-", "-", "-", "-"));
+                continue;
+            }
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalHallRank);
+            String deltaElo = prevElo == null ? "-" : deltaDoubleString(s.finalHallElo - prevElo);
+            sb.append(String.format("%-6d %-6d %-10s %-8s %-10s\n", s.year, s.finalHallRank, deltaRank, String.format("%.1f", s.finalHallElo), deltaElo));
+            prevElo = s.finalHallElo;
+            prevRank = s.finalHallRank;
+        }
+        sb.append("```\n\n");
+
+        sb.append("**📋 Player Stats (most recent year):**\n```\n");
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "--------", "--------", "------", "-------", "--------------------"));
+        for (PlayerData p : latestYearData.players) {
+            String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
+            sb.append(String.format("%-8d %-8d %-6d %-7s %-20s\n", p.hallRank, p.globalRank, p.elo, p.capped ? "Yes" : "No", name));
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🪑 Seating Arrangements (avg seat by year):**\n```\n");
+        List<String> allPlayerIds = collectAllPlayerIdsByRecency(yearSummaries);
+        StringBuilder header = new StringBuilder(String.format("%-20s: ", "Name"));
+        for (YearSummary s : yearSummaries) header.append(String.format("%-6s|", s.year));
+        sb.append(header).append("\n");
+        for (String playerId : allPlayerIds) {
+            String name = lastKnownName(yearSummaries, playerId);
+            String displayName = name.length() > 20 ? name.substring(0, 17) + "..." : name;
+            StringBuilder line = new StringBuilder(String.format("%-20s: ", displayName));
+            for (YearSummary s : yearSummaries) {
+                Double avgSeat = s.avgSeatByPlayerId.get(playerId);
+                line.append(String.format("%-6s|", avgSeat != null && avgSeat < 999 ? String.format("%.1f", avgSeat) : "-"));
+            }
+            sb.append(line).append("\n");
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🏆 Season Record (total boards won-lost per year):**\n```\n");
+        for (YearSummary s : yearSummaries) {
+            sb.append(String.format("%-6d %s\n", s.year, formatScorePair(s.totalHallScore, s.totalOppScore)));
+        }
+        sb.append("```");
+
+        return sb.toString();
+    }
+
+    private Path generateImageAllYears(String hallName, List<YearSummary> yearSummaries, HallData latestYearData) throws Exception {
+        InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
+        metadata.title = "Hall Information";
+        metadata.subtitle = formatHallNameForImage(hallName) + " (All Years)";
+        metadata.description = "Hall statistics and performance across every year";
+        metadata.lastRound = yearSummaries.isEmpty() ? null : String.valueOf(yearSummaries.get(yearSummaries.size() - 1).year);
+
+        List<InfoImageGenerator.Section> sections = new ArrayList<>();
+
+        InfoImageGenerator.Section hallEloSection = new InfoImageGenerator.Section("Hall Elo (by Year)");
+        hallEloSection.addMonospacedRow(String.format("%-6s %-6s %-8s %-8s %-8s", "Year", "Rank", "ΔRank", "Elo", "ΔElo"));
+        Double prevElo = null;
+        Integer prevRank = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalHallElo == null || s.finalHallRank == null) {
+                hallEloSection.addMonospacedRow(String.format("%-6d %-6s %-8s %-8s %-8s", s.year, "-", "-", "-", "-"));
+                continue;
+            }
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalHallRank);
+            String deltaElo = prevElo == null ? "-" : deltaDoubleString(s.finalHallElo - prevElo);
+            hallEloSection.addMonospacedRow(String.format("%-6d %-6d %-8s %-8s %-8s", s.year, s.finalHallRank, deltaRank, String.format("%.1f", s.finalHallElo), deltaElo));
+            prevElo = s.finalHallElo;
+            prevRank = s.finalHallRank;
+        }
+        sections.add(hallEloSection);
+
+        InfoImageGenerator.Section playersSection = new InfoImageGenerator.Section("Player Stats (Most Recent Year)");
+        playersSection.addMonospacedRow(String.format("%-8s %-8s %-6s %-7s %-20s", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
+        for (PlayerData p : latestYearData.players) {
+            String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
+            playersSection.addMonospacedRow(String.format("%-8s %-8s %-6s %-7s %-20s",
+                    String.valueOf(p.hallRank), String.valueOf(p.globalRank), String.valueOf(p.elo), p.capped ? "Yes" : "No", name));
+        }
+        sections.add(playersSection);
+
+        InfoImageGenerator.Section seatingSection = new InfoImageGenerator.Section("Seating (Avg Seat by Year)");
+        List<String> allPlayerIds = collectAllPlayerIdsByRecency(yearSummaries);
+        StringBuilder header = new StringBuilder(String.format("%-20s: ", "Name"));
+        for (YearSummary s : yearSummaries) header.append(String.format("%-6s|", s.year));
+        seatingSection.addMonospacedRow(header.toString());
+        for (String playerId : allPlayerIds) {
+            String name = lastKnownName(yearSummaries, playerId);
+            String displayName = name.length() > 20 ? name.substring(0, 17) + "..." : name;
+            StringBuilder line = new StringBuilder(String.format("%-20s: ", displayName));
+            for (YearSummary s : yearSummaries) {
+                Double avgSeat = s.avgSeatByPlayerId.get(playerId);
+                line.append(String.format("%-6s|", avgSeat != null && avgSeat < 999 ? String.format("%.1f", avgSeat) : "-"));
+            }
+            seatingSection.addMonospacedRow(line.toString());
+        }
+        sections.add(seatingSection);
+
+        InfoImageGenerator.Section seasonSection = new InfoImageGenerator.Section("Season Record");
+        for (YearSummary s : yearSummaries) {
+            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, formatScorePair(s.totalHallScore, s.totalOppScore)));
+        }
+        sections.add(seasonSection);
+
+        return InfoImageGenerator.generateInfoImage(metadata, sections, hallName, "InfoHall", hallName);
+    }
+
+    /** Every player who appeared in any year's summary, ordered by their most recent year of appearance (newest first), then name. */
+    private static List<String> collectAllPlayerIdsByRecency(List<YearSummary> yearSummaries) {
+        Map<String, Integer> mostRecentYearByPlayer = new LinkedHashMap<>();
+        for (YearSummary s : yearSummaries) {
+            for (String playerId : s.avgSeatByPlayerId.keySet()) {
+                mostRecentYearByPlayer.put(playerId, s.year);
+            }
+        }
+        List<String> playerIds = new ArrayList<>(mostRecentYearByPlayer.keySet());
+        playerIds.sort((a, b) -> Integer.compare(mostRecentYearByPlayer.get(b), mostRecentYearByPlayer.get(a)));
+        return playerIds;
+    }
+
+    private static String lastKnownName(List<YearSummary> yearSummaries, String playerId) {
+        for (int i = yearSummaries.size() - 1; i >= 0; i--) {
+            String name = yearSummaries.get(i).playerNameById.get(playerId);
+            if (name != null) return name;
+        }
+        return playerId;
     }
 
     private HallData fetchHallData(int hallId, String hallName, int year, List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
@@ -361,9 +571,21 @@ public class CommandInfoHall {
                 if (points == null) continue;
 
                 if ("WALKOVER".equalsIgnoreCase(oppName)) {
+                    if (oppHallName != null && !oppHallName.equalsIgnoreCase(hallData.hallName)) {
+                        // The forfeiting side's hall IS known - fold this
+                        // board into that hall's own tally like a real board,
+                        // instead of dropping it into the unattributed
+                        // walkoverScore bucket below. Without this, a round
+                        // with real boards AND a walkover against the SAME
+                        // opponent silently underreported the score.
+                        myScoreByOpp.merge(oppHallName, points, Double::sum);
+                        oppScoreByOpp.merge(oppHallName, 1.0 - points, Double::sum);
+                        boardsByOpp.merge(oppHallName, 1, Integer::sum);
+                        continue;
+                    }
                     anyWalkover = true;
                     walkoverScore += points;
-                    continue; // a walkover board isn't "against" any specific opponent hall
+                    continue; // opponent hall genuinely unknown - no specific hall to attribute this to
                 }
                 if (oppHallName == null || oppHallName.equalsIgnoreCase(hallData.hallName)) {
                     continue; // unknown hall, or a same-hall pairing - never our own opponent

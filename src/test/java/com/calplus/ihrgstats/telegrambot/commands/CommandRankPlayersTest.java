@@ -91,4 +91,29 @@ public class CommandRankPlayersTest {
         assertFalse(targetRow.contains("R2"),
                 "Aurelia Nightshade never played round 2 - it must not appear as her LR: " + targetRow);
     }
+
+    @Test
+    void allYears_includesPlayersFromEveryYear_notJustTheCurrentOne(@TempDir Path csvDir) throws Exception {
+        // A player active only in 2025, then the active year moves on to 2026
+        // with a different player. "All Rounds" (current year) must only see
+        // the 2026 player; "All Years" must see both.
+        System.setProperty("SETTINGS_CURRENTYEAR", "2025");
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "Persimmon Vance,1,10,Quillon Ashby,2,5\n");
+        assertTrue(newProcessor().processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        System.setProperty("SETTINGS_CURRENTYEAR", String.valueOf(YEAR));
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "Cornelius Fitzgerald,1,10,Desdemona Ashworth,2,5\n");
+        assertTrue(newProcessor().processRound(r2026.toString(), YEAR, 1, NOW), "2026 round should process");
+
+        CommandRankPlayers rankPlayers = new CommandRankPlayers();
+        rankPlayers.handleCommand(ADMIN_USER_ID);
+
+        CommandRankPlayers.RankResponse currentYearOnly = rankPlayers.handleRoundSelection(ADMIN_USER_ID, "all");
+        assertTrue(currentYearOnly.message.contains("Cornelius"), "2026's player must appear in the current-year view");
+        assertFalse(currentYearOnly.message.contains("Persimmon"), "2025's player must NOT appear in the current-year view");
+
+        CommandRankPlayers.RankResponse allYears = rankPlayers.handleRoundSelection(ADMIN_USER_ID, "allyears");
+        assertTrue(allYears.message.contains("Cornelius"), "All-Years view must include the 2026 player");
+        assertTrue(allYears.message.contains("Persimmon"), "All-Years view must ALSO include the 2025-only player");
+    }
 }

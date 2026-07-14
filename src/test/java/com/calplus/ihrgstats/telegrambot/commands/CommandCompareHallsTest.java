@@ -86,6 +86,32 @@ public class CommandCompareHallsTest {
     }
 
     @Test
+    void hallVictoryRecord_walkoverAgainstAKnownHall_isFoldedIntoThatHallsScore(@TempDir Path csvDir) throws Exception {
+        // Unlike the unattributed-walkover case above, here the forfeiting
+        // side's hall (Hall 2) IS specified in the CSV. The true result vs
+        // Hall 2 is a 3-0 sweep (2 real wins + 1 walkover win) - it used to
+        // be dropped into the unattributed bucket regardless, showing only "2-0".
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,10,B2,2,5\n" +
+                "A3,1,,WALKOVER,2,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        int hall2Id = new A3_Halls().getHallByName("2").id;
+        compareHalls.handleCommand(ADMIN_USER_ID);
+        compareHalls.handleFirstHallSelection(ADMIN_USER_ID, hall1Id);
+        compareHalls.handleSecondHallSelection(ADMIN_USER_ID, hall2Id);
+        CommandCompareHalls.CompareResponse response = compareHalls.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        assertTrue(response.message.contains("3-0"),
+                "The walkover win against a known Hall 2 must be folded into the real score (3-0), not dropped: " + response.message);
+        assertFalse(response.message.contains("2-0"),
+                "Must not show the old, incomplete 2-0 score that ignored the walkover board: " + response.message);
+    }
+
+    @Test
     void hallVictoryRecord_multiOpponentRound_reportsPrimaryOpponentOnly(@TempDir Path csvDir) throws Exception {
         // Hall 1 fields 3 players: 2 boards vs hall 2 (both won), 1 board vs
         // hall 3 (lost). Hall 2 is the primary opponent (2 boards vs 1) - the
@@ -129,6 +155,69 @@ public class CommandCompareHallsTest {
         assertTrue(response.message.contains("1-1"),
                 "Same A30 fix applies to /infohall - real head-to-head vs Hall 2 is a 1-1 draw: " + response.message);
         assertFalse(response.message.contains("2-1"), "Walkover win must not skew the vs-Hall-2 score: " + response.message);
+    }
+
+    @Test
+    void infoHall_walkoverAgainstAKnownHall_isFoldedIntoThatHallsScore(@TempDir Path csvDir) throws Exception {
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,10,B2,2,5\n" +
+                "A3,1,,WALKOVER,2,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandInfoHall infoHall = new CommandInfoHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoHall.InfoResponse response = infoHall.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        assertTrue(response.message.contains("3-0"),
+                "Same fix applies to /infohall - walkover vs a known Hall 2 must be folded in as 3-0: " + response.message);
+        assertFalse(response.message.contains("2-0"), "Must not show the old, incomplete 2-0 score: " + response.message);
+    }
+
+    @Test
+    void infoHall_allYears_collapsesToOneRowPerYear_notOnePerRound(@TempDir Path csvDir) throws Exception {
+        // Hall 1 plays a round in 2025, then again in 2026. All-Years mode
+        // must show BOTH years as summary rows, not a per-round breakdown.
+        System.setProperty("SETTINGS_CURRENTYEAR", "2025");
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "A1,1,10,B1,2,5\n");
+        assertTrue(newProcessor().processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        System.setProperty("SETTINGS_CURRENTYEAR", String.valueOf(YEAR));
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "A1,1,10,B1,2,5\n");
+        assertTrue(newProcessor().processRound(r2026.toString(), YEAR, 1, NOW), "2026 round should process");
+
+        CommandInfoHall infoHall = new CommandInfoHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoHall.InfoResponse response = infoHall.handleRoundSelection(ADMIN_USER_ID, "allyears");
+
+        assertTrue(response.message.contains("2025"), "All-Years Hall Elo must include a 2025 row: " + response.message);
+        assertTrue(response.message.contains("2026"), "All-Years Hall Elo must include a 2026 row: " + response.message);
+        assertNotNull(response.imagePath, "All-Years mode must still render an image");
+    }
+
+    @Test
+    void compareHalls_allYears_collapsesToOneRowPerYear(@TempDir Path csvDir) throws Exception {
+        System.setProperty("SETTINGS_CURRENTYEAR", "2025");
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "A1,1,10,B1,2,5\n");
+        assertTrue(newProcessor().processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        System.setProperty("SETTINGS_CURRENTYEAR", String.valueOf(YEAR));
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "A1,1,10,B1,2,5\n");
+        assertTrue(newProcessor().processRound(r2026.toString(), YEAR, 1, NOW), "2026 round should process");
+
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        int hall2Id = new A3_Halls().getHallByName("2").id;
+        compareHalls.handleCommand(ADMIN_USER_ID);
+        compareHalls.handleFirstHallSelection(ADMIN_USER_ID, hall1Id);
+        compareHalls.handleSecondHallSelection(ADMIN_USER_ID, hall2Id);
+        CommandCompareHalls.CompareResponse response = compareHalls.handleRoundSelection(ADMIN_USER_ID, "allyears");
+
+        assertTrue(response.message.contains("2025"), "All-Years comparison must include a 2025 row: " + response.message);
+        assertTrue(response.message.contains("2026"), "All-Years comparison must include a 2026 row: " + response.message);
+        assertNotNull(response.imagePath, "All-Years mode must still render an image");
     }
 
     // --- A33: win-probability tie-handling and denominator ---

@@ -57,6 +57,25 @@ public class RankingQueryHelper {
     }
 
     /**
+     * Returns every player who has EVER played (not just this year's active
+     * roster), each with their single most recent rating - backs the
+     * "All Years" ranking views. Ratings are already whole-history
+     * cumulative, so the VALUE shown is identical to the current-year view
+     * for any still-active player; what changes is which players are
+     * included at all (anyone from any past year, not just this year).
+     */
+    public Map<String, D11_PlayerRatings.Rating> getLatestRatingsAllYears(int ratingTypeId) throws SQLException {
+        Map<String, D11_PlayerRatings.Rating> ratings = new HashMap<>();
+        for (B6_PlayerYearStatus.Status status : playerYearStatus.getMostRecentStatusForEachPlayer()) {
+            D11_PlayerRatings.Rating rating = playerRatings.getLatestRatingOverall(status.playerId, ratingTypeId);
+            if (rating != null) {
+                ratings.put(status.playerId, rating);
+            }
+        }
+        return ratings;
+    }
+
+    /**
      * A player's rating AS OF a specific round - the point-in-time
      * (snapshot) value, falling back to the current player_ratings row when
      * no snapshot exists. Used by every command that displays a rating next

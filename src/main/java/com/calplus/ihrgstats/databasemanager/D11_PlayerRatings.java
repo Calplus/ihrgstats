@@ -104,6 +104,27 @@ public class D11_PlayerRatings {
     }
 
     /**
+     * Returns a player's single most recent rating across EVERY year -
+     * backs the "All Years" ranking views. Ratings are already whole-history
+     * cumulative regardless of year, so this is simply the chronologically
+     * last row, not a recomputation.
+     */
+    public Rating getLatestRatingOverall(String playerId, int ratingTypeId) throws SQLException {
+        String sql = "SELECT pr.* FROM player_ratings pr " +
+                "JOIN rounds r ON pr.round_id = r.id " +
+                "WHERE pr.player_id = ? AND pr.rating_type_id = ? " +
+                "ORDER BY r.year DESC, r.round_order DESC LIMIT 1";
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, playerId);
+            ps.setInt(2, ratingTypeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? mapRow(rs) : null;
+            }
+        }
+    }
+
+    /**
      * Returns a player's most recent rating AT OR BEFORE a given round
      * within the SAME year (used for rankings "as of round N").
      */

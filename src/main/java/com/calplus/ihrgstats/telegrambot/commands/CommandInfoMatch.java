@@ -58,26 +58,29 @@ public class CommandInfoMatch {
 
         List<A1_Rounds.Round> availableRounds;
         try {
-            availableRounds = rounds.getRoundsForYear(year);
+            availableRounds = rounds.getAllRounds();
         } catch (SQLException e) {
             logHelper.logError("Database error fetching rounds: " + e.getMessage());
             return new MatchResponse("❌ Database error fetching rounds.", null, null);
         }
 
         if (availableRounds.isEmpty()) {
-            return new MatchResponse("ℹ️ No rounds found for " + year + ". Please upload round data first.", null, null);
+            return new MatchResponse("ℹ️ No rounds found. Please upload round data first.", null, null);
         }
 
         List<String> labels = new ArrayList<>();
         List<String> callbacks = new ArrayList<>();
 
+        // Round picker spans every year (not just the current one) - round
+        // numbers repeat across years, so each button's label/callback must
+        // disambiguate by year too.
         A1_Rounds.Round latest = availableRounds.get(availableRounds.size() - 1);
-        labels.add("⏱️ Latest Round (" + latest.roundLabel + ")");
+        labels.add("⏱️ Latest Round (" + latest.year + " · " + latest.roundLabel + ")");
         callbacks.add("infomatch_round_latest");
 
         for (A1_Rounds.Round round : availableRounds) {
-            labels.add(round.roundLabel);
-            callbacks.add("infomatch_round_" + round.roundOrder);
+            labels.add(round.year + " · " + round.roundLabel);
+            callbacks.add("infomatch_round_" + round.year + "_" + round.roundOrder);
         }
 
         labels.add("❌ Cancel");
@@ -90,21 +93,26 @@ public class CommandInfoMatch {
     public MatchResponse handleRoundSelection(String userId, String selectedRound) {
         logHelper.logInfo(String.format("%s selected round: %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId), selectedRound));
 
-        Integer year = YearContext.getCurrentYear();
         userSelectionStates.remove(userId);
-        if (year == null) {
-            return new MatchResponse("⚠️ No current year set.", null, null);
-        }
 
         try {
+            int year;
             int roundOrder;
             if (selectedRound.equalsIgnoreCase("latest")) {
-                roundOrder = rounds.getLatestRoundOrder(year);
-                if (roundOrder <= 0) {
-                    return new MatchResponse("ℹ️ No rounds found for " + year + ".", null, null);
+                List<A1_Rounds.Round> allRounds = rounds.getAllRounds();
+                if (allRounds.isEmpty()) {
+                    return new MatchResponse("ℹ️ No rounds found.", null, null);
                 }
+                A1_Rounds.Round latest = allRounds.get(allRounds.size() - 1);
+                year = latest.year;
+                roundOrder = latest.roundOrder;
             } else {
-                roundOrder = Integer.parseInt(selectedRound);
+                // Encoded as "{year}_{roundOrder}" by the round picker above -
+                // round numbers repeat across years, so the year must travel
+                // with the selection instead of being assumed from settings.
+                String[] parts = selectedRound.split("_", 2);
+                year = Integer.parseInt(parts[0]);
+                roundOrder = Integer.parseInt(parts[1]);
             }
 
             MatchResponse response = generateMatchInfo(year, roundOrder);
@@ -370,13 +378,14 @@ public class CommandInfoMatch {
                 double displayScore1 = m.hall1Score;
                 double displayScore2 = m.hall2Score;
                 if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                    double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
-                    displayScore1 = winner;
-                    displayScore2 = m.hall1Score - winner;
+                    // By right the losing (walkover) side gets no points at
+                    // all - not the "hallScore - winner" minimum-margin
+                    // convention.
+                    displayScore1 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
+                    displayScore2 = 0.0;
                 } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                    double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
-                    displayScore2 = winner;
-                    displayScore1 = m.hall2Score - winner;
+                    displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
+                    displayScore1 = 0.0;
                 }
 
                 String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
@@ -430,13 +439,13 @@ public class CommandInfoMatch {
             double displayScore1 = m.hall1Score;
             double displayScore2 = m.hall2Score;
             if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
-                displayScore1 = winner;
-                displayScore2 = m.hall1Score - winner;
+                // By right the losing (walkover) side gets no points at all -
+                // not the "hallScore - winner" minimum-margin convention.
+                displayScore1 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
+                displayScore2 = 0.0;
             } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                double winner = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
-                displayScore2 = winner;
-                displayScore1 = m.hall2Score - winner;
+                displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
+                displayScore1 = 0.0;
             }
 
             String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))

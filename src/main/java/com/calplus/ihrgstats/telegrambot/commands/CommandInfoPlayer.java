@@ -143,6 +143,8 @@ public class CommandInfoPlayer {
             List<String> callbacks = new ArrayList<>();
             labels.add("All Rounds");
             callbacks.add("infoplayer_round_all");
+            labels.add("🌐 All Years");
+            callbacks.add("infoplayer_round_allyears");
             for (A1_Rounds.Round round : availableRounds) {
                 labels.add(round.roundLabel);
                 callbacks.add("infoplayer_round_" + round.roundOrder);
@@ -164,14 +166,21 @@ public class CommandInfoPlayer {
         if (state == null || state.playerId == null) {
             return new InfoResponse("❌ Session expired. Please use /infoplayer to start again.", (Path) null, null);
         }
-        Integer year = YearContext.getCurrentYear();
         userSelectionStates.remove(userId);
-        if (year == null) {
-            return new InfoResponse("⚠️ No current year set.", (Path) null, null);
+
+        boolean allYears = selectedRound.equalsIgnoreCase("allyears");
+        Integer year = null;
+        if (!allYears) {
+            year = YearContext.getCurrentYear();
+            if (year == null) {
+                return new InfoResponse("⚠️ No current year set.", (Path) null, null);
+            }
         }
 
         try {
-            return generatePlayerInfo(state.playerId, state.playerName, state.hallName, year, selectedRound);
+            return allYears
+                ? generatePlayerInfoAllYears(state.playerId, state.playerName, state.hallName)
+                : generatePlayerInfo(state.playerId, state.playerName, state.hallName, year, selectedRound);
         } catch (Exception e) {
             logHelper.logError("Player info error: " + e.getMessage());
             e.printStackTrace();
@@ -215,6 +224,23 @@ public class CommandInfoPlayer {
             throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
         }
 
+        PlayerData player = fetchPlayerData(playerId, playerName, hallName, year, roundsToInclude, trueEloTypeId);
+
+        if (player.eloByRound.isEmpty()) {
+            throw new IllegalStateException("Player " + player.name + " has no data for " + year);
+        }
+
+        List<Integer> roundOrders = new ArrayList<>(player.roundLabelByOrder.keySet());
+
+        String textOutput = generateTextOutput(player, roundOrders);
+        Path imagePath = generateImage(player, roundOrders, selectedRound);
+
+        logHelper.logSuccess(String.format("Generated player info: %s (%s) (rounds: %s)", player.name, player.hall, selectedRound));
+        return new InfoResponse(textOutput, imagePath, null);
+    }
+
+    private PlayerData fetchPlayerData(String playerId, String playerName, String hallName, int year,
+                                        List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
         PlayerData player = new PlayerData();
         player.name = playerName != null ? playerName : playerId;
         player.hall = hallName;
@@ -260,17 +286,155 @@ public class CommandInfoPlayer {
             }
         }
 
-        if (player.eloByRound.isEmpty()) {
-            throw new IllegalStateException("Player " + player.name + " has no data for " + year);
+        return player;
+    }
+
+    /** One year's collapsed summary row, for the "All Years" view. */
+    private static class YearSummary {
+        int year;
+        Integer finalRank;
+        Integer finalElo;
+        double avgSeat = 999;
+        double wins;
+        double losses;
+    }
+
+    /**
+     * Reuses fetchPlayerData's existing per-round computation once per year
+     * (rather than re-deriving new aggregation math), collapsing each year
+     * down to a single summary row - the round axis becomes the year axis,
+     * avoiding the per-round width/height budgets exploding once a player
+     * has multiple years of history.
+     */
+    private InfoResponse generatePlayerInfoAllYears(String playerId, String playerName, String hallName) throws Exception {
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
         }
 
-        List<Integer> roundOrders = new ArrayList<>(player.roundLabelByOrder.keySet());
+        List<YearSummary> yearSummaries = new ArrayList<>();
+        for (int year : rounds.getAllYears()) {
+            List<A1_Rounds.Round> yearRounds = rounds.getRoundsForYear(year);
+            PlayerData yearData = fetchPlayerData(playerId, playerName, hallName, year, yearRounds, trueEloTypeId);
+            if (yearData.eloByRound.isEmpty()) continue;
 
-        String textOutput = generateTextOutput(player, roundOrders);
-        Path imagePath = generateImage(player, roundOrders, selectedRound);
+            YearSummary summary = new YearSummary();
+            summary.year = year;
+            summary.finalRank = yearData.rankByRound.get(yearData.lastRoundOrder);
+            summary.finalElo = yearData.eloByRound.get(yearData.lastRoundOrder);
 
-        logHelper.logSuccess(String.format("Generated player info: %s (%s) (rounds: %s)", player.name, player.hall, selectedRound));
+            List<Integer> seats = new ArrayList<>(yearData.seatByRound.values());
+            summary.avgSeat = seats.isEmpty() ? 999 : seats.stream().mapToInt(Integer::intValue).average().orElse(999);
+
+            for (Integer outcome : yearData.outcomeByRound.values()) {
+                if (outcome == null) continue;
+                Double points = VictoryRecordCalculator.outcomeToPoints(outcome);
+                if (points == null) continue;
+                summary.wins += points;
+                summary.losses += (1.0 - points);
+            }
+
+            yearSummaries.add(summary);
+        }
+
+        if (yearSummaries.isEmpty()) {
+            throw new IllegalStateException("Player " + (playerName != null ? playerName : playerId) + " has no data for any year");
+        }
+
+        String displayName = playerName != null ? playerName : playerId;
+        String textOutput = generateTextOutputAllYears(displayName, hallName, yearSummaries);
+        Path imagePath = generateImageAllYears(displayName, hallName, yearSummaries);
+
+        logHelper.logSuccess(String.format("Generated player info: %s (%s) (All Years)", displayName, hallName));
         return new InfoResponse(textOutput, imagePath, null);
+    }
+
+    private String generateTextOutputAllYears(String playerName, String hallName, List<YearSummary> yearSummaries) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("**👤 Player Information (All Years)**\n\n");
+        sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(playerName), VictoryRecordCalculator.formatHallName(hallName)));
+
+        sb.append("**📊 Stats Per Year:**\n```\n");
+        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
+        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "------", "------", "----------", "------", "----------"));
+        Integer prevRank = null;
+        Integer prevElo = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalRank == null || s.finalElo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            sb.append(String.format("%-6d %-6d %-10s %-6d %-10s\n", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
+            prevRank = s.finalRank;
+            prevElo = s.finalElo;
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🪑 Avg Seat by Year:**\n```\n");
+        StringBuilder yearsLine = new StringBuilder("Year:");
+        StringBuilder seatsLine = new StringBuilder("Seat:");
+        for (YearSummary s : yearSummaries) {
+            yearsLine.append(String.format(" %-6d|", s.year));
+            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
+        }
+        sb.append(yearsLine).append("\n").append(seatsLine).append("\n```\n\n");
+
+        sb.append("**🏆 Season Record (wins-losses per year):**\n```\n");
+        for (YearSummary s : yearSummaries) {
+            sb.append(String.format("%-6d %s\n", s.year, formatWinLoss(s.wins, s.losses)));
+        }
+        sb.append("```\n");
+
+        return sb.toString();
+    }
+
+    private Path generateImageAllYears(String playerName, String hallName, List<YearSummary> yearSummaries) throws Exception {
+        InfoImageGenerator.ImageMetadata metadata = new InfoImageGenerator.ImageMetadata();
+        metadata.title = "Player Information";
+        metadata.subtitle = String.format("%s (%s) - All Years", playerName, VictoryRecordCalculator.formatHallName(hallName));
+        metadata.description = "Player statistics across every year";
+        metadata.lastRound = yearSummaries.isEmpty() ? null : String.valueOf(yearSummaries.get(yearSummaries.size() - 1).year);
+
+        List<InfoImageGenerator.Section> sections = new ArrayList<>();
+
+        InfoImageGenerator.Section statsSection = new InfoImageGenerator.Section("Stats Per Year");
+        statsSection.addMonospacedRow(String.format("%-6s %-6s %-10s %-6s %-10s", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
+        Integer prevRank = null;
+        Integer prevElo = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalRank == null || s.finalElo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            statsSection.addMonospacedRow(String.format("%-6d %-6d %-10s %-6d %-10s", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
+            prevRank = s.finalRank;
+            prevElo = s.finalElo;
+        }
+        sections.add(statsSection);
+
+        InfoImageGenerator.Section seatSection = new InfoImageGenerator.Section("Avg Seat by Year");
+        StringBuilder yearsLine = new StringBuilder("Year:");
+        StringBuilder seatsLine = new StringBuilder("Seat:");
+        for (YearSummary s : yearSummaries) {
+            yearsLine.append(String.format(" %-6d|", s.year));
+            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
+        }
+        seatSection.addMonospacedRow(yearsLine.toString());
+        seatSection.addMonospacedRow(seatsLine.toString());
+        sections.add(seatSection);
+
+        InfoImageGenerator.Section seasonSection = new InfoImageGenerator.Section("Season Record");
+        for (YearSummary s : yearSummaries) {
+            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, formatWinLoss(s.wins, s.losses)));
+        }
+        sections.add(seasonSection);
+
+        return InfoImageGenerator.generateInfoImage(metadata, sections, hallName, "InfoPlayer", playerName);
+    }
+
+    private static String formatWinLoss(double wins, double losses) {
+        if (wins == Math.floor(wins) && losses == Math.floor(losses)) {
+            return String.format("%d-%d", (int) wins, (int) losses);
+        }
+        return String.format("%.1f-%.1f", wins, losses);
     }
 
     private String generateTextOutput(PlayerData player, List<Integer> roundOrders) {

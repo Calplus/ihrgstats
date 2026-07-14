@@ -158,6 +158,27 @@ public class B6_PlayerYearStatus {
         return statuses;
     }
 
+    /**
+     * Every player's status row from their single most recent year - backs
+     * the "All Years" ranking roster (every player who has ever played, not
+     * just this year's active ones), each shown under whichever hall/capped
+     * status was true as of their last active year.
+     */
+    public List<Status> getMostRecentStatusForEachPlayer() throws SQLException {
+        String sql = "SELECT pys.* FROM player_year_status pys " +
+                "INNER JOIN (SELECT player_id, MAX(year) AS max_year FROM player_year_status GROUP BY player_id) latest " +
+                "ON pys.player_id = latest.player_id AND pys.year = latest.max_year";
+        List<Status> statuses = new ArrayList<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                statuses.add(mapRow(rs));
+            }
+        }
+        return statuses;
+    }
+
     /** Every year-status row ever recorded for one player, ordered oldest-first. Used for exports. */
     public List<Status> getStatusesForPlayer(String playerId) throws SQLException {
         String sql = "SELECT * FROM player_year_status WHERE player_id = ? ORDER BY year ASC";

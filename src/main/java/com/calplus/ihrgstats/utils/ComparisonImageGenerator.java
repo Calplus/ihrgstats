@@ -983,9 +983,9 @@ public class ComparisonImageGenerator {
             }
         }
         
-        return Math.min(maxWidth, 1200);
+        return maxWidth;
     }
-    
+
     /**
      * Calculates content height (without icons which are in header)
      */

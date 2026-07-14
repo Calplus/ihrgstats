@@ -158,6 +158,20 @@ public class A1_Rounds {
         return rounds;
     }
 
+    /** Returns every round across every year, ordered by (year, round_order) ascending - roundOrder alone isn't a valid cross-year ordering since it resets each year. */
+    public List<Round> getAllRounds() throws SQLException {
+        String sql = "SELECT * FROM rounds ORDER BY year ASC, round_order ASC";
+        List<Round> rounds = new ArrayList<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                rounds.add(mapRow(rs));
+            }
+        }
+        return rounds;
+    }
+
     /** Returns all distinct years that have at least one round. */
     public List<Integer> getAllYears() throws SQLException {
         String sql = "SELECT DISTINCT year FROM rounds ORDER BY year ASC";

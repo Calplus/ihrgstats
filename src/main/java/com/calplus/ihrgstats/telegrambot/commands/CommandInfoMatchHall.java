@@ -79,26 +79,24 @@ public class CommandInfoMatchHall {
         state.hallId = hallId;
         userSelectionStates.put(userId, state);
 
-        Integer year = YearContext.getCurrentYear();
-        if (year == null) {
-            return new InfoResponse("⚠️ No current year set. An admin must set `settings.currentYear` first.", (Path) null, null);
-        }
-
         try {
             A3_Halls.Hall hall = halls.getHallById(hallId);
             state.hallName = hall != null ? hall.hallName : "?";
 
-            List<A1_Rounds.Round> availableRounds = rounds.getRoundsForYear(year);
+            // Round picker spans every year (not just the current one) -
+            // round numbers repeat across years, so each button's
+            // label/callback must disambiguate by year too.
+            List<A1_Rounds.Round> availableRounds = rounds.getAllRounds();
             if (availableRounds.isEmpty()) {
                 userSelectionStates.remove(userId);
-                return new InfoResponse("ℹ️ No round data available for " + year + ".", (Path) null, null);
+                return new InfoResponse("ℹ️ No round data available.", (Path) null, null);
             }
 
             List<String> labels = new ArrayList<>();
             List<String> callbacks = new ArrayList<>();
             for (A1_Rounds.Round round : availableRounds) {
-                labels.add(round.roundLabel);
-                callbacks.add("infomatchhall_round_" + round.roundOrder);
+                labels.add(round.year + " · " + round.roundLabel);
+                callbacks.add("infomatchhall_round_" + round.year + "_" + round.roundOrder);
             }
             labels.add("❌ Cancel");
             callbacks.add("infomatchhall_cancel");
@@ -116,14 +114,15 @@ public class CommandInfoMatchHall {
         if (state == null || state.hallName == null) {
             return new InfoResponse("❌ Session expired. Please use /infomatchhall to start again.", (Path) null, null);
         }
-        Integer year = YearContext.getCurrentYear();
         userSelectionStates.remove(userId);
-        if (year == null) {
-            return new InfoResponse("⚠️ No current year set.", (Path) null, null);
-        }
 
         try {
-            int roundOrder = Integer.parseInt(selectedRound);
+            // Encoded as "{year}_{roundOrder}" by the round picker above -
+            // round numbers repeat across years, so the year must travel
+            // with the selection instead of being assumed from settings.
+            String[] parts = selectedRound.split("_", 2);
+            int year = Integer.parseInt(parts[0]);
+            int roundOrder = Integer.parseInt(parts[1]);
             return generateMatchHallInfo(state.hallId, state.hallName, year, roundOrder);
         } catch (Exception e) {
             logHelper.logError("Error generating match hall information: " + e.getMessage());
@@ -276,9 +275,22 @@ public class CommandInfoMatchHall {
             if (points == null) continue;
 
             if ("WALKOVER".equalsIgnoreCase(player.oppName)) {
+                if (player.oppHall != null) {
+                    // The forfeiting side's hall IS known (the uploader
+                    // specified it) - fold this board into that hall's own
+                    // tally exactly like a real board, instead of dropping it
+                    // into the unattributed walkoverCount bucket below. Without
+                    // this, a round with real boards AND a walkover against the
+                    // SAME opponent silently underreported the score (e.g. a
+                    // true 3-2 sweep displayed as 2-0, missing the walkover win).
+                    myScoreByOpp.merge(player.oppHall, points, Double::sum);
+                    oppScoreByOpp.merge(player.oppHall, 1.0 - points, Double::sum);
+                    boardsByOpp.merge(player.oppHall, 1, Integer::sum);
+                    continue;
+                }
                 anyWalkover = true;
                 walkoverCount++;
-                continue; // a walkover board isn't "against" any specific opponent hall
+                continue; // opponent hall genuinely unknown - no specific hall to attribute this to
             }
             if (player.oppHall == null) continue;
 
@@ -298,10 +310,13 @@ public class CommandInfoMatchHall {
             tally.hallScore = myScoreByOpp.getOrDefault(primaryOppHall, 0.0);
             tally.oppScore = oppScoreByOpp.getOrDefault(primaryOppHall, 0.0);
         } else if (anyWalkover) {
+            // The forfeiting hall is unknown for every walkover board this
+            // round - by right the losing (walkover) side gets no points at
+            // all, not the "walkoverCount - winner" minimum-margin convention.
             double winner = MatchScoreUtils.computeWalkoverDefaultScore(walkoverCount);
             tally.primaryOppHall = "WALKOVER";
             tally.hallScore = winner;
-            tally.oppScore = walkoverCount - winner;
+            tally.oppScore = 0.0;
         } else {
             tally.primaryOppHall = "WALKOVER";
             tally.hallScore = 0.0;

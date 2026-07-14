@@ -219,6 +219,8 @@ public class CommandComparePlayers {
             List<String> callbacks = new ArrayList<>();
             labels.add("All Rounds");
             callbacks.add("compareplayers_selectround_all");
+            labels.add("🌐 All Years");
+            callbacks.add("compareplayers_selectround_allyears");
             for (A1_Rounds.Round round : availableRounds) {
                 labels.add(round.roundLabel);
                 callbacks.add("compareplayers_selectround_" + round.roundOrder);
@@ -241,13 +243,21 @@ public class CommandComparePlayers {
         if (state == null || state.firstPlayerId == null || state.secondPlayerId == null) {
             return new CompareResponse("\u274C Session expired. Please use /compareplayers to start again.", null, null);
         }
-        Integer year = YearContext.getCurrentYear();
         userSelectionStates.remove(userId);
-        if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+
+        boolean allYears = selectedRound.equalsIgnoreCase("allyears");
+        Integer year = null;
+        if (!allYears) {
+            year = YearContext.getCurrentYear();
+            if (year == null) return new CompareResponse("\u26A0\uFE0F No current year set.", null, null);
+        }
 
         try {
-            return generateComparison(state.firstPlayerId, state.firstPlayerName, state.firstHallName,
-                    state.secondPlayerId, state.secondPlayerName, state.secondHallName, year, selectedRound);
+            return allYears
+                ? generateComparisonAllYears(state.firstPlayerId, state.firstPlayerName, state.firstHallName,
+                        state.secondPlayerId, state.secondPlayerName, state.secondHallName)
+                : generateComparison(state.firstPlayerId, state.firstPlayerName, state.firstHallName,
+                        state.secondPlayerId, state.secondPlayerName, state.secondHallName, year, selectedRound);
         } catch (Exception e) {
             logHelper.logError("Player comparison error: " + e.getMessage());
             e.printStackTrace();
@@ -360,6 +370,179 @@ public class CommandComparePlayers {
                 data1.name, data1.hall, data2.name, data2.hall, selectedRound));
 
         return new CompareResponse(textOutput, imagePath, null);
+    }
+
+    /** One year's collapsed summary row, for the "All Years" view. */
+    private static class YearSummary {
+        int year;
+        Integer finalRank;
+        Integer finalElo;
+        double avgSeat = 999;
+        double wins;
+        double losses;
+    }
+
+    /**
+     * Reuses fetchPlayerData's existing per-round computation once per year
+     * (rather than re-deriving new aggregation math), collapsing each year
+     * down to a single summary row - the round axis becomes the year axis,
+     * avoiding the per-round width/height budgets exploding once a player
+     * has multiple years of history.
+     */
+    private List<YearSummary> buildYearSummaries(String playerId, String playerName, String hallName, int trueEloTypeId) throws SQLException {
+        List<YearSummary> yearSummaries = new ArrayList<>();
+        for (int year : rounds.getAllYears()) {
+            List<A1_Rounds.Round> yearRounds = rounds.getRoundsForYear(year);
+            PlayerData yearData = fetchPlayerData(playerId, playerName, hallName, year, yearRounds, trueEloTypeId);
+            if (yearData.eloByRound.isEmpty()) continue;
+
+            YearSummary summary = new YearSummary();
+            summary.year = year;
+            summary.finalRank = yearData.rankByRound.get(yearData.lastRoundOrder);
+            summary.finalElo = yearData.eloByRound.get(yearData.lastRoundOrder);
+
+            List<Integer> seats = new ArrayList<>(yearData.seatByRound.values());
+            summary.avgSeat = seats.isEmpty() ? 999 : seats.stream().mapToInt(Integer::intValue).average().orElse(999);
+
+            for (Integer outcome : yearData.outcomeByRound.values()) {
+                if (outcome == null) continue;
+                Double points = VictoryRecordCalculator.outcomeToPoints(outcome);
+                if (points == null) continue;
+                summary.wins += points;
+                summary.losses += (1.0 - points);
+            }
+
+            yearSummaries.add(summary);
+        }
+        return yearSummaries;
+    }
+
+    private CompareResponse generateComparisonAllYears(String player1Id, String player1Name, String player1Hall,
+                                                         String player2Id, String player2Name, String player2Hall) throws Exception {
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
+        }
+
+        List<YearSummary> summaries1 = buildYearSummaries(player1Id, player1Name, player1Hall, trueEloTypeId);
+        List<YearSummary> summaries2 = buildYearSummaries(player2Id, player2Name, player2Hall, trueEloTypeId);
+
+        if (summaries1.isEmpty()) throw new Exception("Player " + player1Name + " has no data for any year");
+        if (summaries2.isEmpty()) throw new Exception("Player " + player2Name + " has no data for any year");
+
+        String textOutput = generateTextOutputAllYears(player1Name, player1Hall, summaries1, player2Name, player2Hall, summaries2);
+        Path imagePath = generateImageAllYears(player1Name, player1Hall, summaries1, player2Name, player2Hall, summaries2);
+
+        logHelper.logSuccess(String.format("Generated player comparison: %s (%s) vs %s (%s) (All Years)", player1Name, player1Hall, player2Name, player2Hall));
+        return new CompareResponse(textOutput, imagePath, null);
+    }
+
+    private String generateTextOutputAllYears(String player1Name, String player1Hall, List<YearSummary> summaries1,
+                                               String player2Name, String player2Hall, List<YearSummary> summaries2) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("**👥 Player Comparison (All Years)**\n\n");
+        sb.append(String.format("**%s** (%s) vs **%s** (%s)\n\n", TelegramHtml.escape(player1Name), VictoryRecordCalculator.formatHallName(player1Hall), TelegramHtml.escape(player2Name), VictoryRecordCalculator.formatHallName(player2Hall)));
+        sb.append(generatePlayerDetailsAllYears(player1Name, player1Hall, summaries1));
+        sb.append("\n");
+        sb.append(generatePlayerDetailsAllYears(player2Name, player2Hall, summaries2));
+        return sb.toString();
+    }
+
+    private String generatePlayerDetailsAllYears(String playerName, String hallName, List<YearSummary> yearSummaries) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("━━━ **%s (%s)** ━━━\n\n", TelegramHtml.escape(playerName), VictoryRecordCalculator.formatHallName(hallName)));
+
+        sb.append("**📊 Stats Per Year:**\n```\n");
+        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
+        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "------", "------", "----------", "------", "----------"));
+        Integer prevRank = null;
+        Integer prevElo = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalRank == null || s.finalElo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            sb.append(String.format("%-6d %-6d %-10s %-6d %-10s\n", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
+            prevRank = s.finalRank;
+            prevElo = s.finalElo;
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🪑 Avg Seat by Year:**\n```\n");
+        StringBuilder yearsLine = new StringBuilder("Year:");
+        StringBuilder seatsLine = new StringBuilder("Seat:");
+        for (YearSummary s : yearSummaries) {
+            yearsLine.append(String.format(" %-6d|", s.year));
+            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
+        }
+        sb.append(yearsLine).append("\n").append(seatsLine).append("\n```\n\n");
+
+        sb.append("**🏆 Season Record (wins-losses per year):**\n```\n");
+        for (YearSummary s : yearSummaries) {
+            sb.append(String.format("%-6d %s\n", s.year, formatWinLoss(s.wins, s.losses)));
+        }
+        sb.append("```\n\n");
+
+        return sb.toString();
+    }
+
+    private Path generateImageAllYears(String player1Name, String player1Hall, List<YearSummary> summaries1,
+                                        String player2Name, String player2Hall, List<YearSummary> summaries2) throws Exception {
+        String description = String.format("%s (%s) vs %s (%s) - All Years", player1Name, VictoryRecordCalculator.formatHallName(player1Hall), player2Name, VictoryRecordCalculator.formatHallName(player2Hall));
+        String lastYearLabel = summaries1.isEmpty() ? null : String.valueOf(summaries1.get(summaries1.size() - 1).year);
+        ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Player Comparison", description, lastYearLabel);
+
+        List<ComparisonImageGenerator.Section> sections1 = buildSectionsAllYears(summaries1);
+        List<ComparisonImageGenerator.Section> sections2 = buildSectionsAllYears(summaries2);
+
+        ComparisonImageGenerator.ComparisonData data1 = new ComparisonImageGenerator.ComparisonData(player1Name, player1Hall, sections1);
+        ComparisonImageGenerator.ComparisonData data2 = new ComparisonImageGenerator.ComparisonData(player2Name, player2Hall, sections2);
+
+        return ComparisonImageGenerator.generateComparisonImage(metadata.title, data1, data2, metadata,
+                "ComparePlayers", player1Name, player2Name);
+    }
+
+    private List<ComparisonImageGenerator.Section> buildSectionsAllYears(List<YearSummary> yearSummaries) {
+        List<ComparisonImageGenerator.Section> sections = new ArrayList<>();
+
+        List<String> statsLines = new ArrayList<>();
+        statsLines.add(String.format("%-6s %-6s %-10s %-6s %-10s", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
+        Integer prevRank = null;
+        Integer prevElo = null;
+        for (YearSummary s : yearSummaries) {
+            if (s.finalRank == null || s.finalElo == null) continue;
+            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            statsLines.add(String.format("%-6d %-6d %-10s %-6d %-10s", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
+            prevRank = s.finalRank;
+            prevElo = s.finalElo;
+        }
+        sections.add(new ComparisonImageGenerator.Section("Stats Per Year", statsLines));
+
+        List<String> seatLines = new ArrayList<>();
+        StringBuilder yearsLine = new StringBuilder("Year:");
+        StringBuilder seatsLine = new StringBuilder("Seat:");
+        for (YearSummary s : yearSummaries) {
+            yearsLine.append(String.format(" %-6d|", s.year));
+            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
+        }
+        seatLines.add(yearsLine.toString());
+        seatLines.add(seatsLine.toString());
+        sections.add(new ComparisonImageGenerator.Section("Seating (Avg by Yr)", seatLines));
+
+        List<String> seasonLines = new ArrayList<>();
+        for (YearSummary s : yearSummaries) {
+            seasonLines.add(String.format("%-6d %s", s.year, formatWinLoss(s.wins, s.losses)));
+        }
+        sections.add(new ComparisonImageGenerator.Section("Season Record", seasonLines));
+
+        return sections;
+    }
+
+    private static String formatWinLoss(double wins, double losses) {
+        if (wins == Math.floor(wins) && losses == Math.floor(losses)) {
+            return String.format("%d-%d", (int) wins, (int) losses);
+        }
+        return String.format("%.1f-%.1f", wins, losses);
     }
 
     private String generateTextOutput(PlayerData player1, List<Integer> orders1, PlayerData player2, List<Integer> orders2) {

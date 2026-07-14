@@ -76,11 +76,87 @@ public class CommandInfoMatchHallTest {
         int hall1Id = new A3_Halls().getHallByName("1").id;
         infoMatchHall.handleCommand(ADMIN_USER_ID);
         infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
-        CommandInfoMatchHall.InfoResponse response = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, "1");
+        CommandInfoMatchHall.InfoResponse response = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, YEAR + "_1");
 
         assertTrue(response.message.contains("2-0"),
                 "Hall 1 swept its actual (majority) opponent Hall 2 2-0: " + response.message);
         assertFalse(response.message.contains("Hall 3") && response.message.contains("2-1"),
                 "Hall 1 lost its single board against Hall 3 (0-1) - it must never be shown as a 2-1 win over Hall 3: " + response.message);
+    }
+
+    @Test
+    void walkoverAgainstAKnownHall_isFoldedIntoThatHallsScore_notDroppedEntirely(@TempDir Path csvDir) throws Exception {
+        // Hall 1 fields 2 real boards vs Hall 2 (both won) PLUS one walkover
+        // board where the forfeiting side's hall (Hall 2) is specified in the
+        // CSV - the true result is a 3-0 sweep, but the walkover used to be
+        // dropped into an unattributed bucket entirely, showing only "2-0".
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,10,B1,2,5\n" +
+                "A2,1,10,B2,2,5\n" +
+                "A3,1,,WALKOVER,2,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandInfoMatchHall infoMatchHall = new CommandInfoMatchHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoMatchHall.handleCommand(ADMIN_USER_ID);
+        infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoMatchHall.InfoResponse response = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, YEAR + "_1");
+
+        assertTrue(response.message.contains("3-0"),
+                "The walkover win against a known Hall 2 must be folded into the real score (3-0), not dropped: " + response.message);
+        assertFalse(response.message.contains("2-0"),
+                "Must not show the old, incomplete 2-0 score that ignored the walkover board: " + response.message);
+    }
+
+    @Test
+    void allWalkoverRound_withNoOpponentHallSpecified_forfeitingSideGetsZeroPoints(@TempDir Path csvDir) throws Exception {
+        // 5 separate walkover boards, none naming an opponent hall - the only
+        // signal is the board count. By right the forfeiting side gets zero
+        // points; the old "walkoverCount - winner" convention gave it 2.
+        Path csv = writeRoundCsv(csvDir, "r1.csv",
+                "A1,1,,WALKOVER,,\n" +
+                "A2,1,,WALKOVER,,\n" +
+                "A3,1,,WALKOVER,,\n" +
+                "A4,1,,WALKOVER,,\n" +
+                "A5,1,,WALKOVER,,\n");
+        assertTrue(newProcessor().processRound(csv.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandInfoMatchHall infoMatchHall = new CommandInfoMatchHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoMatchHall.handleCommand(ADMIN_USER_ID);
+        infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoMatchHall.InfoResponse response = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, YEAR + "_1");
+
+        assertTrue(response.message.contains("3-0"),
+                "5 unattributed walkovers must default to a 3-0 shutout (winner=ceil(5/2), loser=0), not 3-2: " + response.message);
+    }
+
+    @Test
+    void roundPicker_spansEveryYear_notJustTheCurrentOne(@TempDir Path csvDir) throws Exception {
+        // A round processed in 2025, then the active year moves on to 2026.
+        // The round picker (and a direct year-qualified selection) must
+        // still be able to reach the 2025 round for the same hall.
+        System.setProperty("SETTINGS_CURRENTYEAR", "2025");
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "A1,1,10,B1,2,3\n");
+        assertTrue(newProcessor().processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        System.setProperty("SETTINGS_CURRENTYEAR", String.valueOf(YEAR));
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "C1,1,10,D1,2,7\n");
+        assertTrue(newProcessor().processRound(r2026.toString(), YEAR, 1, NOW), "2026 round should process");
+
+        CommandInfoMatchHall infoMatchHall = new CommandInfoMatchHall();
+        int hall1Id = new A3_Halls().getHallByName("1").id;
+        infoMatchHall.handleCommand(ADMIN_USER_ID);
+        CommandInfoMatchHall.InfoResponse picker = infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        assertNotNull(picker.buttonConfig, "The round picker must offer buttons");
+        boolean has2025Button = java.util.Arrays.asList(picker.buttonConfig.labels).stream().anyMatch(l -> l.contains("2025"));
+        assertTrue(has2025Button, "The picker must offer the 2025 round, not just the current year's");
+
+        // handleHallSelection consumed the pending selection state above, so
+        // re-select the hall before picking a round, matching real usage.
+        infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
+        CommandInfoMatchHall.InfoResponse response2025 = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, "2025_1");
+        assertTrue(response2025.message.contains("10-3"),
+                "Selecting the 2025 round must return THAT round's match detail (10-3), not 2026's (10-7): " + response2025.message);
     }
 }

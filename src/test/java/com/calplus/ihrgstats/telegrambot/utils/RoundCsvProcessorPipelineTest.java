@@ -296,4 +296,31 @@ public class RoundCsvProcessorPipelineTest {
         assertNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 0),
                 "No round 0 row should have been created");
     }
+
+    @Test
+    void walkoverBoard_winnerGetsAFullOnePointWin_forfeiterGetsZero(@TempDir Path csvDir) throws Exception {
+        // Pins down individual-board walkover scoring: the real, present
+        // player must be recorded with outcome=1.0 (a full win, identical to
+        // beating a real opponent), and the WLKOVR sentinel on the other side
+        // must be outcome=0.0 - regardless of the match type's board count.
+        new A2_MatchTypes().createMatchType("Test", 10.0, null, "Test match type", NOW);
+
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Aurelia Nightshade,1,,WALKOVER,,\n");
+        assertTrue(newProcessor().processRound(r1.toString(), YEAR, 1, NOW), "Walkover round should process successfully");
+
+        String playerA = resolvePlayerId("Aurelia Nightshade");
+        int round1Id = new A1_Rounds().getRoundByYearAndOrder(YEAR, 1).id;
+
+        C9_MatchParticipants participants = new C9_MatchParticipants();
+        List<C9_MatchParticipants.Participant> rows = participants.getParticipantsForRound(round1Id);
+        assertEquals(2, rows.size(), "A walkover board still produces exactly 2 participant rows (winner + sentinel)");
+
+        C9_MatchParticipants.Participant winner = rows.stream()
+                .filter(p -> p.playerId.equals(playerA)).findFirst().orElseThrow();
+        C9_MatchParticipants.Participant forfeiter = rows.stream()
+                .filter(p -> p.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)).findFirst().orElseThrow();
+
+        assertEquals(1.0, winner.outcome, 1e-9, "A walkover win must count as a full 1.0-point win for the present player");
+        assertEquals(0.0, forfeiter.outcome, 1e-9, "The forfeiting (WLKOVR sentinel) side must be a full 0.0-point loss");
+    }
 }

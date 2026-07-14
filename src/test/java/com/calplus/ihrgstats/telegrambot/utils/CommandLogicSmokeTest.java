@@ -114,7 +114,7 @@ public class CommandLogicSmokeTest {
         // === Checklist item: /infomatchhall shows "TIMEOUT" for the timed-out side ===
         CommandInfoMatchHall infoMatchHall = new CommandInfoMatchHall();
         infoMatchHall.handleHallSelection(ADMIN_USER_ID, hall1Id);
-        CommandInfoMatchHall.InfoResponse matchHallResponse = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, "3");
+        CommandInfoMatchHall.InfoResponse matchHallResponse = infoMatchHall.handleRoundSelection(ADMIN_USER_ID, YEAR + "_3");
         String matchHallSent = TelegramHtml.prepareForSending(matchHallResponse.message);
         assertTrue(matchHallSent.contains("TIMEOUT"), "Hall match info for round 3 should show TIMEOUT for Petra Lindqvist: " + matchHallSent);
 

@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Regression test for the comparison-image canvas height budget:
@@ -94,5 +95,37 @@ public class ComparisonImageGeneratorTest {
                         + " - the canvas was sized too short and clipped some rows entirely");
         assertEquals(30, bandHeights.get(bandHeights.size() - 1).intValue(),
                 "the last row must be fully drawn (30px tall), not clipped short by the canvas edge");
+    }
+
+    @Test
+    void veryWideLine_isNotClippedByAnArbitraryWidthCap() throws Exception {
+        // Simulates a many-round Seating grid header line (e.g.
+        // "Avg Name : Round 1|Round 2|...|Round 12|") which used to be
+        // silently capped at 1200px regardless of how wide the actual
+        // content was - confirmed visually with just 10 rounds clipping the
+        // rightmost Seating columns in a real /comparehalls render.
+        String wideLine = "Avg Name : " + "Round 99|".repeat(20);
+        List<ComparisonImageGenerator.Section> sections = new ArrayList<>();
+        sections.add(new ComparisonImageGenerator.Section("Seating", Collections.singletonList(wideLine)));
+
+        ComparisonImageGenerator.ComparisonData leftData =
+                new ComparisonImageGenerator.ComparisonData("Left Entity", "1", sections);
+        ComparisonImageGenerator.ComparisonData rightData =
+                new ComparisonImageGenerator.ComparisonData("Right Entity", "2", sections);
+        ComparisonImageGenerator.ImageMetadata metadata =
+                new ComparisonImageGenerator.ImageMetadata("Test Title", "", "");
+
+        Path imagePath = ComparisonImageGenerator.generateComparisonImage(
+                "Test Title", leftData, rightData, metadata, "Test", "Left Entity", "Right Entity");
+        BufferedImage image = ImageIO.read(imagePath.toFile());
+
+        java.awt.FontMetrics fm = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
+                .createGraphics().getFontMetrics(FontManager.getMonoFont(24));
+        int expectedMinLineWidth = fm.stringWidth(wideLine) + 40;
+        int minExpectedImageWidth = expectedMinLineWidth * 2;
+
+        assertTrue(image.getWidth() >= minExpectedImageWidth,
+                "image width " + image.getWidth() + " is narrower than the content needs ("
+                        + minExpectedImageWidth + ") - a width cap is clipping wide sections");
     }
 }

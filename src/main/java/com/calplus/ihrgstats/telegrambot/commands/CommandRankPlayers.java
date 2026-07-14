@@ -75,6 +75,9 @@ public class CommandRankPlayers {
         labels.add("All Rounds");
         callbacks.add("rankplayers_round_all");
 
+        labels.add("🌐 All Years");
+        callbacks.add("rankplayers_round_allyears");
+
         for (A1_Rounds.Round round : availableRounds) {
             labels.add(round.roundLabel);
             callbacks.add("rankplayers_round_" + round.roundOrder);
@@ -91,21 +94,25 @@ public class CommandRankPlayers {
     public RankResponse handleRoundSelection(String userId, String selectedRound) {
         logHelper.logInfo(com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId) + " selected round: " + selectedRound);
 
-        Integer year = YearContext.getCurrentYear();
-        if (year == null) {
-            return new RankResponse("⚠️ No current year set.", (Path) null);
+        boolean allYears = selectedRound.equalsIgnoreCase("allyears");
+        Integer year = null;
+        if (!allYears) {
+            year = YearContext.getCurrentYear();
+            if (year == null) {
+                return new RankResponse("⚠️ No current year set.", (Path) null);
+            }
         }
 
         List<PlayerRankData> players;
         try {
-            players = fetchPlayerData(year, selectedRound);
+            players = allYears ? fetchPlayerDataAllYears() : fetchPlayerData(year, selectedRound);
         } catch (SQLException e) {
             logHelper.logError("Error fetching player data: " + e.getMessage());
             return new RankResponse("❌ Database error fetching player data.", (Path) null);
         }
 
         if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No player data found for round " + selectedRound + ".";
+            String errorMsg = "ℹ️ No player data found for " + (allYears ? "any year" : "round " + selectedRound) + ".";
             return new RankResponse(errorMsg, (Path) null);
         }
 
@@ -114,8 +121,9 @@ public class CommandRankPlayers {
         String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
         String table = formatPlayersTable(players, homeHall);
 
-        String roundDisplay = selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound;
-        String message = "🏆 **Player Rankings** (" + roundDisplay + ", " + year + ")\n\n" +
+        String roundDisplay = allYears ? "All Years" : (selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound);
+        String yearDisplay = allYears ? "" : (", " + year);
+        String message = "🏆 **Player Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
                 "Players ranked by TrueElo rating\n\n" + table;
 
         Path imagePath = null;
@@ -128,7 +136,9 @@ public class CommandRankPlayers {
                     }
                 }
             }
-            imagePath = generatePlayersImage(players, highlightRows, selectedRound, year);
+            imagePath = allYears
+                ? generatePlayersImageAllYears(players, highlightRows)
+                : generatePlayersImage(players, highlightRows, selectedRound, year);
         } catch (Exception e) {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
@@ -173,6 +183,45 @@ public class CommandRankPlayers {
 
             players.add(new PlayerRankData(
                 name != null ? name : playerId,
+                hall != null ? hall.hallName : "?",
+                lastPlayedLabel != null ? lastPlayedLabel : "-",
+                rating.ratingValue,
+                status.capped));
+        }
+
+        return players;
+    }
+
+    /**
+     * All-time roster: every player who has EVER played, not just this
+     * year's active ones. Ratings are already whole-history cumulative, so
+     * the VALUE shown for a still-active player is identical to the
+     * current-year view - only the roster differs. Each player's hall/capped
+     * status is shown as of their own single most recent active year (that
+     * concept isn't well-defined jointly across multiple years).
+     */
+    private List<PlayerRankData> fetchPlayerDataAllYears() throws SQLException {
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            return new ArrayList<>();
+        }
+
+        List<A1_Rounds.Round> roundsDescending = new ArrayList<>(rounds.getAllRounds());
+        Collections.reverse(roundsDescending);
+
+        Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsAllYears(trueEloTypeId);
+
+        List<PlayerRankData> players = new ArrayList<>();
+        for (B6_PlayerYearStatus.Status status : playerYearStatus.getMostRecentStatusForEachPlayer()) {
+            D11_PlayerRatings.Rating rating = ratingsByPlayer.get(status.playerId);
+            if (rating == null) continue;
+
+            A3_Halls.Hall hall = halls.getHallById(status.hallId);
+            String lastPlayedLabel = findLastRoundLabelActuallyPlayed(status.playerId, roundsDescending);
+            String name = playerNames.getNameForYear(status.playerId, status.year);
+
+            players.add(new PlayerRankData(
+                name != null ? name : status.playerId,
                 hall != null ? hall.hallName : "?",
                 lastPlayedLabel != null ? lastPlayedLabel : "-",
                 rating.ratingValue,
@@ -252,11 +301,12 @@ public class CommandRankPlayers {
         return table;
     }
 
-    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
-        String[] headers = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
-        Alignment[] alignments = {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
-        int[] columnWidths = {4, 4, 4, 3, 3, 20};
+    private static final String[] RANK_TABLE_HEADERS = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
+    private static final Alignment[] RANK_TABLE_ALIGNMENTS =
+        {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
+    private static final int[] RANK_TABLE_COLUMN_WIDTHS = {4, 4, 4, 3, 3, 20};
 
+    private static List<String[]> buildRankRows(List<PlayerRankData> players) {
         List<String[]> rows = new ArrayList<>();
         int rank = 1;
         for (PlayerRankData player : players) {
@@ -270,7 +320,10 @@ public class CommandRankPlayers {
             });
             rank++;
         }
+        return rows;
+    }
 
+    private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
         String lastRoundForMetadata = selectedRound.equalsIgnoreCase("all")
             ? MatchScoreUtils.latestRoundLabel(rounds, year)
             : selectedRound;
@@ -279,7 +332,19 @@ public class CommandRankPlayers {
             "Player Rankings", "Players ranked by TrueElo rating", lastRoundForMetadata);
 
         String entityName = lastRoundForMetadata != null ? lastRoundForMetadata : "unknown";
-        return TableImageGenerator.generatePlayerTable(headers, rows, alignments, columnWidths, metadata, highlightRows, "RankPlayers", entityName);
+        return TableImageGenerator.generatePlayerTable(RANK_TABLE_HEADERS, buildRankRows(players), RANK_TABLE_ALIGNMENTS,
+            RANK_TABLE_COLUMN_WIDTHS, metadata, highlightRows, "RankPlayers", entityName);
+    }
+
+    private Path generatePlayersImageAllYears(List<PlayerRankData> players, Set<Integer> highlightRows) throws Exception {
+        List<A1_Rounds.Round> allRounds = rounds.getAllRounds();
+        String lastRoundForMetadata = allRounds.isEmpty() ? null : allRounds.get(allRounds.size() - 1).roundLabel;
+
+        TableImageGenerator.ImageMetadata metadata = new TableImageGenerator.ImageMetadata(
+            "Player Rankings", "Players ranked by TrueElo rating (All Years)", lastRoundForMetadata);
+
+        return TableImageGenerator.generatePlayerTable(RANK_TABLE_HEADERS, buildRankRows(players), RANK_TABLE_ALIGNMENTS,
+            RANK_TABLE_COLUMN_WIDTHS, metadata, highlightRows, "RankPlayers", "AllYears");
     }
 
     public static class RankResponse extends CommandResponse {

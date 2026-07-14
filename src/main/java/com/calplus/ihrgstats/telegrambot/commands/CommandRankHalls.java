@@ -82,6 +82,9 @@ public class CommandRankHalls {
         labels.add("All Rounds");
         callbacks.add("rankhalls_round_all");
 
+        labels.add("🌐 All Years");
+        callbacks.add("rankhalls_round_allyears");
+
         for (A1_Rounds.Round round : availableRounds) {
             labels.add(round.roundLabel);
             callbacks.add("rankhalls_round_" + round.roundOrder);
@@ -98,21 +101,25 @@ public class CommandRankHalls {
     public RankResponse handleRoundSelection(String userId, String selectedRound) {
         logHelper.logInfo(com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId) + " selected round: " + selectedRound);
 
-        Integer year = YearContext.getCurrentYear();
-        if (year == null) {
-            return new RankResponse("⚠️ No current year set.", (Path) null);
+        boolean allYears = selectedRound.equalsIgnoreCase("allyears");
+        Integer year = null;
+        if (!allYears) {
+            year = YearContext.getCurrentYear();
+            if (year == null) {
+                return new RankResponse("⚠️ No current year set.", (Path) null);
+            }
         }
 
         List<PlayerEloData> players;
         try {
-            players = fetchPlayerData(year, selectedRound);
+            players = allYears ? fetchPlayerDataAllYears() : fetchPlayerData(year, selectedRound);
         } catch (SQLException e) {
             logHelper.logError("Error fetching player data: " + e.getMessage());
             return new RankResponse("❌ Database error fetching player data.", (Path) null);
         }
 
         if (players.isEmpty()) {
-            String errorMsg = "ℹ️ No player data found for round " + selectedRound + ".";
+            String errorMsg = "ℹ️ No player data found for " + (allYears ? "any year" : "round " + selectedRound) + ".";
             return new RankResponse(errorMsg, (Path) null);
         }
 
@@ -122,8 +129,9 @@ public class CommandRankHalls {
         String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
         String table = formatHallsTable(hallRankings, homeHall);
 
-        String roundDisplay = selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound;
-        String message = "🏆 **Hall Rankings** (" + roundDisplay + ", " + year + ")\n\n" +
+        String roundDisplay = allYears ? "All Years" : (selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound);
+        String yearDisplay = allYears ? "" : (", " + year);
+        String message = "🏆 **Hall Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
                 "Halls ranked by average TrueElo of top 5 players\n\n" + table;
 
         Path imagePath = null;
@@ -137,7 +145,9 @@ public class CommandRankHalls {
                     }
                 }
             }
-            imagePath = generateHallsImage(hallRankings, highlightRows, selectedRound, year);
+            imagePath = allYears
+                ? generateHallsImageAllYears(hallRankings, highlightRows)
+                : generateHallsImage(hallRankings, highlightRows, selectedRound, year);
         } catch (Exception e) {
             logHelper.logWarning("Failed to generate table image: " + e.getMessage());
         }
@@ -167,6 +177,31 @@ public class CommandRankHalls {
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
             if (hall == null) continue;
             players.add(new PlayerEloData(hall.hallName, entry.getValue().ratingValue, status.capped));
+        }
+        return players;
+    }
+
+    /**
+     * All-time roster: every player who has EVER played, each shown under
+     * their own single most recent hall/capped status - ratings are already
+     * whole-history cumulative, so only the roster (not the rating value)
+     * differs from the current-year view.
+     */
+    private List<PlayerEloData> fetchPlayerDataAllYears() throws SQLException {
+        Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
+        if (trueEloTypeId == null) {
+            return new ArrayList<>();
+        }
+
+        Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsAllYears(trueEloTypeId);
+
+        List<PlayerEloData> players = new ArrayList<>();
+        for (B6_PlayerYearStatus.Status status : playerYearStatus.getMostRecentStatusForEachPlayer()) {
+            D11_PlayerRatings.Rating rating = ratingsByPlayer.get(status.playerId);
+            if (rating == null) continue;
+            A3_Halls.Hall hall = halls.getHallById(status.hallId);
+            if (hall == null) continue;
+            players.add(new PlayerEloData(hall.hallName, rating.ratingValue, status.capped));
         }
         return players;
     }
@@ -236,19 +271,24 @@ public class CommandRankHalls {
         return table;
     }
 
-    private Path generateHallsImage(List<HallRankData> hallRankings, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
-        String[] headers = {"Rank", "Hall", "Cap", "Avg Elo"};
-        Alignment[] alignments = {Alignment.RIGHT, Alignment.LEFT, Alignment.RIGHT, Alignment.RIGHT};
-        int[] columnWidths = {4, 10, 3, 7};
+    private static final String[] HALL_TABLE_HEADERS = {"Rank", "Hall", "Cap", "Avg Elo"};
+    private static final Alignment[] HALL_TABLE_ALIGNMENTS = {Alignment.RIGHT, Alignment.LEFT, Alignment.RIGHT, Alignment.RIGHT};
+    private static final int[] HALL_TABLE_COLUMN_WIDTHS = {4, 10, 3, 7};
 
+    private static List<String[]> buildHallRows(List<HallRankData> hallRankings, List<String> hallNamesOut) {
         List<String[]> rows = new ArrayList<>();
-        List<String> hallNames = new ArrayList<>();
         int rank = 1;
         for (HallRankData hall : hallRankings) {
             rows.add(new String[]{String.valueOf(rank), hall.hallName, String.valueOf(hall.cappedCount), String.format("%.1f", hall.averageElo)});
-            hallNames.add(hall.hallName);
+            if (hallNamesOut != null) hallNamesOut.add(hall.hallName);
             rank++;
         }
+        return rows;
+    }
+
+    private Path generateHallsImage(List<HallRankData> hallRankings, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
+        List<String> hallNames = new ArrayList<>();
+        List<String[]> rows = buildHallRows(hallRankings, hallNames);
 
         String lastRoundForMetadata;
         if (selectedRound.equalsIgnoreCase("all")) {
@@ -262,7 +302,22 @@ public class CommandRankHalls {
             "Hall Rankings", "Halls ranked by average\nTrueElo (top 5 players)", lastRoundForMetadata);
 
         String entityName = lastRoundForMetadata != null ? lastRoundForMetadata : "unknown";
-        return TableImageGenerator.generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, highlightRows, "RankHalls", entityName);
+        return TableImageGenerator.generateHallTable(HALL_TABLE_HEADERS, rows, hallNames, HALL_TABLE_ALIGNMENTS,
+            HALL_TABLE_COLUMN_WIDTHS, metadata, highlightRows, "RankHalls", entityName);
+    }
+
+    private Path generateHallsImageAllYears(List<HallRankData> hallRankings, Set<Integer> highlightRows) throws Exception {
+        List<String> hallNames = new ArrayList<>();
+        List<String[]> rows = buildHallRows(hallRankings, hallNames);
+
+        List<A1_Rounds.Round> allRounds = rounds.getAllRounds();
+        String lastRoundForMetadata = allRounds.isEmpty() ? null : allRounds.get(allRounds.size() - 1).roundLabel;
+
+        TableImageGenerator.ImageMetadata metadata = new TableImageGenerator.ImageMetadata(
+            "Hall Rankings", "Halls ranked by average\nTrueElo (top 5 players, All Years)", lastRoundForMetadata);
+
+        return TableImageGenerator.generateHallTable(HALL_TABLE_HEADERS, rows, hallNames, HALL_TABLE_ALIGNMENTS,
+            HALL_TABLE_COLUMN_WIDTHS, metadata, highlightRows, "RankHalls", "AllYears");
     }
 
     public static class RankResponse extends CommandResponse {
