@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%202%20Update%2011-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2012,%202026-red)
+![Version](https://img.shields.io/badge/version-2.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2019,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -66,7 +66,7 @@ IHRG Statistics Bot is the complete solution for tournament organizers and compe
 
 **1. Individual Player Profiles (/infoplayer)**
 
-Get comprehensive statistics for any player. View their Elo, Past seating, Victory records, Hall affiliation, and performance trends over time.
+Get comprehensive statistics for any player. View their Elo, Past seating, Victory records, Hall affiliation, and performance trends over time. Supports an All Years mode, collapsing the round-by-round breakdown into one row per year across every season on record.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_InfoPlayer.png">
@@ -74,7 +74,7 @@ Get comprehensive statistics for any player. View their Elo, Past seating, Victo
 
 **2. Player Rankings (/rankplayers)**
 
-Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played. Players part of the hall you selected will be highlighted!
+Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played. Players part of the hall you selected will be highlighted! Also supports an All Years roster mode, ranking every player who has ever been active using their cross-year cumulative rating.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_RankPlayers.png">
@@ -82,7 +82,7 @@ Display player rankings sorted by trueElo. Easily view player's Capped status, H
 
 **3. Player Comparisons (/compareplayers)**
 
-Compare two players side-by-side with visual split-screen layouts. See Round Stats, Past Seating and Victory Records at a glance.
+Compare two players side-by-side with visual split-screen layouts. See Round Stats, Past Seating and Victory Records at a glance. Supports an All Years mode, collapsing the breakdown into one row per year.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_ComparePlayers.png">
@@ -94,7 +94,7 @@ Compare two players side-by-side with visual split-screen layouts. See Round Sta
 
 **4. Hall Information (infohall)**
 
-View detailed statistics for individual halls including member rosters, win/loss records, average ELO ratings, and recent performance trends.
+View detailed statistics for individual halls including member rosters, win/loss records, average ELO ratings, and recent performance trends. Supports an All Years mode, collapsing the breakdown into one row per year across every season on record.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_InfoHall.png">
@@ -102,7 +102,7 @@ View detailed statistics for individual halls including member rosters, win/loss
 
 **5. Hall Rankings (/rankhalls)**
 
-See which halls dominate the competition based on aggregate player performance and match results! Easily view each hall's total Cap Points and Average Elo, taken from the top 5 players of the team. The hall you selected in the settings will be highlighted!
+See which halls dominate the competition based on aggregate player performance and match results! Easily view each hall's total Cap Points and Average Elo, taken from the top 5 players of the team. The hall you selected in the settings will be highlighted! Also supports an All Years roster mode, ranking every hall using its cross-year cumulative rating.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_RankHalls.png">
@@ -110,7 +110,7 @@ See which halls dominate the competition based on aggregate player performance a
 
 **6. Hall Comparisons (/comparehalls)**
 
-Compare two halls side-by-side to analyze team strength differences, member statistics, and competitive advantages!
+Compare two halls side-by-side to analyze team strength differences, member statistics, and competitive advantages! Supports an All Years mode, collapsing the breakdown into one row per year.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_CompareHalls.png">
@@ -122,7 +122,7 @@ Compare two halls side-by-side to analyze team strength differences, member stat
 
 **7. Match Information (/infomatch)**
 
-Retrieve a high-level breakdown of any match by round number. See all participating teams, scores and match outcomes including proper WALKOVER handling.
+Retrieve a high-level breakdown of any match by round number. See all participating teams, scores and match outcomes including proper WALKOVER handling. The round picker spans every year on record, not just the current one.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_InfoMatch.png">
@@ -130,7 +130,7 @@ Retrieve a high-level breakdown of any match by round number. See all participat
 
 **8. Hall Match Details (/infomatchhall)**
 
-View comprehensive match information for a specific hall in a specific round. 
+View comprehensive match information for a specific hall in a specific round. The round picker spans every year on record, not just the current one.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_InfoMatchHall.png">
@@ -178,11 +178,15 @@ Fine-tune specific settings for your bot, from your home hall to allowing file p
 
 Create, list, and edit match types (name, max score, time limit, description), and assign a match type to a round that was uploaded without one. A match type must be assigned to a round before it can process a WALKOVER, since the walkover's default score is derived from the match type's max score.
 
-**13. (ADMIN) Recalculate Ratings (/recalculate)**
+**13. (ADMIN) Manage Admins (/admins)**
+
+List, add, or remove Telegram bot administrators. Refuses to remove the last remaining admin so you can never accidentally lock yourself out.
+
+**14. (ADMIN) Recalculate Ratings (/recalculate)**
 
 Manually triggers the whole-history rating recalculation: every stored round across every year is replayed through the rating engine and `player_ratings` is rewritten from scratch. This runs automatically after every round upload already - use this command to refresh ratings on demand (e.g. after a rating-engine update) without re-uploading any files. Point-in-time snapshots ("rankings as of round N") are never touched by a recalculation.
 
-**14. (ADMIN) Export Database (/exportdatabase)**
+**15. (ADMIN) Export Database (/exportdatabase)**
 
 Need to bug-test your database? Run your own data analytics? Migrating servers? Backing up your database? Choose between a full **.xlsx export** (one sheet per populated table - great for spreadsheet analysis) or the **raw .db file** (a drop-in backup/restore of the entire SQLite database). Sent to your DM for additional privacy!
 
@@ -340,7 +344,7 @@ ssh user@yourserver
 # Navigate to the application directory
 cd /opt/ihrgstats
 
-# Run the bot (quote the jar name - the version string contains spaces)
+# Run the bot (quote the jar name in case your path contains spaces)
 java -jar "<JAR_NAME>.jar"
 ```
 
@@ -365,7 +369,7 @@ nohup java -Denv.file.path=./.env.properties -jar <.JAR NAME>.jar
 # Copy files to server directory
 # Open PowerShell or Command Prompt in the application directory
 
-# Run the bot (quote the jar name - the version string contains spaces)
+# Run the bot (quote the jar name in case your path contains spaces)
 java -jar "<JAR_NAME>.jar"
 ```
 
@@ -612,7 +616,7 @@ ihrgstats/
 │   │   │   ├── calculations/
 │   │   │   │   ├── EloCalculator.java             # Batch Glicko-2 rating math
 │   │   │   │   └── RatingRecalculator.java        # Whole-history multi-pass recalculation
-│   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E-prefixed managers)
+│   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E/F-prefixed managers, incl. F16_Admins.java)
 │   │   │   ├── discordbot/
 │   │   │   │   └── logs/DiscordLog.java           # Discord logging
 │   │   │   ├── telegrambot/
@@ -628,6 +632,7 @@ ihrgstats/
 │   │   │   │   │   ├── CommandComparePlayers.java
 │   │   │   │   │   ├── CommandCompareHalls.java
 │   │   │   │   │   ├── CommandMatchTypes.java
+│   │   │   │   │   ├── CommandAdmins.java
 │   │   │   │   │   ├── CommandRecalculate.java
 │   │   │   │   │   ├── CommandExportDatabase.java
 │   │   │   │   │   ├── CommandSettings.java
