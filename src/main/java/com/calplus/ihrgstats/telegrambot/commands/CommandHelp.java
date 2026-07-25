@@ -136,7 +136,9 @@ public class CommandHelp {
         message.append("• /settings - (ADMIN) Change bot's settings\n");
         message.append("• /exportdatabase - (ADMIN) Exports the full database as .xlsx or the raw .db file\n");
         message.append("• /matchtypes - (ADMIN) Manage match types (name, max score, time limit, description)\n");
-        message.append("• /recalculate - (ADMIN) Recalculates all ratings across all years (whole-history WHR-style refit)\n\n");
+        message.append("• /recalculate - (ADMIN) Recalculates all ratings across all years (whole-history WHR-style refit)\n");
+        message.append("• /predict - (ADMIN) Forecasts a hypothetical matchup: AI model vs Glicko baseline, side by side\n");
+        message.append("• /modelstats - (ADMIN) AI model leaderboard and live prediction-accuracy scorecard\n\n");
 
         message.append("Click on any command below for detailed information:\n");
 
@@ -147,6 +149,7 @@ public class CommandHelp {
             "/infomatch", "/infomatchhall",
             "/settings", "/exportdatabase",
             "/matchtypes", "/recalculate",
+            "/predict", "/modelstats",
             "/about", "/help",
             "🔙 Back", "❌ Cancel"
         };
@@ -157,6 +160,7 @@ public class CommandHelp {
             "help_cmd_infomatch", "help_cmd_infomatchhall",
             "help_cmd_settings", "help_cmd_exportdatabase",
             "help_cmd_matchtypes", "help_cmd_recalculate",
+            "help_cmd_predict", "help_cmd_modelstats",
             "help_cmd_about", "help_cmd_help",
             "help_back", "help_cancel"
         };
@@ -581,6 +585,38 @@ public class CommandHelp {
                 message.append("• Match data is only read, never modified\n\n");
                 message.append("<b>When to run it:</b>\n");
                 message.append("• This runs automatically after every round upload - manual use is for refreshing stored ratings without re-uploading data (e.g. after a rating-engine update)\n");
+                break;
+
+            case "predict":
+                message.append("<b>(ADMIN) /predict</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("Forecasts a hypothetical matchup between any two players using the current AI model, shown side by side with the plain Glicko baseline. Admin-only command.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/predict</code>\n\n");
+                message.append("<b>Access:</b>\n");
+                message.append("• Only users with admin privileges can use this command\n\n");
+                message.append("<b>Flow:</b>\n");
+                message.append("• Pick the first player's hall, then the first player, then the second player's hall, then the second player\n");
+                message.append("• Returns win/draw/loss probabilities from the AI model AND the Glicko baseline, the top factors driving the model's number, and a reliability note (rating deviation, career boards) for each player\n\n");
+                message.append("<b>Honest limits:</b>\n");
+                message.append("• Each player's features come from their own most recently played round, not a perfectly live snapshot\n");
+                message.append("• If no AI model has been trained yet, only the Glicko baseline is shown\n");
+                break;
+
+            case "modelstats":
+                message.append("<b>(ADMIN) /modelstats</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("The AI model trust dashboard: current champion, a leaderboard comparing every trained model family against the Glicko baseline, and a live scorecard of how the champion's real pre-round predictions have actually done. Admin-only command.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/modelstats</code>\n\n");
+                message.append("<b>Access:</b>\n");
+                message.append("• Only users with admin privileges can use this command\n\n");
+                message.append("<b>What it shows:</b>\n");
+                message.append("• The current champion model and how it compares to the Glicko baseline in walk-forward backtesting\n");
+                message.append("• A leaderboard of every model family that has ever been trained\n");
+                message.append("• A live scorecard: predicted-outcome hit rate and mean probability assigned to what actually happened, across every logged pre-round prediction\n\n");
+                message.append("<b>Why it matters:</b>\n");
+                message.append("• Models and the baseline are always shown side by side, and a model only becomes champion if it measurably beat the baseline - this command is how you check whether that's actually still true\n");
                 break;
 
             default:

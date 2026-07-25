@@ -2,6 +2,17 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 16] - 2026-07-25
+
+Two new admin-only bot commands: the AI/ML layer is now user-facing for the first time.
+
+### Added
+
+- `/predict` - forecasts a hypothetical matchup between any two players. Walks through the same hall/player/hall/player picker as `/compareplayers`, then shows win/draw/loss probabilities from the AI model **and** the plain Glicko baseline side by side, the top factors driving the model's number, and a reliability note (rating deviation, career boards) for each player. Falls back to baseline-only when no model has been trained yet.
+- `/modelstats` - the AI model trust dashboard: current champion vs the Glicko baseline in walk-forward backtesting, a leaderboard of every trained model family, and a live scorecard measuring the champion's actual logged pre-round predictions against what really happened (hit rate, mean probability assigned to the realized outcome).
+- Both commands are admin-only, matching `/recalculate`/`/matchtypes` - re-checked at every wizard step, not just on entry.
+- 11 new command-logic tests (state machine, cancel, session-expiry, admin denial at every step, and full output content once a real model has been trained through the live pipeline).
+
 ## [Beta 3 Update 15] - 2026-07-25
 
 Hand-built gradient-boosted matchup model and full upload-pipeline wiring. **Internal only - no bot-facing commands yet** (still admin-only /predict, /modelstats, /lineup to come in a later checkpoint).

@@ -6,7 +6,7 @@
 
     <groupId>com.calplus.ihrgstats</groupId>
     <artifactId>ihrgstats</artifactId>
-    <version>Beta 3 Update 15</version>
+    <version>Beta 3 Update 16</version>
 
     <properties>
         <maven.compiler.source>24</maven.compiler.source>

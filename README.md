@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%203%20Update%2015-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2025,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2016-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2025,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -189,6 +189,14 @@ Need to bug-test your database? Run your own data analytics? Migrating servers? 
 <div align = "center">
 <img src="Github%20Images/TELEGRAM_exportdatabase.png">
 </div>
+
+**16. (ADMIN) Predict Matchup (/predict)**
+
+Forecasts a hypothetical matchup between any two players: pick a hall and player twice, and get win/draw/loss probabilities from the AI model **and** the plain Glicko baseline side by side, the top factors driving the model's number, and a reliability note (rating deviation, career boards) for each player. If no AI model has been trained yet, only the Glicko baseline is shown.
+
+**17. (ADMIN) AI Model Stats (/modelstats)**
+
+The AI model trust dashboard: the current champion model and how it compares to the Glicko baseline in walk-forward backtesting, a leaderboard of every model family ever trained, and a live scorecard measuring how the champion's actual pre-round predictions have done against reality. Models never silently replace the baseline in this view - a model only becomes champion once it measurably beats it.
 
 
 
@@ -612,7 +620,8 @@ ihrgstats/
 │   │   │   ├── calculations/
 │   │   │   │   ├── EloCalculator.java             # Batch Glicko-2 rating math
 │   │   │   │   └── RatingRecalculator.java        # Whole-history multi-pass recalculation
-│   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E/F-prefixed managers, incl. F16_Admins.java)
+│   │   │   ├── ml/                                # AI/ML matchup models (FeatureExtractor, GlickoBaseline, LogisticModel, GbmTree/GbmModel, BacktestHarness, ModelTrainer, PredictionService, RollingCacheUpdater)
+│   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E/F-prefixed managers, incl. F16_Admins.java, E17_MlModels.java)
 │   │   │   ├── discordbot/
 │   │   │   │   └── logs/DiscordLog.java           # Discord logging
 │   │   │   ├── telegrambot/
@@ -633,7 +642,9 @@ ihrgstats/
 │   │   │   │   │   ├── CommandExportDatabase.java
 │   │   │   │   │   ├── CommandSettings.java
 │   │   │   │   │   ├── CommandHelp.java
-│   │   │   │   │   └── CommandAbout.java
+│   │   │   │   │   ├── CommandAbout.java
+│   │   │   │   │   ├── CommandPredict.java
+│   │   │   │   │   └── CommandModelStats.java
 │   │   │   │   ├── utils/                         # RoundCsvProcessor, MatchScoreUtils, etc.
 │   │   │   │   └── logs/TelegramLog.java          # Telegram logging
 │   │   │   └── utils/                             # Shared utility classes (TelegramHtml, TableFormatter, VictoryRecordCalculator, ...)

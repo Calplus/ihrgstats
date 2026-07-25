@@ -1020,6 +1020,12 @@ public class TelegramListener {
                 return;
             }
 
+            // Handle predict callbacks
+            if (data.startsWith("predict_")) {
+                handlePredictCallback(callbackQuery, data, userId);
+                return;
+            }
+
             // Handle admins callbacks
             if (data.startsWith("admins_")) {
                 handleAdminsCallback(callbackQuery, data, userId);
@@ -1618,6 +1624,10 @@ public class TelegramListener {
             handleRecalculateCommand(message);
         } else if (command.equalsIgnoreCase("/admins")) {
             handleAdminsCommand(message);
+        } else if (command.equalsIgnoreCase("/predict")) {
+            handlePredictCommand(message);
+        } else if (command.equalsIgnoreCase("/modelstats")) {
+            handleModelStatsCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -3132,6 +3142,121 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing match types callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles /modelstats command (admin-only) - a single read-only report, no wizard.
+     */
+    private void handleModelStatsCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+
+            com.calplus.ihrgstats.telegrambot.commands.CommandModelStats modelStatsCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandModelStats();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                modelStatsCommand.handleCommand(userId);
+
+            sendLongMessageToCommandsChannel(response.message, message);
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /modelstats command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles /predict command (admin-only) - starts the hall/player/hall/player wizard.
+     */
+    private void handlePredictCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+
+            com.calplus.ihrgstats.telegrambot.commands.CommandPredict predictCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandPredict();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                predictCommand.handleCommand(userId);
+
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /predict command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles predict callback queries (admin-only wizard steps)
+     */
+    private void handlePredictCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandPredict predictCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandPredict();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
+
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+
+            if (message != null) {
+                JsonObject chat = message.getAsJsonObject("chat");
+                String chatId = chat.get("id").getAsString();
+                String messageId = message.get("message_id").getAsString();
+
+                removeInlineKeyboard(chatId, messageId);
+
+                if (data.equals("predict_cancel")) {
+                    response = predictCommand.handleCancel(userId);
+                    sendMessageToCommandsChannel(response.message, message);
+                } else if (data.startsWith("predict_selecthall1_")) {
+                    int hallId = Integer.parseInt(data.substring("predict_selecthall1_".length()));
+                    response = predictCommand.handleFirstHallSelection(userId, hallId);
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("predict_selectplayer1_")) {
+                    String player = data.substring("predict_selectplayer1_".length());
+                    response = predictCommand.handleFirstPlayerSelection(userId, player);
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("predict_selecthall2_")) {
+                    int hallId = Integer.parseInt(data.substring("predict_selecthall2_".length()));
+                    response = predictCommand.handleSecondHallSelection(userId, hallId);
+                    if (response.buttonConfig != null) {
+                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                    } else {
+                        sendMessageToCommandsChannel(response.message, message);
+                    }
+                } else if (data.startsWith("predict_selectplayer2_")) {
+                    String player = data.substring("predict_selectplayer2_".length());
+                    response = predictCommand.handleSecondPlayerSelection(userId, player);
+                    sendLongMessageToCommandsChannel(response.message, message);
+                }
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing predict callback: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             e.printStackTrace();

@@ -3,11 +3,14 @@ package com.calplus.ihrgstats.databasemanager;
 import com.calplus.ihrgstats.utils.DatabaseHelper;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Data-access helper for the {@code ai_predictions} table.
- * Reserved for the future prediction engine - not populated or read by
- * any current feature.
+ * Data-access helper for the {@code ai_predictions} table - the pre-round
+ * prediction log written automatically by every round upload and
+ * {@code /recalculate} (see {@code RoundCsvProcessor.logPredictionsForRound}),
+ * and read back by {@code /modelstats}' live scorecard.
  */
 public class E14_AiPredictions {
 
@@ -68,5 +71,20 @@ public class E14_AiPredictions {
                         rs.getDouble("predicted_win_probability"), rs.getString("model_version"));
             }
         }
+    }
+
+    /** Every logged prediction, most recent match first - backs /modelstats' live scorecard. */
+    public List<Prediction> getAllPredictions() throws SQLException {
+        String sql = "SELECT * FROM ai_predictions ORDER BY match_id DESC";
+        List<Prediction> predictions = new ArrayList<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                predictions.add(new Prediction(rs.getInt("match_id"), rs.getString("predicted_winner_player_id"),
+                        rs.getDouble("predicted_win_probability"), rs.getString("model_version")));
+            }
+        }
+        return predictions;
     }
 }
