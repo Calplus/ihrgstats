@@ -2,6 +2,23 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 17] - 2026-07-25
+
+`/lineup` - the app's actual reason for existing: a seating-order recommendation against a specific opponent, admin-only.
+
+### Added
+
+- Opponent-captain model (`OpponentModel`): recency-weighted per-player seat distributions, an expected 5-player roster, a probability-ranked top-24 list of the most likely full seat orderings, and a captain profile (ordering consistency and reactivity to rematches).
+- An exact lineup optimizer (`LineupOptimizer`): enumerates every legal 5-player lineup and seat order (auto-pruned to the top 12 by rating when more than 16 are available, stated in the output), scores each via a two-team half-point DP against the opponent's full predicted ordering distribution, and returns the best-response lineup, the maximin ("safe") lineup, and a named strategy-archetype table (strength order, mirror, single sacrifice, double sacrifice, free optimum) - so a Tian-Ji-style sacrifice gets an actual number, not a guess.
+- A per-player `ReliabilityScore` (0-100 + plain-language flags: rating uncertainty, thin history, insular schedule, strength-of-schedule bias) shown for the recommended lineup.
+- A fully deterministic "why this lineup" explanation (`LineupExplainer`) built entirely from the optimizer's own numbers - no LLM.
+- `/lineup` command: pick the opponent hall (your own home hall is excluded from the list), and get the full report - captain profile, best response, maximin, archetype table, per-board pairing table (model and Glicko side by side), reliability flags, and the explanation.
+- 14 new tests, including an exact brute-force cross-check of the DP, a literal Tian Ji scenario proving sacrifice beats strength-order with hand-computable probabilities, the maximin/best-response invariants, and a performance-budget test (12-player roster, 24 opponent orderings, under 2 seconds).
+
+### Scope note
+
+v1 uses your home hall's full active roster automatically - manual availability ticking, seat-locking, and adjusting the opponent's expected roster are real captain-in-the-loop refinements from the original plan, deliberately deferred rather than rushed. The underlying optimizer and opponent model are the full, real engine; only the wizard is simplified.
+
 ## [Beta 3 Update 16] - 2026-07-25
 
 Two new admin-only bot commands: the AI/ML layer is now user-facing for the first time.

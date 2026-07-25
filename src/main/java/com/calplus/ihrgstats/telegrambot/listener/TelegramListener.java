@@ -1026,6 +1026,12 @@ public class TelegramListener {
                 return;
             }
 
+            // Handle lineup callbacks
+            if (data.startsWith("lineup_")) {
+                handleLineupCallback(callbackQuery, data, userId);
+                return;
+            }
+
             // Handle admins callbacks
             if (data.startsWith("admins_")) {
                 handleAdminsCallback(callbackQuery, data, userId);
@@ -1628,6 +1634,8 @@ public class TelegramListener {
             handlePredictCommand(message);
         } else if (command.equalsIgnoreCase("/modelstats")) {
             handleModelStatsCommand(message);
+        } else if (command.equalsIgnoreCase("/lineup")) {
+            handleLineupCommand(message);
         } else {
             System.out.println("Unknown command: " + command);
         }
@@ -3257,6 +3265,87 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing predict callback: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Handles /lineup command (admin-only) - starts the opponent-hall picker.
+     */
+    private void handleLineupCommand(JsonObject message) {
+        try {
+            JsonObject from = message.getAsJsonObject("from");
+            String userId = from.get("id").getAsString();
+
+            com.calplus.ihrgstats.telegrambot.commands.CommandLineup lineupCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandLineup();
+
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                lineupCommand.handleCommand(userId);
+
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing /lineup command: " + e.getMessage();
+            discordLog.logError(errorMsg);
+            telegramLog.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        }
+    }
+
+    /**
+     * Handles lineup callback queries (admin-only). Cancel is instant; the
+     * actual optimization is a heavier combinatorial search, so it runs on
+     * a background thread (like /recalculate) so the polling loop stays free.
+     */
+    private void handleLineupCallback(JsonObject callbackQuery, String data, String userId) {
+        try {
+            com.calplus.ihrgstats.telegrambot.commands.CommandLineup lineupCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandLineup();
+
+            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            if (message == null) {
+                return;
+            }
+
+            JsonObject chat = message.getAsJsonObject("chat");
+            String chatId = chat.get("id").getAsString();
+            String messageId = message.get("message_id").getAsString();
+            removeInlineKeyboard(chatId, messageId);
+
+            if (data.equals("lineup_cancel")) {
+                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = lineupCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+                return;
+            }
+
+            if (data.startsWith("lineup_selectopponent_")) {
+                int opponentHallId = Integer.parseInt(data.substring("lineup_selectopponent_".length()));
+                Thread lineupThread = new Thread(() -> {
+                    try {
+                        com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                            lineupCommand.handleOpponentHallSelection(userId, opponentHallId);
+                        sendLongMessageToCommandsChannel(response.message, message);
+                    } catch (Exception e) {
+                        String errorMsg = "Error computing /lineup: " + e.getMessage();
+                        discordLog.logError(errorMsg);
+                        telegramLog.logError(errorMsg);
+                        e.printStackTrace();
+                    }
+                });
+                lineupThread.setDaemon(true);
+                lineupThread.start();
+            }
+
+        } catch (Exception e) {
+            String errorMsg = "Error processing lineup callback: " + e.getMessage();
             discordLog.logError(errorMsg);
             telegramLog.logError(errorMsg);
             e.printStackTrace();

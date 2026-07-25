@@ -671,6 +671,25 @@ public class FeatureExtractor {
         return new Vectors(sym, anti);
     }
 
+    /**
+     * A copy of {@code s} with only the seat overridden - used by the
+     * lineup optimizer to ask "how does THIS candidate seat affect the
+     * matchup" for a player whose other features (rating, career,
+     * seatPrior, etc) come from their own real history. seatPrior itself
+     * is deliberately NOT recomputed for the hypothetical seat (that would
+     * require re-deriving hall/seat aggregates for a seat the player may
+     * never have actually sat at) - only the direct seat-diff feature and
+     * the effective-rating blend respond to the override. Documented
+     * simplification, not a full live re-sweep.
+     */
+    public static Side withSeat(Side s, Integer newSeat) {
+        return new Side(s.playerId, s.hallId, newSeat, s.rating, s.rd, s.careerBoards, s.careerTimeouts,
+                s.sumOutcomeLast5, s.countLast5, s.seatPrior, s.ratingTrajectory, s.ratingStability,
+                s.hallRatingBias, s.seasonBoards, s.oppQualityBias, s.graphInsularity, s.roundsMissedThisSeason,
+                s.seatTrend, s.marginForm, s.blowoutRate, s.walkoverReceivedCount, s.oppTimeoutForcedRate,
+                s.vsOpponentHallRate);
+    }
+
     /** The board with A and B exchanged - used by symmetry tests and predictors. */
     public static RawBoard swapped(RawBoard rb) {
         return new RawBoard(rb.matchId, rb.roundSeq, rb.roundId, rb.year, rb.roundOrder,

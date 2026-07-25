@@ -119,6 +119,25 @@ public class C9_MatchParticipants {
         return participants;
     }
 
+    /** All of a hall's match_participants rows across all years, chronological (oldest first) - backs the lineup optimizer's opponent-captain seat-history model. */
+    public List<Participant> getParticipantsForHall(int hallId) throws SQLException {
+        String sql = "SELECT mp.* FROM match_participants mp " +
+                "JOIN matches m ON mp.match_id = m.id " +
+                "JOIN rounds r ON m.round_id = r.id " +
+                "WHERE mp.hall_id = ? ORDER BY r.year ASC, r.round_order ASC";
+        List<Participant> participants = new ArrayList<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, hallId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    participants.add(mapRow(rs));
+                }
+            }
+        }
+        return participants;
+    }
+
     /** A player's match_participants rows scoped to a single year, ordered by round ascending. */
     public List<Participant> getParticipantsForPlayerAndYear(String playerId, int year) throws SQLException {
         String sql = "SELECT mp.* FROM match_participants mp " +

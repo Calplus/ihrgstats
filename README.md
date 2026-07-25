@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%203%20Update%2016-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2025,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2017-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2025,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -197,6 +197,10 @@ Forecasts a hypothetical matchup between any two players: pick a hall and player
 **17. (ADMIN) AI Model Stats (/modelstats)**
 
 The AI model trust dashboard: the current champion model and how it compares to the Glicko baseline in walk-forward backtesting, a leaderboard of every model family ever trained, and a live scorecard measuring how the champion's actual pre-round predictions have done against reality. Models never silently replace the baseline in this view - a model only becomes champion once it measurably beats it.
+
+**18. (ADMIN) Lineup Optimizer (/lineup)**
+
+Recommends your seating order against a specific opponent hall - the app's actual reason for existing. Models the opponent captain's seating habits (expected roster, how fixed vs random their order is, how often they change it in rematches), then runs an exact optimizer over every legal lineup and seat order to find the best-response and "safe" (maximin) lineups. Shows a strategy-archetype table (strength order, mirror, single/double sacrifice, and the optimizer's free optimum) so you can see whether a Tian-Ji-style sacrifice actually pays off here, backed by real numbers - plus a per-board pairing table (model and Glicko side by side), a reliability flag per player, and a fully deterministic explanation (no LLM). Requires `settings.homeHall` and `settings.currentYear` to be set and a trained AI model. **v1 note:** uses your home hall's full active roster automatically; manual availability/exclude and opponent-roster adjustment are planned refinements.
 
 
 
@@ -620,7 +624,8 @@ ihrgstats/
 │   │   │   ├── calculations/
 │   │   │   │   ├── EloCalculator.java             # Batch Glicko-2 rating math
 │   │   │   │   └── RatingRecalculator.java        # Whole-history multi-pass recalculation
-│   │   │   ├── ml/                                # AI/ML matchup models (FeatureExtractor, GlickoBaseline, LogisticModel, GbmTree/GbmModel, BacktestHarness, ModelTrainer, PredictionService, RollingCacheUpdater)
+│   │   │   ├── ml/                                # AI/ML matchup models (FeatureExtractor, GlickoBaseline, LogisticModel, GbmTree/GbmModel, BacktestHarness, ModelTrainer, PredictionService, RollingCacheUpdater, ReliabilityScore)
+│   │   │   │   └── lineup/                        # Opponent-captain model + exact lineup optimizer (OpponentModel, LineupOptimizer, LineupExplainer)
 │   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E/F-prefixed managers, incl. F16_Admins.java, E17_MlModels.java)
 │   │   │   ├── discordbot/
 │   │   │   │   └── logs/DiscordLog.java           # Discord logging
@@ -644,7 +649,8 @@ ihrgstats/
 │   │   │   │   │   ├── CommandHelp.java
 │   │   │   │   │   ├── CommandAbout.java
 │   │   │   │   │   ├── CommandPredict.java
-│   │   │   │   │   └── CommandModelStats.java
+│   │   │   │   │   ├── CommandModelStats.java
+│   │   │   │   │   └── CommandLineup.java
 │   │   │   │   ├── utils/                         # RoundCsvProcessor, MatchScoreUtils, etc.
 │   │   │   │   └── logs/TelegramLog.java          # Telegram logging
 │   │   │   └── utils/                             # Shared utility classes (TelegramHtml, TableFormatter, VictoryRecordCalculator, ...)

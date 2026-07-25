@@ -138,7 +138,8 @@ public class CommandHelp {
         message.append("• /matchtypes - (ADMIN) Manage match types (name, max score, time limit, description)\n");
         message.append("• /recalculate - (ADMIN) Recalculates all ratings across all years (whole-history WHR-style refit)\n");
         message.append("• /predict - (ADMIN) Forecasts a hypothetical matchup: AI model vs Glicko baseline, side by side\n");
-        message.append("• /modelstats - (ADMIN) AI model leaderboard and live prediction-accuracy scorecard\n\n");
+        message.append("• /modelstats - (ADMIN) AI model leaderboard and live prediction-accuracy scorecard\n");
+        message.append("• /lineup - (ADMIN) Recommends your seating order against a specific opponent hall, with a strategy-archetype comparison\n\n");
 
         message.append("Click on any command below for detailed information:\n");
 
@@ -150,6 +151,7 @@ public class CommandHelp {
             "/settings", "/exportdatabase",
             "/matchtypes", "/recalculate",
             "/predict", "/modelstats",
+            "/lineup",
             "/about", "/help",
             "🔙 Back", "❌ Cancel"
         };
@@ -161,6 +163,7 @@ public class CommandHelp {
             "help_cmd_settings", "help_cmd_exportdatabase",
             "help_cmd_matchtypes", "help_cmd_recalculate",
             "help_cmd_predict", "help_cmd_modelstats",
+            "help_cmd_lineup",
             "help_cmd_about", "help_cmd_help",
             "help_back", "help_cancel"
         };
@@ -617,6 +620,25 @@ public class CommandHelp {
                 message.append("• A live scorecard: predicted-outcome hit rate and mean probability assigned to what actually happened, across every logged pre-round prediction\n\n");
                 message.append("<b>Why it matters:</b>\n");
                 message.append("• Models and the baseline are always shown side by side, and a model only becomes champion if it measurably beat the baseline - this command is how you check whether that's actually still true\n");
+                break;
+
+            case "lineup":
+                message.append("<b>(ADMIN) /lineup</b>\n\n");
+                message.append("<b>Description:</b>\n");
+                message.append("Recommends your seating order against a specific opponent hall: an opponent-captain model plus an exact optimizer over every legal lineup and seat order. Admin-only command.\n\n");
+                message.append("<b>Usage:</b>\n");
+                message.append("<code>/lineup</code>\n\n");
+                message.append("<b>Access:</b>\n");
+                message.append("• Only users with admin privileges can use this command\n");
+                message.append("• Requires <code>settings.homeHall</code> and <code>settings.currentYear</code> to be set (see /settings), and a trained AI model\n\n");
+                message.append("<b>What it shows:</b>\n");
+                message.append("• The opponent captain's expected roster and seating consistency (fixed vs random, reactivity to rematches)\n");
+                message.append("• The best-response lineup (highest expected win probability) and the maximin \"safe\" lineup, with each one's worst-case win probability\n");
+                message.append("• A strategy-archetype table - strength order, mirror, single sacrifice, double sacrifice, and the optimizer's free optimum - so you can see whether a Tian-Ji-style sacrifice actually helps here, with real numbers\n");
+                message.append("• A per-board pairing table with model and Glicko win% side by side, and a reliability flag for each of your players\n");
+                message.append("• A plain-language, fully deterministic explanation of the recommendation (no LLM involved)\n\n");
+                message.append("<b>v1 scope:</b>\n");
+                message.append("• Uses your home hall's full active roster automatically - manual availability/exclude and opponent-roster adjustment are planned refinements, not yet built\n");
                 break;
 
             default:

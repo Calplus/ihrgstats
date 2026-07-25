@@ -3,13 +3,15 @@ package com.calplus.ihrgstats.ml;
 import com.calplus.ihrgstats.databasemanager.E17_MlModels;
 
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Loads the currently-crowned champion model and serves predictions from
  * it. Thin wrapper so callers (the upload pipeline's prediction-logging
- * hook, and commands like {@code /predict}) don't each re-implement
- * "load champion row -> decode -> predict".
+ * hook, and commands like {@code /predict}/{@code /lineup}) don't each
+ * re-implement "load champion row -> decode -> predict".
  */
 public class PredictionService {
 
@@ -31,43 +33,58 @@ public class PredictionService {
     }
 
     /**
+     * Every player's most-recently-played Side snapshot, keyed by player_id
+     * - one extraction pass shared across a whole roster (the lineup
+     * optimizer and opponent model both need this for many players at
+     * once). "Most recent" means the state ENTERING that player's last
+     * rated round - up to one round short of perfectly live, since it
+     * doesn't yet include their own most recent result, but the closest
+     * available without a dedicated live-state sweep. A player who has
+     * never played simply has no entry - callers fall back to
+     * {@link #defaultSide}.
+     */
+    public Map<String, FeatureExtractor.Side> latestSides() throws SQLException {
+        Map<String, FeatureExtractor.Side> latest = new HashMap<>();
+        Map<String, Integer> latestSeq = new HashMap<>();
+        for (FeatureExtractor.RawBoard rb : new FeatureExtractor().extractAll()) {
+            considerLatest(latest, latestSeq, rb.a, rb.roundSeq);
+            considerLatest(latest, latestSeq, rb.b, rb.roundSeq);
+        }
+        return latest;
+    }
+
+    private static void considerLatest(Map<String, FeatureExtractor.Side> latest, Map<String, Integer> latestSeq,
+                                       FeatureExtractor.Side side, int seq) {
+        Integer prev = latestSeq.get(side.playerId);
+        if (prev == null || seq > prev) {
+            latest.put(side.playerId, side);
+            latestSeq.put(side.playerId, seq);
+        }
+    }
+
+    /** {@code latestSides()}, falling back to a neutral debutant Side for any playerId with no history. */
+    public FeatureExtractor.Side latestSideOrDefault(Map<String, FeatureExtractor.Side> latestSides, String playerId) {
+        FeatureExtractor.Side side = latestSides.get(playerId);
+        return side != null ? side : defaultSide(playerId);
+    }
+
+    /**
      * Builds a hypothetical "if these two played right now" board for
-     * {@code /predict}: each side's features come from that PLAYER's own
-     * most recently played rated board (their state entering their last
-     * round - one round short of perfectly live, since it doesn't yet
-     * include their own most recent result, but the closest available
-     * without a dedicated live-state sweep). A player who has never
-     * played gets neutral defaults, matching {@link FeatureExtractor}'s
-     * own debutant conventions exactly.
-     *
-     * Sides are combined across what may be two DIFFERENT rounds/opponent
-     * contexts (each reflects that player's own real history, not a
-     * shared as-of moment) - an accepted simplification for an ad-hoc
-     * scouting tool, not a training-grade guarantee. matchId/roundId are
-     * dummy placeholders (-1); predict() never reads them.
+     * {@code /predict}. Sides are combined across what may be two
+     * DIFFERENT rounds/opponent contexts (each reflects that player's own
+     * real history, not a shared as-of moment) - an accepted
+     * simplification for an ad-hoc scouting tool, not a training-grade
+     * guarantee. matchId/roundId are dummy placeholders (-1); predict()
+     * never reads them.
      */
     public FeatureExtractor.RawBoard buildHypotheticalBoard(String playerAId, String playerBId, int fallbackYear) throws SQLException {
+        Map<String, FeatureExtractor.Side> latest = latestSides();
+        FeatureExtractor.Side sideA = latestSideOrDefault(latest, playerAId);
+        FeatureExtractor.Side sideB = latestSideOrDefault(latest, playerBId);
         List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
-        FeatureExtractor.Side sideA = latestSideFor(all, playerAId);
-        FeatureExtractor.Side sideB = latestSideFor(all, playerBId);
         int roundOrder = all.isEmpty() ? 1 : all.get(all.size() - 1).roundOrder + 1;
         int year = all.isEmpty() ? fallbackYear : all.get(all.size() - 1).year;
         return new FeatureExtractor.RawBoard(-1, Integer.MAX_VALUE, -1, year, roundOrder, sideA, sideB, 0.0, false, false, 0.0);
-    }
-
-    private static FeatureExtractor.Side latestSideFor(List<FeatureExtractor.RawBoard> all, String playerId) {
-        FeatureExtractor.RawBoard latest = null;
-        for (FeatureExtractor.RawBoard rb : all) {
-            if (rb.a.playerId.equals(playerId) || rb.b.playerId.equals(playerId)) {
-                if (latest == null || rb.roundSeq > latest.roundSeq) {
-                    latest = rb;
-                }
-            }
-        }
-        if (latest == null) {
-            return defaultSide(playerId);
-        }
-        return latest.a.playerId.equals(playerId) ? latest.a : latest.b;
     }
 
     /** Fits a fresh Glicko baseline (draw rate) from the full stored history - the free "side by side" comparator. */
@@ -76,7 +93,7 @@ public class PredictionService {
     }
 
     /** Mirrors FeatureExtractor's own debutant conventions exactly (default rating/RD, neutral covariates). */
-    private static FeatureExtractor.Side defaultSide(String playerId) {
+    public static FeatureExtractor.Side defaultSide(String playerId) {
         return new FeatureExtractor.Side(playerId, -1, null, FeatureExtractor.DEFAULT_RATING, FeatureExtractor.DEFAULT_RD,
                 0, 0, 0.0, 0, FeatureExtractor.DEFAULT_RATING,
                 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.1, 0.5);
