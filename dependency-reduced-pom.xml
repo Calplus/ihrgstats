@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.calplus.ihrgstats</groupId>
   <artifactId>ihrgstats</artifactId>
-  <version>Beta 2 Update 11</version>
+  <version>Beta 3 Update 14</version>
   <build>
     <plugins>
       <plugin>
@@ -27,6 +27,9 @@
               <transformers>
                 <transformer>
                   <mainClass>com.calplus.ihrgstats.Main</mainClass>
+                  <manifestEntries>
+                    <Implementation-Version>${project.version}</Implementation-Version>
+                  </manifestEntries>
                 </transformer>
               </transformers>
             </configuration>

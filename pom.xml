@@ -6,7 +6,7 @@
 
     <groupId>com.calplus.ihrgstats</groupId>
     <artifactId>ihrgstats</artifactId>
-    <version>2.0.0</version>
+    <version>Beta 3 Update 14</version>
 
     <properties>
         <maven.compiler.source>24</maven.compiler.source>
@@ -113,19 +113,20 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.calplus.ihrgstats.Main</mainClass>
+                                    <!-- Populates Implementation-Version in the shaded jar's manifest
+                                         from this pom's own <version> - CommandAbout reads it via
+                                         Package.getImplementationVersion() so /about's displayed
+                                         version can never drift from the pom (previously a separate
+                                         hardcoded literal, kept in sync only by remembering to edit
+                                         both places). NOTE: the shade mojo has no <archive> parameter
+                                         (addDefaultImplementationEntries here was silently ignored,
+                                         a discovered pre-existing bug) - manifestEntries on the
+                                         transformer itself is the only mechanism that actually works. -->
+                                    <manifestEntries>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                    </manifestEntries>
                                 </transformer>
                             </transformers>
-                            <!-- Populates Implementation-Version in the shaded jar's manifest
-                                 from this pom's own <version> - CommandAbout reads it via
-                                 Package.getImplementationVersion() so /about's displayed
-                                 version can never drift from the pom (previously a separate
-                                 hardcoded literal, kept in sync only by remembering to edit
-                                 both places). -->
-                            <archive>
-                                <manifest>
-                                    <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
-                                </manifest>
-                            </archive>
                         </configuration>
                     </execution>
                 </executions>

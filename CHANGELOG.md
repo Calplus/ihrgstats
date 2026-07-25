@@ -2,6 +2,16 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 14] - 2026-07-25
+
+First checkpoint of the AI/ML implementation plan (Segment A of 7 - see the plan for the full roadmap: covariate-corrected win probabilities, a hand-built XGBoost-style model, player/hall embeddings, and an exact lineup optimizer for `/lineup`). **Internal only - not yet exposed via any bot command.**
+
+### Added
+
+- `ml_models` table + `E17_MlModels` DAO - registry of trained matchup-model runs (parameters, walk-forward backtest metrics, champion flag).
+- `com.calplus.ihrgstats.ml` package: leak-free per-board feature extraction (`FeatureExtractor`, single-forward-pass Glicko ratings, seat-as-prior shrinkage for cold-start players), a free Glicko-2 baseline predictor, a hand-rolled two-stage symmetric logistic regression model (draw stage + win stage, exact Newton-Raphson solver), a walk-forward backtest harness (Brier score, log-loss, calibration, paired comparison vs baseline), and a trainer that persists every run and crowns a champion only when it measurably beats the Glicko baseline.
+- 22 new tests, including permanent leakage-guard, signal-recovery, and noise-guard regression tests that keep the model honest going forward.
+
 ## [2.0.0] - 2026-07-19
 
 A ground-up rewrite of the data layer and rating engine, developed under the internal codename "Beta 2" (commits `b2u7`-`b2u14`). The internal `Beta 2 Update N` version label is retired in favor of semantic versioning, starting here at `2.0.0`.

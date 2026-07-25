@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2019,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2014-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2025,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -13,11 +13,7 @@ A powerful and intelligent statistics tracking bot designed specifically for NTU
 
 
 
-<div align = "center">
-
-*DISCLAIMER: All data used in the examples here are compeltely made-up and randomly generated, and not representitive of any of the aforementioned person's skills or talent. All names used are either fictional or historical figures, and are merely used for fun. All fictional names belong to their respective copyright holder(s). Any coincidences or similarities to real-life events involving historical figures are completely coincidental. No harm or message is intended by the examples used here. Hall Logos used are designed by the respective JCRCs of NTU Halls.*
-
-</div>
+> *DISCLAIMER: All data used in the examples here are compeltely made-up and randomly generated, and not representitive of any of the aforementioned person's skills or talent. All names used are either fictional or historical figures, and are merely used for fun. All fictional names belong to their respective copyright holder(s). Any coincidences or similarities to real-life events involving historical figures are completely coincidental. No harm or message is intended by the examples used here. Hall Logos used are designed by the respective JCRCs of NTU Halls.*
 
 
 

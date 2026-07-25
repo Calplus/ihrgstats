@@ -299,6 +299,25 @@ public class DatabaseSchema {
             "    FOREIGN KEY (predicted_winner_player_id) REFERENCES players(player_id)\n" +
             ")");
 
+        // Trained ML model registry (Segment A of the AI/ML plan). One row per
+        // training run: serialized parameters + walk-forward backtest metrics.
+        // Exactly one row should carry is_champion = 1 at any time - the model
+        // the prediction/lineup features serve from. The Glicko baseline is
+        // itself persisted as a run (family GLICKO_BASELINE) so "the champion
+        // is still plain Glicko" is a recorded, honest outcome.
+        createTable(conn, "ml_models",
+            "CREATE TABLE IF NOT EXISTS ml_models (\n" +
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n" +
+            "    model_version TEXT NOT NULL UNIQUE,\n" +
+            "    family TEXT NOT NULL,\n" +
+            "    params_json TEXT NOT NULL,\n" +
+            "    metrics_json TEXT NOT NULL,\n" +
+            "    trained_boards INTEGER NOT NULL,\n" +
+            "    is_champion BOOLEAN NOT NULL,\n" +
+            "    created_dttm TEXT NOT NULL,\n" +
+            "    updated_dttm TEXT NOT NULL\n" +
+            ")");
+
         // ====================================================================
         // DOMAIN 6: ACCESS CONTROL
         // ====================================================================
@@ -340,6 +359,7 @@ public class DatabaseSchema {
         createIndex(conn, "idx_player_ratings_snapshot_round_type", "player_ratings_snapshot", "round_id, rating_type_id");
         createIndex(conn, "idx_player_profiles_year", "player_profiles", "last_calculated_year");
         createIndex(conn, "idx_ai_predictions_winner_id", "ai_predictions", "predicted_winner_player_id");
+        createIndex(conn, "idx_ml_models_champion", "ml_models", "is_champion");
     }
 
     /**
