@@ -91,6 +91,18 @@ public class C8_Matches {
         }
     }
 
+    /** The round_id a specific match belongs to, or null if the match_id doesn't exist. */
+    public Integer getRoundIdForMatch(int matchId) throws SQLException {
+        String sql = "SELECT round_id FROM matches WHERE id = ?";
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, matchId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : null;
+            }
+        }
+    }
+
     /**
      * Deletes all matches for a round (cascades to match_participants and
      * ai_predictions via FK). Used when reprocessing a round - the round

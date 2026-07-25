@@ -18,14 +18,16 @@ public class LogisticModelTest {
     // Synthetic board builders (no DB)
     // ------------------------------------------------------------------
 
+    /** Neutral defaults for every [B] feature - callers only vary what a given test cares about. */
     static FeatureExtractor.Side side(String id, double rating, double rd, Integer seat,
                                       int career, int timeouts, double sum5, int cnt5, double prior) {
-        return new FeatureExtractor.Side(id, 1, seat, rating, rd, career, timeouts, sum5, cnt5, prior);
+        return new FeatureExtractor.Side(id, 1, seat, rating, rd, career, timeouts, sum5, cnt5, prior,
+                0.0, 0.0, 0.0, career, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.1, 0.5);
     }
 
     static FeatureExtractor.RawBoard board(int matchId, int roundSeq, FeatureExtractor.Side a,
                                            FeatureExtractor.Side b, double outcomeA) {
-        return new FeatureExtractor.RawBoard(matchId, roundSeq, roundSeq, 2025, roundSeq + 1, a, b, outcomeA, false, false);
+        return new FeatureExtractor.RawBoard(matchId, roundSeq, roundSeq, 2025, roundSeq + 1, a, b, outcomeA, false, false, 0.0);
     }
 
     /** Rating gap decides everything; includes a sprinkle of draws for stage D. */

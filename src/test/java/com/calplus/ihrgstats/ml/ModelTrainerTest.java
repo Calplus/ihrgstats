@@ -60,12 +60,12 @@ public class ModelTrainerTest {
 
         ModelTrainer.TrainOutcome outcome = trainer.retrainAndSelect(MlTestFixtures.NOW);
         assertTrue(outcome.trained);
-        assertEquals(10, outcome.runsPersisted); // baseline + 3x3 logistic grid
+        assertEquals(14, outcome.runsPersisted); // baseline + 3x3 logistic grid + 2x2 gbm grid
         assertNotNull(outcome.championVersion);
         assertFalse(outcome.note.isEmpty());
 
         List<E17_MlModels.MlModel> rows = mlModels.getRecent(50);
-        assertEquals(10, rows.size());
+        assertEquals(14, rows.size());
         assertEquals(1, rows.stream().filter(m -> m.isChampion).count());
 
         // Champion must be loadable and serve valid, symmetric probabilities.
@@ -92,8 +92,8 @@ public class ModelTrainerTest {
         ModelTrainer.TrainOutcome second = trainer.retrainAndSelect(MlTestFixtures.NOW);
 
         assertEquals(first.championVersion, second.championVersion);
-        // Upsert semantics: rerun updates the same 10 rows, no duplicates.
-        assertEquals(10, mlModels.getRecent(50).size());
+        // Upsert semantics: rerun updates the same 14 rows, no duplicates.
+        assertEquals(14, mlModels.getRecent(50).size());
         assertEquals(1, mlModels.getRecent(50).stream().filter(m -> m.isChampion).count());
     }
 

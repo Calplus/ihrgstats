@@ -76,7 +76,7 @@ public class ModelTrainer {
         }
 
         int burnIn = burnInOverride >= 0 ? burnInOverride : BacktestHarness.defaultBurnIn(all);
-        List<BacktestHarness.ModelFactory> factories = BacktestHarness.segmentACandidates();
+        List<BacktestHarness.ModelFactory> factories = BacktestHarness.allCandidates();
         List<BacktestHarness.Result> results = BacktestHarness.runAll(all, factories, burnIn);
 
         // No rounds beyond burn-in -> zero walk-forward predictions -> every

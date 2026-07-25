@@ -2,6 +2,7 @@ package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.F16_Admins;
+import com.calplus.ihrgstats.ml.ModelTrainer;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
@@ -73,12 +74,33 @@ public class CommandRecalculate {
                 return new CommandResponse("🟡 Nothing to recalculate - no rounds have been processed yet.", (java.nio.file.Path) null);
             }
 
+            // AI model retraining, same as the automatic post-upload hook -
+            // this command doubles as "refresh the ML models on demand"
+            // without re-uploading anything. Isolated: a training failure
+            // must not hide the (already-successful) rating recalculation.
+            String trainingNote;
+            try {
+                ModelTrainer.TrainOutcome trainOutcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
+                trainingNote = trainOutcome.trained
+                        ? "<i>AI models retrained:</i> " + trainOutcome.note
+                        : "<i>AI models not retrained:</i> " + trainOutcome.note;
+            } catch (Exception e) {
+                trainingNote = "<i>AI model retraining failed:</i> " + e.getMessage();
+            }
+
+            try {
+                new com.calplus.ihrgstats.ml.RollingCacheUpdater().updateAll(nowTimestamp);
+            } catch (Exception e) {
+                logHelper.logWarning("Rolling cache refresh failed after /recalculate: " + e.getMessage());
+            }
+
             String message = "🟢 <b>Whole-History Recalculation Complete</b>\n\n" +
                     "<b>Rounds recalculated:</b> " + result.roundsRecalculated + " (all years)\n" +
                     "<b>Players rated:</b> " + result.playersRated + "\n" +
                     "<b>Rating rows written:</b> " + result.ratingRowsWritten + "\n" +
                     "<b>Passes:</b> " + result.passes + "\n\n" +
-                    "<i>Point-in-time snapshots were left untouched.</i>";
+                    "<i>Point-in-time snapshots were left untouched.</i>\n\n" +
+                    trainingNote;
             logHelper.logSuccess(String.format("%s completed /recalculate: %d rounds, %d rows",
                     userInfo, result.roundsRecalculated, result.ratingRowsWritten));
             return new CommandResponse(message, (java.nio.file.Path) null);

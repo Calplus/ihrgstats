@@ -3,6 +3,10 @@ package com.calplus.ihrgstats.telegrambot.utils;
 import com.calplus.ihrgstats.calculations.EloCalculator;
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.ml.FeatureExtractor;
+import com.calplus.ihrgstats.ml.MatchupPredictor;
+import com.calplus.ihrgstats.ml.ModelTrainer;
+import com.calplus.ihrgstats.ml.PredictionService;
 import com.calplus.ihrgstats.utils.Constants;
 
 import java.io.BufferedReader;
@@ -440,6 +444,19 @@ public class RoundCsvProcessor {
             notify("🟢", String.format("round_%d.csv processed successfully for %d. %d matches, %d players rated.",
                     roundOrder, year, games.size(), finalRatings.size()));
 
+            // AI/ML pre-round prediction logging: score every rated board of
+            // THIS round with the champion model AS IT STOOD BEFORE this
+            // round's results are folded into training below - a genuine
+            // "did the model call it right" record for /modelstats, not a
+            // hindsight-informed one. Best-effort: no champion yet (a fresh
+            // or too-thin database) or any ML error must never fail the
+            // upload, matching the recalc's isolation below.
+            try {
+                logPredictionsForRound(round.id, nowTimestamp);
+            } catch (Exception e) {
+                notify("🟠", "Round data was saved, but AI prediction logging failed: " + e.getMessage());
+            }
+
             // Whole-history recalculation: replay ALL stored rounds across all
             // years so later results refine earlier rounds' estimates. The
             // round itself is already fully committed - a recalc failure must
@@ -452,6 +469,29 @@ public class RoundCsvProcessor {
             } catch (SQLException e) {
                 notify("🟠", "Round data was saved, but the whole-history recalculation failed: " + e.getMessage()
                         + " - run /recalculate to retry.");
+            }
+
+            // AI/ML model retraining: refits every candidate on the now-current
+            // full history and may crown a new champion for FUTURE rounds -
+            // the prediction logging above already ran against the OLD
+            // champion, so this ordering never lets a round's own result leak
+            // into its own logged prediction. Never fails the upload.
+            try {
+                ModelTrainer.TrainOutcome outcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
+                if (outcome.trained) {
+                    notify("🟢", "AI model retraining complete: " + outcome.note);
+                }
+            } catch (Exception e) {
+                notify("🟠", "Round data was saved, but AI model retraining failed: " + e.getMessage()
+                        + " - run /recalculate to retry.");
+            }
+
+            // Refresh the current-state serving cache (streaks, recent form,
+            // margins) - independent of the trained models, never fails the upload.
+            try {
+                new com.calplus.ihrgstats.ml.RollingCacheUpdater().updateAll(nowTimestamp);
+            } catch (Exception e) {
+                notify("🟠", "Round data was saved, but refreshing the AI rolling cache failed: " + e.getMessage());
             }
 
             promptForRoundDatetimeIfMissing(round, nowTimestamp);
@@ -471,6 +511,41 @@ public class RoundCsvProcessor {
         } catch (SQLException e) {
             notify("🔴", "Database update failed: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Scores every rated board of one round with the current champion
+     * model and upserts the result into {@code ai_predictions}. A no-op
+     * (not an error) when no champion has ever been trained yet - normal
+     * for a fresh or too-thin database, see {@link ModelTrainer#MIN_BOARDS_TO_TRAIN}.
+     */
+    private void logPredictionsForRound(int roundId, String nowTimestamp) throws SQLException {
+        PredictionService predictionService = new PredictionService();
+        MatchupPredictor champion = predictionService.loadChampion();
+        if (champion == null) {
+            return;
+        }
+        String modelVersion = predictionService.championVersion();
+        E14_AiPredictions predictions = new E14_AiPredictions();
+        for (FeatureExtractor.RawBoard rb : new FeatureExtractor().extractAll()) {
+            if (rb.roundId != roundId) {
+                continue;
+            }
+            MatchupPredictor.Probs probs = champion.predict(rb);
+            String winnerId;
+            double winnerProbability;
+            if (probs.pWin >= probs.pDraw && probs.pWin >= probs.pLoss) {
+                winnerId = rb.a.playerId;
+                winnerProbability = probs.pWin;
+            } else if (probs.pLoss >= probs.pDraw) {
+                winnerId = rb.b.playerId;
+                winnerProbability = probs.pLoss;
+            } else {
+                winnerId = null; // draw is the model's most likely outcome
+                winnerProbability = probs.pDraw;
+            }
+            predictions.upsertPrediction(rb.matchId, winnerId, winnerProbability, modelVersion, nowTimestamp);
         }
     }
 

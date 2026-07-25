@@ -39,6 +39,24 @@ public class E14_AiPredictions {
         }
     }
 
+    /** Insert-or-replace variant - used by the live prediction-logging hook, since a reprocessed round's match_id may already have a stored prediction. */
+    public void upsertPrediction(int matchId, String predictedWinnerPlayerId, double predictedWinProbability, String modelVersion, String nowTimestamp) throws SQLException {
+        String sql = "INSERT INTO ai_predictions (match_id, predicted_winner_player_id, predicted_win_probability, model_version, created_dttm) " +
+                "VALUES (?, ?, ?, ?, ?) " +
+                "ON CONFLICT(match_id) DO UPDATE SET predicted_winner_player_id = excluded.predicted_winner_player_id, " +
+                "predicted_win_probability = excluded.predicted_win_probability, model_version = excluded.model_version, " +
+                "created_dttm = excluded.created_dttm";
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, matchId);
+            ps.setString(2, predictedWinnerPlayerId);
+            ps.setDouble(3, predictedWinProbability);
+            ps.setString(4, modelVersion);
+            ps.setString(5, nowTimestamp);
+            ps.executeUpdate();
+        }
+    }
+
     public Prediction getPrediction(int matchId) throws SQLException {
         String sql = "SELECT * FROM ai_predictions WHERE match_id = ?";
         try (Connection conn = DatabaseHelper.getDefaultConnection();

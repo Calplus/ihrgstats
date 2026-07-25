@@ -24,7 +24,8 @@ public class BacktestHarnessTest {
     }
 
     private static FeatureExtractor.Side side(String id, int seat) {
-        return new FeatureExtractor.Side(id, 1, seat, 1000.0, 100.0, 20, 0, 2.5, 5, 1000.0);
+        return new FeatureExtractor.Side(id, 1, seat, 1000.0, 100.0, 20, 0, 2.5, 5, 1000.0,
+                0.0, 0.0, 0.0, 20, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0, 0.1, 0.5);
     }
 
     /** 40 rounds x 3 boards; equal ratings everywhere; seat difference decides (equal seats draw). */
@@ -40,7 +41,7 @@ public class BacktestHarnessTest {
                 int seatB = (int) Math.floorMod(state >> 16, 5) + 1;
                 double outcome = seatA < seatB ? 1.0 : (seatA > seatB ? 0.0 : 0.5);
                 data.add(new FeatureExtractor.RawBoard(matchId, round, round, 2025, round + 1,
-                        side("A" + matchId, seatA), side("B" + matchId, seatB), outcome, false, false));
+                        side("A" + matchId, seatA), side("B" + matchId, seatB), outcome, false, false, 0.0));
                 matchId++;
             }
         }
@@ -62,7 +63,7 @@ public class BacktestHarnessTest {
                 long roll = Math.floorMod(state >> 16, 20);
                 double outcome = roll == 0 ? 0.5 : (roll % 2 == 0 ? 1.0 : 0.0);
                 data.add(new FeatureExtractor.RawBoard(matchId, round, round, 2025, round + 1,
-                        side("A" + matchId, seatA), side("B" + matchId, seatB), outcome, false, false));
+                        side("A" + matchId, seatA), side("B" + matchId, seatB), outcome, false, false, 0.0));
                 matchId++;
             }
         }
@@ -97,10 +98,35 @@ public class BacktestHarnessTest {
         for (int round = 0; round < 14; round++) {
             int year = round < 12 ? 2024 : 2025; // 12 first-year rounds > the 10 floor
             data.add(new FeatureExtractor.RawBoard(round, round, round, year, round + 1,
-                    side("A", 1), side("B", 2), 1.0, false, false));
+                    side("A", 1), side("B", 2), 1.0, false, false, 0.0));
         }
         assertEquals(12, BacktestHarness.defaultBurnIn(data));
         assertEquals(10, BacktestHarness.defaultBurnIn(data.subList(12, 14))); // tiny history -> floor of 10
+    }
+
+    /**
+     * Regression test: a SINGLE-year history's "first year's round count"
+     * always equals the running total, so the multi-year rule would make
+     * burn-in chase the total upward forever and never predict a single
+     * round, no matter how large the first (only) season grew - silently
+     * disabling training for any club in its first-ever season. A lone
+     * year must fall back to the fixed 10-round floor instead.
+     */
+    @Test
+    void burnInStaysAtTheFixedFloorForASingleYearNoMatterHowManyRounds() {
+        List<FeatureExtractor.RawBoard> data = new ArrayList<>();
+        for (int round = 0; round < 50; round++) {
+            data.add(new FeatureExtractor.RawBoard(round, round, round, 2026, round + 1,
+                    side("A", 1), side("B", 2), 1.0, false, false, 0.0));
+        }
+        assertEquals(10, BacktestHarness.defaultBurnIn(data),
+                "50 rounds, all in one single year, must not push burn-in past the fixed floor");
+
+        // And walk-forward must actually be able to predict rounds beyond that floor.
+        BacktestHarness.Result result = BacktestHarness.run(data,
+                BacktestHarness.segmentACandidates().get(0), BacktestHarness.defaultBurnIn(data));
+        assertEquals(40, result.predictedRounds, "rounds 11-50 (40 rounds) should be predictable");
+        assertTrue(result.predictedBoards > 0);
     }
 
     @Test

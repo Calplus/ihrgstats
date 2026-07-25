@@ -61,17 +61,34 @@ public class BacktestHarness {
         }
     }
 
-    /** Burn-in: rounds never predicted, only trained on. max(10, rounds in the first stored year). */
+    /**
+     * Burn-in: rounds never predicted, only trained on. When history spans
+     * more than one year, this is max(10, rounds in the first stored year)
+     * - the whole first season is reserved so nothing gets "predicted"
+     * before any Elo history exists to predict from. With only a SINGLE
+     * year on record (a club's first season, or simply a fresh database),
+     * that same rule degenerates: "first year's round count" always
+     * equals the running total, so burn-in would forever chase the total
+     * upward and no round would EVER be predicted, no matter how much
+     * data accumulated. In that case burn-in is just the fixed 10-round
+     * floor instead, so a first-ever season can still train once it has
+     * enough rounds.
+     */
     public static int defaultBurnIn(List<FeatureExtractor.RawBoard> all) {
         if (all.isEmpty()) {
             return 10;
         }
         int firstYear = all.get(0).year;
+        Set<Integer> years = new HashSet<>();
         Set<Integer> firstYearRounds = new HashSet<>();
         for (FeatureExtractor.RawBoard rb : all) {
+            years.add(rb.year);
             if (rb.year == firstYear) {
                 firstYearRounds.add(rb.roundSeq);
             }
+        }
+        if (years.size() <= 1) {
+            return 10;
         }
         return Math.max(10, firstYearRounds.size());
     }
@@ -223,6 +240,36 @@ public class BacktestHarness {
         return factories;
     }
 
+    /** GBM configs only (no baseline row - combine with {@link #segmentACandidates} via {@link #allCandidates}). */
+    public static List<ModelFactory> gbmCandidates() {
+        List<ModelFactory> factories = new ArrayList<>();
+        for (double n0 : new double[]{6, 12}) {
+            for (double lambda : new double[]{1.0, 3.0}) {
+                final double fn0 = n0;
+                final double fLambda = lambda;
+                factories.add(new ModelFactory() {
+                    @Override
+                    public String name() {
+                        return String.format(Locale.ROOT, "gbm n0=%.0f lambda=%.1f", fn0, fLambda);
+                    }
+
+                    @Override
+                    public MatchupPredictor fit(List<FeatureExtractor.RawBoard> train) {
+                        return GbmModel.fit(train, fn0, fLambda);
+                    }
+                });
+            }
+        }
+        return factories;
+    }
+
+    /** Full candidate roster used by the trainer and the real-DB report: baseline + logistic grid + GBM grid. */
+    public static List<ModelFactory> allCandidates() {
+        List<ModelFactory> all = new ArrayList<>(segmentACandidates());
+        all.addAll(gbmCandidates());
+        return all;
+    }
+
     // ========================================================================
     // Read-only report against the real database (audit checkpoints)
     // ========================================================================
@@ -261,7 +308,7 @@ public class BacktestHarness {
         int burnIn = defaultBurnIn(all);
         sb.append(String.format(Locale.ROOT, "Burn-in: first %d rounds (never predicted)%n%n", burnIn));
 
-        List<Result> results = runAll(all, segmentACandidates(), burnIn);
+        List<Result> results = runAll(all, allCandidates(), burnIn);
         Result baseline = results.get(0);
         sb.append(String.format(Locale.ROOT, "%-28s %9s %9s %9s %7s %12s%n",
                 "candidate", "Brier", "logLoss", "ES-MSE", "acc", "rounds +/-"));

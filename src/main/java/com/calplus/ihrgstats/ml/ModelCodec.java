@@ -19,6 +19,9 @@ public final class ModelCodec {
         if (predictor instanceof LogisticModel logistic) {
             return logistic.toParamsJson();
         }
+        if (predictor instanceof GbmModel gbm) {
+            return gbm.toParamsJson();
+        }
         throw new IllegalArgumentException("No codec for predictor family: " + predictor.family());
     }
 
@@ -28,6 +31,8 @@ public final class ModelCodec {
                 return GlickoBaseline.fromParamsJson(paramsJson);
             case E17_MlModels.FAMILY_LOGISTIC:
                 return LogisticModel.fromParamsJson(paramsJson);
+            case E17_MlModels.FAMILY_GBM:
+                return GbmModel.fromParamsJson(paramsJson);
             default:
                 throw new IllegalArgumentException("Unknown ml_models family: " + family);
         }

@@ -2,6 +2,22 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 15] - 2026-07-25
+
+Hand-built gradient-boosted matchup model and full upload-pipeline wiring. **Internal only - no bot-facing commands yet** (still admin-only /predict, /modelstats, /lineup to come in a later checkpoint).
+
+### Added
+
+- Expanded the feature set from ~11 to 27 leak-free, as-of covariates per side: rating trajectory, rating stability, hall-vs-own-rating bias, season boards, opponent-quality bias (strength of schedule), graph insularity, rounds missed this season, seat trend, margin form, blowout rate, walkover-received count, forced-timeout rate, and record vs the specific opponent's hall - plus match-type max-score and same-hall context.
+- A hand-built, dependency-free gradient-boosted-tree model (`GbmTree`/`GbmModel`): exact-greedy splits on the standard second-order gain, learned missing-value split direction (so unrecorded seats are handled natively instead of always imputed), and an algebraic symmetrization wrapper that guarantees exactly-antisymmetric win probabilities regardless of what the trees learn - proven by a genuine three-way sign-parity interaction the linear model provably cannot represent, verified in a dedicated test.
+- Live pipeline wiring: every round upload (and `/recalculate`) now automatically retrains all candidate models, logs each board's pre-round prediction (made with the champion as it stood BEFORE that round, never with hindsight), and refreshes a current-state rolling cache (streaks, recent form, margins) - proven end-to-end with zero direct calls to any ML class.
+- 24 new tests, including an end-to-end pipeline test that uploads real rounds through the CSV processor and asserts training, prediction logging, and the rolling cache all fire automatically.
+
+### Fixed
+
+- The walk-forward burn-in heuristic degenerated for any single-year history (the common case for a club's first-ever season): "first year's round count" always equalled the running total, so burn-in chased it upward forever and training could never produce walk-forward evidence no matter how much data accumulated. Single-year histories now use a fixed 10-round floor instead.
+- The shaded jar's `Implementation-Version` manifest entry - meant to keep `/about`'s displayed version in sync with the pom - was silently never being written: the `maven-shade-plugin`'s `shade` goal has no `archive` parameter at all (confirmed against the plugin's own descriptor), so that configuration block was dead on arrival. Replaced with the shade transformer's actual `manifestEntries` mechanism, which now genuinely works.
+
 ## [Beta 3 Update 14] - 2026-07-25
 
 First checkpoint of the AI/ML implementation plan (Segment A of 7 - see the plan for the full roadmap: covariate-corrected win probabilities, a hand-built XGBoost-style model, player/hall embeddings, and an exact lineup optimizer for `/lineup`). **Internal only - not yet exposed via any bot command.**
