@@ -2,6 +2,19 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 18] - 2026-07-26
+
+Hand-built neural-network player embeddings. **Internal only - no bot-facing changes** (`/predict`, `/lineup`, `/modelstats` surface the result automatically since both already display whichever family is champion).
+
+### Added
+
+- `EmbeddingNet`: a from-scratch neural net (per-player and per-hall embeddings feeding a single hidden tanh layer) with hand-derived backpropagation, checked against a numeric finite-difference gradient - no autodiff, no ML library.
+- A new `GBM_EMB` model family: the embedding net's antisymmetric interaction score is appended to the existing GBM feature set, added to the walk-forward candidate grid alongside plain GBM.
+- A stricter champion-selection rule: `GBM_EMB` is only crowned champion if it measurably beats plain GBM's Brier score, not merely the Glicko baseline - embeddings have to earn their added complexity.
+- Trained player embeddings are now written to the long-reserved `player_profiles.playstyle_vector` column after every retrain - the first thing that table has ever stored.
+- A synthetic cyclic-dominance ("rock-paper-scissors") test fixture where every player shares identical scalar stats, proving embeddings recover a pure identity-based signal that plain GBM structurally cannot see at all.
+- 14 new tests, 236 total passing.
+
 ## [Beta 3 Update 17] - 2026-07-25
 
 `/lineup` - the app's actual reason for existing: a seating-order recommendation against a specific opponent, admin-only.

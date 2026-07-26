@@ -1,6 +1,8 @@
 package com.calplus.ihrgstats.ml;
 
+import com.calplus.ihrgstats.databasemanager.E12_PlayerProfiles;
 import com.calplus.ihrgstats.databasemanager.E17_MlModels;
+import com.calplus.ihrgstats.ml.embed.EmbeddingNet;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
@@ -9,6 +11,7 @@ import java.security.MessageDigest;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Orchestrates one full training cycle: extract features, walk-forward
@@ -97,6 +100,7 @@ public class ModelTrainer {
         mlModels.clearChampionFlags(nowTimestamp);
         String championVersion = null;
         String championFamily = null;
+        EmbeddingNet.Params embeddingForExport = null;
         Gson gson = new Gson();
         for (int i = 0; i < results.size(); i++) {
             BacktestHarness.Result result = results.get(i);
@@ -110,6 +114,15 @@ public class ModelTrainer {
                 championVersion = version;
                 championFamily = result.family;
             }
+            // Last GBM_EMB config wins (highest embedding dim, per gbmEmbCandidates order) - a
+            // best-effort visibility export into the reserved player_profiles table, independent
+            // of whether embeddings actually won the champion gate this cycle.
+            if (fullFit instanceof GbmModel gbm && gbm.getEmbedding() != null) {
+                embeddingForExport = gbm.getEmbedding();
+            }
+        }
+        if (embeddingForExport != null) {
+            exportEmbeddingsToProfiles(embeddingForExport, all, nowTimestamp);
         }
 
         String note = String.format(Locale.ROOT,
@@ -122,8 +135,25 @@ public class ModelTrainer {
     /**
      * Champion selection - static and side-effect-free so the noise-guard
      * test can exercise it directly. results.get(0) must be the baseline.
+     *
+     * GBM_EMB gets a stricter bar than every other family: it only
+     * qualifies if it ALSO strictly beats the best plain-GBM result, not
+     * merely the Glicko baseline. Embeddings add real complexity (a whole
+     * trained neural net per candidate) for a feature the plan explicitly
+     * says to keep "only if it measurably beats plain GBM" - this is that
+     * gate, enforced structurally rather than trusted to the grid search
+     * happening to prefer it on Brier alone (a GBM_EMB config could beat
+     * the baseline by luck without beating GBM, and the baseline-only
+     * comparison would still crown it).
      */
     public static int pickChampion(List<BacktestHarness.Result> results, int minPredictedBoards) {
+        double bestGbmBrier = Double.POSITIVE_INFINITY;
+        for (BacktestHarness.Result r : results) {
+            if (E17_MlModels.FAMILY_GBM.equals(r.family) && !Double.isNaN(r.brier) && r.brier < bestGbmBrier) {
+                bestGbmBrier = r.brier;
+            }
+        }
+
         int best = 0;
         double baselineBrier = results.get(0).brier;
         double bestBrier = baselineBrier;
@@ -132,12 +162,32 @@ public class ModelTrainer {
             if (Double.isNaN(r.brier) || r.predictedBoards < minPredictedBoards) {
                 continue;
             }
+            if (E17_MlModels.FAMILY_GBM_EMB.equals(r.family) && !(r.brier < bestGbmBrier)) {
+                continue;
+            }
             if (r.brier < baselineBrier && r.brier < bestBrier) {
                 best = i;
                 bestBrier = r.brier;
             }
         }
         return best;
+    }
+
+    /**
+     * Writes the trained player embeddings into the reserved
+     * {@code player_profiles.playstyle_vector} slot - the first thing that
+     * has ever populated that table. {@code all} is chronological (see
+     * {@link FeatureExtractor#extractAll}), so its last board's year is
+     * "as of" this training cycle.
+     */
+    private void exportEmbeddingsToProfiles(EmbeddingNet.Params embedding, List<FeatureExtractor.RawBoard> all,
+                                            String nowTimestamp) throws SQLException {
+        int year = all.get(all.size() - 1).year;
+        Gson gson = new Gson();
+        E12_PlayerProfiles profiles = new E12_PlayerProfiles();
+        for (Map.Entry<String, double[]> e : embedding.playerEmb.entrySet()) {
+            profiles.upsertProfile(e.getKey(), gson.toJson(e.getValue()), year, nowTimestamp);
+        }
     }
 
     /** Deterministic version string: family, data extent, and a hash of the exact parameters. */

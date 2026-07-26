@@ -263,10 +263,38 @@ public class BacktestHarness {
         return factories;
     }
 
-    /** Full candidate roster used by the trainer and the real-DB report: baseline + logistic grid + GBM grid. */
+    /**
+     * GBM_EMB configs only: hand-built player/hall embeddings (see
+     * {@code com.calplus.ihrgstats.ml.embed.EmbeddingNet}) feeding extra
+     * antisymmetric interaction features into the win-stage trees. n0/lambda
+     * are held at one representative GBM setting (embedding dimension is
+     * the thing actually being compared here, not another n0/lambda sweep -
+     * that combinatorial product is already covered by {@link #gbmCandidates}).
+     */
+    public static List<ModelFactory> gbmEmbCandidates() {
+        List<ModelFactory> factories = new ArrayList<>();
+        for (int dim : new int[]{4, 8}) {
+            final int fdim = dim;
+            factories.add(new ModelFactory() {
+                @Override
+                public String name() {
+                    return "gbm+emb dim=" + fdim;
+                }
+
+                @Override
+                public MatchupPredictor fit(List<FeatureExtractor.RawBoard> train) {
+                    return GbmModel.fitWithEmbeddings(train, 6.0, 1.0, fdim);
+                }
+            });
+        }
+        return factories;
+    }
+
+    /** Full candidate roster used by the trainer and the real-DB report: baseline + logistic grid + GBM grid + GBM_EMB grid. */
     public static List<ModelFactory> allCandidates() {
         List<ModelFactory> all = new ArrayList<>(segmentACandidates());
         all.addAll(gbmCandidates());
+        all.addAll(gbmEmbCandidates());
         return all;
     }
 

@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.ml;
 
 import com.calplus.ihrgstats.databasemanager.DatabaseSchema;
+import com.calplus.ihrgstats.databasemanager.E12_PlayerProfiles;
 import com.calplus.ihrgstats.databasemanager.E17_MlModels;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,12 +61,12 @@ public class ModelTrainerTest {
 
         ModelTrainer.TrainOutcome outcome = trainer.retrainAndSelect(MlTestFixtures.NOW);
         assertTrue(outcome.trained);
-        assertEquals(14, outcome.runsPersisted); // baseline + 3x3 logistic grid + 2x2 gbm grid
+        assertEquals(16, outcome.runsPersisted); // baseline + 3x3 logistic grid + 2x2 gbm grid + 2 gbm_emb grid
         assertNotNull(outcome.championVersion);
         assertFalse(outcome.note.isEmpty());
 
         List<E17_MlModels.MlModel> rows = mlModels.getRecent(50);
-        assertEquals(14, rows.size());
+        assertEquals(16, rows.size());
         assertEquals(1, rows.stream().filter(m -> m.isChampion).count());
 
         // Champion must be loadable and serve valid, symmetric probabilities.
@@ -82,6 +83,14 @@ public class ModelTrainerTest {
             assertTrue(row.metricsJson.contains("brierDeltaVsBaseline"));
             assertEquals(24, row.trainedBoards);
         }
+
+        // The GBM_EMB grid is always fit as part of the full-history persist loop, so the
+        // reserved player_profiles.playstyle_vector slot must be populated too - the first
+        // thing that has ever written to that table.
+        E12_PlayerProfiles.Profile profile = new E12_PlayerProfiles().getProfile("AA-01");
+        assertNotNull(profile, "training must export embeddings into player_profiles");
+        assertTrue(profile.playstyleVector.startsWith("["), "playstyle_vector should be a JSON array: " + profile.playstyleVector);
+        assertEquals(2025, profile.lastCalculatedYear);
     }
 
     @Test
@@ -92,8 +101,8 @@ public class ModelTrainerTest {
         ModelTrainer.TrainOutcome second = trainer.retrainAndSelect(MlTestFixtures.NOW);
 
         assertEquals(first.championVersion, second.championVersion);
-        // Upsert semantics: rerun updates the same 14 rows, no duplicates.
-        assertEquals(14, mlModels.getRecent(50).size());
+        // Upsert semantics: rerun updates the same 16 rows, no duplicates.
+        assertEquals(16, mlModels.getRecent(50).size());
         assertEquals(1, mlModels.getRecent(50).stream().filter(m -> m.isChampion).count());
     }
 

@@ -32,6 +32,7 @@ public final class ModelCodec {
             case E17_MlModels.FAMILY_LOGISTIC:
                 return LogisticModel.fromParamsJson(paramsJson);
             case E17_MlModels.FAMILY_GBM:
+            case E17_MlModels.FAMILY_GBM_EMB:
                 return GbmModel.fromParamsJson(paramsJson);
             default:
                 throw new IllegalArgumentException("Unknown ml_models family: " + family);

@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.ml;
 
 import com.calplus.ihrgstats.databasemanager.E17_MlModels;
+import com.calplus.ihrgstats.ml.embed.EmbeddingNet;
 import com.google.gson.Gson;
 
 import java.util.ArrayList;
@@ -48,6 +49,8 @@ public class GbmModel implements MatchupPredictor {
         public double drawBaseScore; // logit(overall draw rate) - constant offset, draw stage only
         public List<GbmTree.Node> drawTrees;
         public List<GbmTree.Node> winTrees;
+        /** Null = plain GBM (family {@code GBM}); present = GBM_EMB, win-stage anti[] is augmented with embedding interaction features. */
+        public EmbeddingNet.Params embedding;
     }
 
     private static final int MAX_TREES = 200;
@@ -76,11 +79,31 @@ public class GbmModel implements MatchupPredictor {
     // ========================================================================
 
     public static GbmModel fit(List<FeatureExtractor.RawBoard> train, double n0, double lambda) {
+        return fitInternal(train, n0, lambda, null);
+    }
+
+    /**
+     * Same as {@link #fit}, but first trains an {@link EmbeddingNet} on
+     * {@code train} and augments every win-stage anti[] vector with its
+     * antisymmetric interaction features - the GBM_EMB family. Kept as a
+     * genuinely separate model class (not a post-hoc feature bolt-on) so
+     * the walk-forward harness can score it head-to-head against plain
+     * GBM and the trainer can gate on it strictly beating plain GBM, not
+     * just the Glicko baseline (see {@code ModelTrainer.pickChampion}).
+     */
+    public static GbmModel fitWithEmbeddings(List<FeatureExtractor.RawBoard> train, double n0, double lambda, int embedDim) {
+        EmbeddingNet.Params embedding = EmbeddingNet.fit(train, embedDim);
+        return fitInternal(train, n0, lambda, embedding);
+    }
+
+    private static GbmModel fitInternal(List<FeatureExtractor.RawBoard> train, double n0, double lambda,
+                                        EmbeddingNet.Params embedding) {
         Params p = new Params();
         p.n0 = n0;
         p.lambda = lambda;
         p.learningRate = 0.1;
         p.maxDepth = 3;
+        p.embedding = embedding;
 
         if (train.isEmpty()) {
             p.drawBaseScore = 0.0;
@@ -136,14 +159,14 @@ public class GbmModel implements MatchupPredictor {
         List<FeatureExtractor.RawBoard> decisiveFit = fitSet.stream().filter(rb -> !rb.isDraw()).toList();
         List<FeatureExtractor.RawBoard> decisiveVal = valSet.stream().filter(rb -> !rb.isDraw()).toList();
 
-        double[][] fitX = mirroredAntiMatrix(decisiveFit, p.n0);
+        double[][] fitX = mirroredAntiMatrix(decisiveFit, p.n0, p.embedding);
         double[] fitY = new double[decisiveFit.size() * 2];
         for (int i = 0; i < decisiveFit.size(); i++) {
             fitY[2 * i] = decisiveFit.get(i).outcomeA;
             fitY[2 * i + 1] = 1.0 - decisiveFit.get(i).outcomeA;
         }
         // Validation uses the antisymmetrized prediction directly (see predictWinLogit), not the raw mirrored set.
-        double[][] valX = antiMatrix(decisiveVal, p.n0);
+        double[][] valX = antiMatrix(decisiveVal, p.n0, p.embedding);
         double[] valY = new double[decisiveVal.size()];
         for (int i = 0; i < decisiveVal.size(); i++) {
             valY[i] = decisiveVal.get(i).outcomeA;
@@ -159,27 +182,44 @@ public class GbmModel implements MatchupPredictor {
         return x;
     }
 
-    private static double[][] antiMatrix(List<FeatureExtractor.RawBoard> boards, double n0) {
+    private static double[][] antiMatrix(List<FeatureExtractor.RawBoard> boards, double n0, EmbeddingNet.Params embedding) {
         double[][] x = new double[boards.size()][];
         for (int i = 0; i < boards.size(); i++) {
-            x[i] = FeatureExtractor.assemble(boards.get(i), n0, true).anti;
+            x[i] = augmentedAnti(boards.get(i), n0, embedding);
         }
         return x;
     }
 
     /** Each board contributes its own row AND its negated-feature mirror row, doubling the fit set. */
-    private static double[][] mirroredAntiMatrix(List<FeatureExtractor.RawBoard> boards, double n0) {
+    private static double[][] mirroredAntiMatrix(List<FeatureExtractor.RawBoard> boards, double n0, EmbeddingNet.Params embedding) {
         double[][] x = new double[boards.size() * 2][];
         for (int i = 0; i < boards.size(); i++) {
-            double[] anti = FeatureExtractor.assemble(boards.get(i), n0, true).anti;
+            double[] anti = augmentedAnti(boards.get(i), n0, embedding);
             x[2 * i] = anti;
-            double[] negated = new double[anti.length];
-            for (int j = 0; j < anti.length; j++) {
-                negated[j] = -anti[j];
-            }
-            x[2 * i + 1] = negated;
+            x[2 * i + 1] = negate(anti);
         }
         return x;
+    }
+
+    /**
+     * The plain anti[] vector, optionally extended with the trained
+     * embedding net's antisymmetric interaction features (see
+     * {@link EmbeddingNet#interactionFeatures}). Every appended dimension
+     * is itself exactly antisymmetric under an A/B swap, so {@link #negate}
+     * on the WHOLE augmented row is still exactly equal to what this method
+     * would return for the swapped board - the mirroring trick and the
+     * serving-time wrapper both stay exact with embeddings in the mix.
+     */
+    private static double[] augmentedAnti(FeatureExtractor.RawBoard rb, double n0, EmbeddingNet.Params embedding) {
+        double[] anti = FeatureExtractor.assemble(rb, n0, true).anti;
+        if (embedding == null) {
+            return anti;
+        }
+        double[] extra = EmbeddingNet.interactionFeatures(embedding, rb.a.playerId, rb.a.hallId, rb.b.playerId, rb.b.hallId);
+        double[] out = new double[anti.length + extra.length];
+        System.arraycopy(anti, 0, out, 0, anti.length);
+        System.arraycopy(extra, 0, out, anti.length, extra.length);
+        return out;
     }
 
     /** Standard second-order logistic boosting with a constant base score and validation-based early stopping. */
@@ -340,8 +380,9 @@ public class GbmModel implements MatchupPredictor {
         double drawLogit = params.drawBaseScore + ensemblePredict(params.drawTrees, params.learningRate, v.sym);
         double pd = sigmoid(drawLogit);
 
-        double raw = ensemblePredict(params.winTrees, params.learningRate, v.anti);
-        double rawNeg = ensemblePredict(params.winTrees, params.learningRate, negate(v.anti));
+        double[] anti = augmentedAnti(board, params.n0, params.embedding);
+        double raw = ensemblePredict(params.winTrees, params.learningRate, anti);
+        double rawNeg = ensemblePredict(params.winTrees, params.learningRate, negate(anti));
         double winLogit = 0.5 * (raw - rawNeg);
         double pw = sigmoid(winLogit);
 
@@ -350,7 +391,12 @@ public class GbmModel implements MatchupPredictor {
 
     @Override
     public String family() {
-        return E17_MlModels.FAMILY_GBM;
+        return params.embedding != null ? E17_MlModels.FAMILY_GBM_EMB : E17_MlModels.FAMILY_GBM;
+    }
+
+    /** The trained embeddings, or null for a plain-GBM fit - used to export {@code player_profiles.playstyle_vector}. */
+    public EmbeddingNet.Params getEmbedding() {
+        return params.embedding;
     }
 
     public String toParamsJson() {
