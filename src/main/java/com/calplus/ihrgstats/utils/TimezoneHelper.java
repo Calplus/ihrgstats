@@ -16,30 +16,37 @@ public class TimezoneHelper {
     private static final double DEFAULT_OFFSET = 8.0;
     
     /**
+     * Reads and parses the settings.timezone property (a UTC offset such as
+     * "8" or "-9.5"). Returns null when unset or invalid - the single shared
+     * read used by every public accessor below, which previously each had
+     * their own copy of this read/parse/fallback block.
+     */
+    private static Double readConfiguredOffset() {
+        try {
+            String timezoneProperty = PropertyResolver.getProperty("settings.timezone", "");
+            if (timezoneProperty == null || timezoneProperty.trim().isEmpty()) {
+                return null;
+            }
+            return Double.parseDouble(timezoneProperty.trim());
+        } catch (NumberFormatException e) {
+            System.err.println("Invalid timezone offset in settings.timezone, using default: " + DEFAULT_TIMEZONE);
+            return null;
+        } catch (Exception e) {
+            System.err.println("Error reading timezone setting, using default: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Gets the configured timezone from settings.timezone property.
      * Returns a ZoneId based on the UTC offset stored in the property.
      * Falls back to Asia/Singapore (UTC+8) if not configured.
-     * 
+     *
      * @return ZoneId for the configured timezone
      */
     public static ZoneId getConfiguredZoneId() {
-        try {
-            String timezoneProperty = PropertyResolver.getProperty("settings.timezone", "");
-            
-            if (timezoneProperty == null || timezoneProperty.trim().isEmpty()) {
-                return ZoneId.of(DEFAULT_TIMEZONE);
-            }
-            
-            double offset = Double.parseDouble(timezoneProperty.trim());
-            return getZoneIdFromOffset(offset);
-            
-        } catch (NumberFormatException e) {
-            System.err.println("Invalid timezone offset in settings.timezone, using default: " + DEFAULT_TIMEZONE);
-            return ZoneId.of(DEFAULT_TIMEZONE);
-        } catch (Exception e) {
-            System.err.println("Error reading timezone setting, using default: " + e.getMessage());
-            return ZoneId.of(DEFAULT_TIMEZONE);
-        }
+        Double offset = readConfiguredOffset();
+        return offset == null ? ZoneId.of(DEFAULT_TIMEZONE) : getZoneIdFromOffset(offset);
     }
     
     /**
@@ -128,42 +135,32 @@ public class TimezoneHelper {
      * @return Formatted timezone string
      */
     public static String getFormattedTimezone() {
-        try {
-            String timezoneProperty = PropertyResolver.getProperty("settings.timezone", "");
-            
-            if (timezoneProperty == null || timezoneProperty.trim().isEmpty()) {
-                return "UTC+8"; // Default
-            }
-            
-            double offset = Double.parseDouble(timezoneProperty.trim());
-            if (offset == 0) {
-                return "UTC";
-            } else if (offset > 0) {
-                return String.format("UTC+%.1f", offset).replace(".0", "");
-            } else {
-                return String.format("UTC%.1f", offset).replace(".0", "");
-            }
-        } catch (Exception e) {
-            return "UTC+8"; // Default
+        Double offset = readConfiguredOffset();
+        return offset == null ? "UTC+8" : formatOffsetDisplay(offset);
+    }
+
+    /**
+     * Formats a UTC offset for display (e.g. "UTC", "UTC+8", "UTC-9.5") -
+     * the single shared implementation used both for the configured
+     * timezone and for arbitrary offsets (e.g. /settings previews).
+     */
+    public static String formatOffsetDisplay(double offset) {
+        if (offset == 0) {
+            return "UTC";
+        } else if (offset > 0) {
+            return String.format("UTC+%.1f", offset).replace(".0", "");
+        } else {
+            return String.format("UTC%.1f", offset).replace(".0", "");
         }
     }
-    
+
     /**
      * Gets the timezone offset in hours from the configuration.
-     * 
+     *
      * @return Timezone offset as a double
      */
     public static double getTimezoneOffset() {
-        try {
-            String timezoneProperty = PropertyResolver.getProperty("settings.timezone", "");
-            
-            if (timezoneProperty == null || timezoneProperty.trim().isEmpty()) {
-                return DEFAULT_OFFSET;
-            }
-            
-            return Double.parseDouble(timezoneProperty.trim());
-        } catch (NumberFormatException e) {
-            return DEFAULT_OFFSET;
-        }
+        Double offset = readConfiguredOffset();
+        return offset == null ? DEFAULT_OFFSET : offset;
     }
 }

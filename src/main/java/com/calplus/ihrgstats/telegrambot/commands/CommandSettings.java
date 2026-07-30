@@ -1,8 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.A3_Halls;
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import com.calplus.ihrgstats.utils.TelegramHtml;
@@ -16,8 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Allows admin to view and toggle boolean settings from application.properties
  */
 public class CommandSettings {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
     private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private static final Map<String, SettingsSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
@@ -43,11 +40,9 @@ public class CommandSettings {
 
     public CommandSettings() {
         // Load environment variables
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
+        this.logHelper = new LogHelper();
     }
 
     /**
@@ -60,8 +55,7 @@ public class CommandSettings {
         try {
             return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
         } catch (java.sql.SQLException e) {
-            discordLog.logError("Database error checking admin status: " + e.getMessage());
-            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            logHelper.logError("Database error checking admin status: " + e.getMessage());
             return false;
         }
     }
@@ -72,15 +66,19 @@ public class CommandSettings {
      * @return SettingsResponse containing the message and button options
      */
     public SettingsResponse handleCommand(String userId) {
+        // Drop stale manual-input states (>10 min old) - same expiry every
+        // other wizard command applies via cleanupOldStates; previously
+        // /settings was the only state-holding command that never did this,
+        // so an abandoned "reply with a value" prompt stayed armed forever.
+        TelegramCommandUtils.cleanupOldStates(userSelectionStates);
+
         String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
-        discordLog.logInfo(String.format("%s requested /settings command", userInfo));
-        telegramLog.logInfo(String.format("%s requested /settings command", userInfo));
+        logHelper.logInfo(String.format("%s requested /settings command", userInfo));
 
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can use the /settings command.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to use /settings", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to use /settings", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to use /settings", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
@@ -89,8 +87,7 @@ public class CommandSettings {
         
         if (settings.isEmpty()) {
             String errorMsg = "⚠️ No configurable settings found in application.properties";
-            discordLog.logWarning("No settings.* properties found");
-            telegramLog.logWarning("No settings.* properties found");
+            logHelper.logWarning("No settings.* properties found");
             return new SettingsResponse(errorMsg, null);
         }
 
@@ -169,8 +166,7 @@ public class CommandSettings {
         buttonLabels.add("❌ Cancel");
         buttonCallbacks.add("settings_cancel");
 
-        discordLog.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
-        telegramLog.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
+        logHelper.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
 
         return new SettingsResponse(message.toString(), 
             new ButtonConfig(buttonLabels.toArray(new String[0]), 
@@ -184,8 +180,7 @@ public class CommandSettings {
      */
     public String handleCancel(String userId) {
         String userInfo = com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId);
-        discordLog.logInfo(String.format("%s cancelled settings", userInfo));
-        telegramLog.logInfo(String.format("%s cancelled settings", userInfo));
+        logHelper.logInfo(String.format("%s cancelled settings", userInfo));
         return "ℹ️ Settings menu closed.";
     }
 
@@ -200,8 +195,7 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to toggle setting", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to toggle setting", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to toggle setting", userInfo));
             return errorMsg;
         }
 
@@ -214,20 +208,17 @@ public class CommandSettings {
 
         if (!TOGGLEABLE_SETTING_KEYS.contains(settingKey)) {
             String errorMsg = String.format("❌ Error: '%s' is not a valid toggleable setting.", settingKey);
-            discordLog.logWarning(String.format("Admin %s attempted to toggle a non-allowlisted key: %s", userInfo, settingKey));
-            telegramLog.logWarning(String.format("Admin %s attempted to toggle a non-allowlisted key: %s", userInfo, settingKey));
+            logHelper.logWarning(String.format("Admin %s attempted to toggle a non-allowlisted key: %s", userInfo, settingKey));
             return errorMsg;
         }
 
-        discordLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
-        telegramLog.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
+        logHelper.logInfo(String.format("Admin %s toggling setting: %s", userInfo, settingKey));
 
         // Get current value
         String currentValue = PropertyResolver.getProperty(settingKey);
         if (currentValue == null) {
             String errorMsg = String.format("❌ Error: Setting not found: %s", settingKey);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
 
@@ -246,14 +237,12 @@ public class CommandSettings {
             String successMsg = String.format("%s Successfully %s <b>%s</b>\n\nUse /settings to see updated configuration.",
                 statusEmoji, statusText, settingName);
             
-            discordLog.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
-            telegramLog.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
+            logHelper.logSuccess(String.format("Setting %s toggled to %s", settingKey, newValue));
             
             return successMsg;
         } else {
             String errorMsg = String.format("❌ Error: Failed to update setting %s", settingKey);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
     }
@@ -268,13 +257,11 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to change home hall", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to change home hall", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to change home hall", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested home hall selection", userInfo));
-        telegramLog.logInfo(String.format("Admin %s requested home hall selection", userInfo));
+        logHelper.logInfo(String.format("Admin %s requested home hall selection", userInfo));
 
         try {
             // Query all halls (excluding the reserved "unknown" fallback hall)
@@ -287,8 +274,7 @@ public class CommandSettings {
 
             if (halls.isEmpty()) {
                 String errorMsg = "⚠️ No halls found in database.";
-                discordLog.logWarning(errorMsg);
-                telegramLog.logWarning(errorMsg);
+                logHelper.logWarning(errorMsg);
                 return new SettingsResponse(errorMsg, null);
             }
 
@@ -339,8 +325,7 @@ public class CommandSettings {
             buttonLabels.add("❌ Cancel");
             buttonCallbacks.add("settings_cancel");
 
-            discordLog.logSuccess(String.format("Sent hall selection menu to admin %s with %d halls", userId, halls.size()));
-            telegramLog.logSuccess(String.format("Sent hall selection menu to admin %s with %d halls", userId, halls.size()));
+            logHelper.logSuccess(String.format("Sent hall selection menu to admin %s with %d halls", userId, halls.size()));
 
             return new SettingsResponse(message.toString(), 
                 new ButtonConfig(buttonLabels.toArray(new String[0]), 
@@ -349,8 +334,7 @@ public class CommandSettings {
 
         } catch (SQLException e) {
             String errorMsg = "❌ Error: Failed to load halls from database: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return new SettingsResponse(errorMsg, null);
         }
     }
@@ -366,15 +350,13 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to set home hall", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to set home hall", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to set home hall", userInfo));
             return errorMsg;
         }
 
         // Handle manual input request
         if (callbackData.equals("setting_homeHall_manual")) {
-            discordLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
-            telegramLog.logInfo(String.format("Admin %s requested manual home hall input", userId));
+            logHelper.logInfo(String.format("Admin %s requested manual home hall input", userId));
             
             // Set user state to await manual input
             SettingsSelectionState state = userSelectionStates.computeIfAbsent(userId, k -> new SettingsSelectionState());
@@ -403,19 +385,16 @@ public class CommandSettings {
             canonicalHallName = resolveHallNameOrNull(hallValue);
         } catch (SQLException e) {
             String errorMsg = "❌ Error: Failed to validate hall: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
         if (canonicalHallName == null) {
             String errorMsg = String.format("❌ Error: '%s' is not a recognized hall.", hallValue);
-            discordLog.logWarning(String.format("Admin %s tried to set an unrecognized home hall: %s", userId, hallValue));
-            telegramLog.logWarning(String.format("Admin %s tried to set an unrecognized home hall: %s", userId, hallValue));
+            logHelper.logWarning(String.format("Admin %s tried to set an unrecognized home hall: %s", userId, hallValue));
             return errorMsg;
         }
 
-        discordLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, canonicalHallName));
-        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s", userId, canonicalHallName));
+        logHelper.logInfo(String.format("Admin %s setting home hall to: %s", userId, canonicalHallName));
 
         // Update property
         boolean success = PropertyManager.updateProperty("settings.homeHall", canonicalHallName);
@@ -423,14 +402,12 @@ public class CommandSettings {
         if (success) {
             String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(canonicalHallName));
 
-            discordLog.logSuccess(String.format("Home hall set to %s", canonicalHallName));
-            telegramLog.logSuccess(String.format("Home hall set to %s", canonicalHallName));
+            logHelper.logSuccess(String.format("Home hall set to %s", canonicalHallName));
 
             return successMsg;
         } else {
             String errorMsg = "❌ Error: Failed to update home hall setting";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
     }
@@ -485,8 +462,7 @@ public class CommandSettings {
                 
                 String timezoneValue = String.valueOf(offset);
                 
-                discordLog.logInfo(String.format("Admin %s setting timezone to: %s (manual input)", userId, timezoneValue));
-                telegramLog.logInfo(String.format("Admin %s setting timezone to: %s (manual input)", userId, timezoneValue));
+                logHelper.logInfo(String.format("Admin %s setting timezone to: %s (manual input)", userId, timezoneValue));
                 
                 // Update property
                 boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
@@ -495,14 +471,12 @@ public class CommandSettings {
                     String successMsg = String.format("🌍 Successfully set timezone to <b>%s</b>\n\nUse /settings to see updated configuration.",
                                                     TelegramHtml.escape(formatTimezoneDisplay(timezoneValue)));
 
-                    discordLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
-                    telegramLog.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
+                    logHelper.logSuccess(String.format("Timezone set to %s (manual input)", timezoneValue));
                     
                     return successMsg;
                 } else {
                     String errorMsg = "❌ Error: Failed to update timezone setting";
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     return errorMsg;
                 }
             } catch (NumberFormatException e) {
@@ -522,8 +496,7 @@ public class CommandSettings {
                 
                 String formattedValue = String.valueOf(yearValue);
                 
-                discordLog.logInfo(String.format("Admin %s setting currentYear to: %s", userId, formattedValue));
-                telegramLog.logInfo(String.format("Admin %s setting currentYear to: %s", userId, formattedValue));
+                logHelper.logInfo(String.format("Admin %s setting currentYear to: %s", userId, formattedValue));
                 
                 // Update property
                 boolean success = PropertyManager.updateProperty("settings.currentYear", formattedValue);
@@ -531,14 +504,12 @@ public class CommandSettings {
                 if (success) {
                     String successMsg = String.format("📅 Successfully set current year to <b>%s</b>\n\nUse /settings to see updated configuration.", formattedValue);
 
-                    discordLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
-                    telegramLog.logSuccess(String.format("CurrentYear set to %s", formattedValue));
+                    logHelper.logSuccess(String.format("CurrentYear set to %s", formattedValue));
                     
                     return successMsg;
                 } else {
                     String errorMsg = "❌ Error: Failed to update currentYear setting";
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     return errorMsg;
                 }
             } catch (NumberFormatException e) {
@@ -557,8 +528,7 @@ public class CommandSettings {
             canonicalHallName = resolveHallNameOrNull(hallValue);
         } catch (SQLException e) {
             String errorMsg = "❌ Error: Failed to validate hall: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
         if (canonicalHallName == null) {
@@ -566,8 +536,7 @@ public class CommandSettings {
                     TelegramHtml.escape(hallValue));
         }
 
-        discordLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, canonicalHallName));
-        telegramLog.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, canonicalHallName));
+        logHelper.logInfo(String.format("Admin %s setting home hall to: %s (manual input)", userId, canonicalHallName));
 
         // Update property
         boolean success = PropertyManager.updateProperty("settings.homeHall", canonicalHallName);
@@ -575,14 +544,12 @@ public class CommandSettings {
         if (success) {
             String successMsg = String.format("🏠 Successfully set home hall to <b>%s</b>\n\nUse /settings to see updated configuration.", TelegramHtml.escape(canonicalHallName));
 
-            discordLog.logSuccess(String.format("Home hall set to %s (manual input)", canonicalHallName));
-            telegramLog.logSuccess(String.format("Home hall set to %s (manual input)", canonicalHallName));
+            logHelper.logSuccess(String.format("Home hall set to %s (manual input)", canonicalHallName));
 
             return successMsg;
         } else {
             String errorMsg = "❌ Error: Failed to update home hall setting";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
     }
@@ -597,13 +564,11 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to change currentYear", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to change currentYear", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to change currentYear", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested currentYear change", userInfo));
-        telegramLog.logInfo(String.format("Admin %s requested currentYear change", userInfo));
+        logHelper.logInfo(String.format("Admin %s requested currentYear change", userInfo));
 
         // Set manual input mode
         SettingsSelectionState state = new SettingsSelectionState();
@@ -627,8 +592,7 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted unauthorized currentYear callback", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted unauthorized currentYear callback", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted unauthorized currentYear callback", userInfo));
             return errorMsg;
         }
 
@@ -651,13 +615,11 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to change timezone", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to change timezone", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to change timezone", userInfo));
             return new SettingsResponse(errorMsg, null);
         }
 
-        discordLog.logInfo(String.format("Admin %s requested timezone selection", userInfo));
-        telegramLog.logInfo(String.format("Admin %s requested timezone selection", userInfo));
+        logHelper.logInfo(String.format("Admin %s requested timezone selection", userInfo));
 
         // Get current timezone
         String currentTimezone = PropertyResolver.getProperty("settings.timezone", "");
@@ -711,8 +673,7 @@ public class CommandSettings {
         buttonLabels.add("❌ Cancel");
         buttonCallbacks.add("settings_cancel");
 
-        discordLog.logSuccess(String.format("Sent timezone selection menu to admin %s", userId));
-        telegramLog.logSuccess(String.format("Sent timezone selection menu to admin %s", userId));
+        logHelper.logSuccess(String.format("Sent timezone selection menu to admin %s", userId));
 
         return new SettingsResponse(message.toString(), 
             new ButtonConfig(buttonLabels.toArray(new String[0]), 
@@ -731,15 +692,13 @@ public class CommandSettings {
         // Check admin authorization
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can change settings.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to set timezone", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to set timezone", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to set timezone", userInfo));
             return errorMsg;
         }
 
         // Handle manual input request
         if (callbackData.equals("setting_timezone_manual")) {
-            discordLog.logInfo(String.format("Admin %s requested manual timezone input", userId));
-            telegramLog.logInfo(String.format("Admin %s requested manual timezone input", userId));
+            logHelper.logInfo(String.format("Admin %s requested manual timezone input", userId));
             
             // Set user state to await manual input
             SettingsSelectionState state = userSelectionStates.computeIfAbsent(userId, k -> new SettingsSelectionState());
@@ -774,8 +733,7 @@ public class CommandSettings {
             return "❌ Error: Invalid timezone format";
         }
         
-        discordLog.logInfo(String.format("Admin %s setting timezone to: %s", userId, timezoneValue));
-        telegramLog.logInfo(String.format("Admin %s setting timezone to: %s", userId, timezoneValue));
+        logHelper.logInfo(String.format("Admin %s setting timezone to: %s", userId, timezoneValue));
 
         // Update property
         boolean success = PropertyManager.updateProperty("settings.timezone", timezoneValue);
@@ -784,14 +742,12 @@ public class CommandSettings {
             String successMsg = String.format("🌍 Successfully set timezone to <b>%s</b>\n\nUse /settings to see updated configuration.",
                                             TelegramHtml.escape(formatTimezoneDisplay(timezoneValue)));
 
-            discordLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
-            telegramLog.logSuccess(String.format("Timezone set to %s", timezoneValue));
+            logHelper.logSuccess(String.format("Timezone set to %s", timezoneValue));
             
             return successMsg;
         } else {
             String errorMsg = "❌ Error: Failed to update timezone setting";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return errorMsg;
         }
     }
@@ -803,16 +759,9 @@ public class CommandSettings {
         if (timezoneValue == null || timezoneValue.isEmpty()) {
             return "Not set";
         }
-        
+
         try {
-            double offset = Double.parseDouble(timezoneValue);
-            if (offset == 0) {
-                return "UTC";
-            } else if (offset > 0) {
-                return String.format("UTC+%.1f", offset).replace(".0", "");
-            } else {
-                return String.format("UTC%.1f", offset).replace(".0", "");
-            }
+            return TimezoneHelper.formatOffsetDisplay(Double.parseDouble(timezoneValue));
         } catch (NumberFormatException e) {
             return timezoneValue;
         }

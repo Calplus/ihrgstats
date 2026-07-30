@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -16,6 +17,29 @@ public class EnvironmentManager {
     private static final String ENV_FILE_NAME = ".env.properties";
     private final Path envFilePath;
     private final Properties envProperties;
+
+    // Directories whose .env.properties has already been loaded into system
+    // properties this process - see ensureSystemPropertiesLoaded().
+    private static final Set<String> loadedDirectories = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Loads {@code <user.dir>/.env.properties} into system properties, once
+     * per distinct working directory per process. Nearly every command
+     * constructor needs the env values present as system properties (for
+     * PropertyResolver's ${VAR:default} resolution), but commands are
+     * instantiated per incoming message - re-reading and re-parsing the same
+     * unchanged file from disk on every message was pure waste. Keyed by
+     * user.dir (not a plain boolean) so tests that swap user.dir per
+     * test-case still get their own directory's file loaded. Runtime setting
+     * changes don't need a re-read: setProperty()/setProperties() already
+     * mirror every change into system properties immediately.
+     */
+    public static void ensureSystemPropertiesLoaded() {
+        String dir = System.getProperty("user.dir");
+        if (loadedDirectories.add(dir)) {
+            new EnvironmentManager().loadIntoSystemProperties();
+        }
+    }
 
     /**
      * Creates an EnvironmentManager instance.

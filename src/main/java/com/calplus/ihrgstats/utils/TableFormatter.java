@@ -28,15 +28,15 @@ public class TableFormatter {
         sb.append("```\n");
         
         // Format header row with | separators
-        sb.append(formatRow(headers, alignments, columnWidths, true)).append("\n");
-        
+        sb.append(formatRow(headers, alignments, columnWidths)).append("\n");
+
         // Add === separator after header
         sb.append(createHeaderSeparator(columnWidths)).append("\n");
-        
+
         // Format data rows with | separators
         int rowCount = 0;
         for (String[] row : rows) {
-            sb.append(formatRow(row, alignments, columnWidths, true)).append("\n");
+            sb.append(formatRow(row, alignments, columnWidths)).append("\n");
             rowCount++;
             
             // Add --- separator every 10 rows (but not after the last row)
@@ -50,44 +50,33 @@ public class TableFormatter {
     }
     
     /**
-     * Formats a single row
+     * Formats a single row with | separators
      */
-    private static String formatRow(String[] cells, Alignment[] alignments, int[] columnWidths, boolean useSeparators) {
+    private static String formatRow(String[] cells, Alignment[] alignments, int[] columnWidths) {
         StringBuilder row = new StringBuilder();
-        
-        if (useSeparators) {
-            row.append("| ");
-        }
-        
+        row.append("| ");
+
         for (int i = 0; i < cells.length; i++) {
             String cell = cells[i];
             Alignment align = alignments[i];
             int width = columnWidths[i];
-            
+
             // Truncate if too long
             if (cell.length() > width) {
                 cell = cell.substring(0, width);
             }
-            
+
             // Pad according to alignment
-            String formatted = padString(cell, width, align);
-            row.append(formatted);
-            
+            row.append(padString(cell, width, align));
+
             // Add separator between columns
-            if (useSeparators) {
-                if (i < cells.length - 1) {
-                    row.append(" | ");
-                } else {
-                    row.append(" |");
-                }
+            if (i < cells.length - 1) {
+                row.append(" | ");
             } else {
-                // Old format - just space
-                if (i < cells.length - 1) {
-                    row.append(" ");
-                }
+                row.append(" |");
             }
         }
-        
+
         return row.toString();
     }
     
@@ -100,16 +89,15 @@ public class TableFormatter {
         }
         
         int padding = width - str.length();
-        
+
         switch (alignment) {
             case LEFT:
-                return str + repeatChar(' ', padding);
+                return str + " ".repeat(padding);
             case RIGHT:
-                return repeatChar(' ', padding) + str;
+                return " ".repeat(padding) + str;
             case CENTER:
                 int leftPad = padding / 2;
-                int rightPad = padding - leftPad;
-                return repeatChar(' ', leftPad) + str + repeatChar(' ', rightPad);
+                return " ".repeat(leftPad) + str + " ".repeat(padding - leftPad);
             default:
                 return str;
         }
@@ -119,27 +107,21 @@ public class TableFormatter {
      * Creates a header separator line (===)
      */
     private static String createHeaderSeparator(int[] columnWidths) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("| ");
-        for (int i = 0; i < columnWidths.length; i++) {
-            sb.append(repeatChar('=', columnWidths[i]));
-            if (i < columnWidths.length - 1) {
-                sb.append(" | ");
-            } else {
-                sb.append(" |");
-            }
-        }
-        return sb.toString();
+        return createSeparatorLine(columnWidths, '=');
     }
-    
+
     /**
      * Creates a row separator line (---)
      */
     private static String createRowSeparator(int[] columnWidths) {
+        return createSeparatorLine(columnWidths, '-');
+    }
+
+    private static String createSeparatorLine(int[] columnWidths, char fill) {
         StringBuilder sb = new StringBuilder();
         sb.append("| ");
         for (int i = 0; i < columnWidths.length; i++) {
-            sb.append(repeatChar('-', columnWidths[i]));
+            sb.append(String.valueOf(fill).repeat(columnWidths[i]));
             if (i < columnWidths.length - 1) {
                 sb.append(" | ");
             } else {
@@ -150,16 +132,33 @@ public class TableFormatter {
     }
     
     /**
-     * Repeats a character n times
+     * Appends a trailing "*" marker to each data row whose 0-based index
+     * satisfies {@code shouldMark} in a table produced by
+     * {@link #formatTable} - used by the ranking commands to flag home-hall
+     * rows. Header lines (first 3), "---" separators and the closing fence
+     * pass through unchanged; the result is trimmed exactly like the
+     * previously-duplicated per-command implementations were.
      */
-    private static String repeatChar(char c, int count) {
-        StringBuilder sb = new StringBuilder(count);
-        for (int i = 0; i < count; i++) {
-            sb.append(c);
+    public static String markRows(String table, java.util.function.IntPredicate shouldMark) {
+        String[] lines = table.split("\n");
+        StringBuilder result = new StringBuilder();
+        int rowIndex = 0;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (i < 3) {
+                result.append(line).append("\n");
+            } else if (line.contains("----")) {
+                result.append(line).append("\n");
+            } else if (line.trim().equals("```")) {
+                result.append(line);
+            } else {
+                result.append(line).append(shouldMark.test(rowIndex) ? "*\n" : "\n");
+                rowIndex++;
+            }
         }
-        return sb.toString();
+        return result.toString().trim();
     }
-    
+
     /**
      * Shortens a player name to fit within maxLength characters
      * Shortens the longest part of the name to just its first letter until it fits

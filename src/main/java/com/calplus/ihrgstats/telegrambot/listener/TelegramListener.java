@@ -33,6 +33,7 @@ import java.util.regex.Pattern;
 public class TelegramListener {
     private final DiscordLog discordLog;
     private final TelegramLog telegramLog;
+    private final com.calplus.ihrgstats.utils.LogHelper logHelper;
     private final HttpClient httpClient;
     private final Gson gson;
     
@@ -45,7 +46,6 @@ public class TelegramListener {
     private String publicChatIdCommands;
 
     private String webhookUrl;
-    private int webhookPort;
     private int webhookTimeoutMs;
     
     private boolean useWebhook;
@@ -97,28 +97,16 @@ public class TelegramListener {
     private static final Map<String, String> userNameCache = new ConcurrentHashMap<>();
     
     private static class ConfirmationRequest {
-        String message;
-        CompletableFuture<Boolean> future;
-        long timestamp;
-        JsonObject originalMessage;  // Store original message for channel routing
-        
-        ConfirmationRequest(String message, CompletableFuture<Boolean> future) {
-            this(message, future, null);
-        }
-        
-        ConfirmationRequest(String message, CompletableFuture<Boolean> future, JsonObject originalMessage) {
-            this.message = message;
+        final CompletableFuture<Boolean> future;
+
+        ConfirmationRequest(CompletableFuture<Boolean> future) {
             this.future = future;
-            this.timestamp = System.currentTimeMillis();
-            this.originalMessage = originalMessage;
         }
     }
-    
+
     private static class MultiChoiceConfirmationRequest {
-        String message;
         String[] options;
         CompletableFuture<Integer> future;
-        long timestamp;
         JsonObject originalMessage;  // Store original message for channel routing
         // Unique per-dialog token embedded in every button's callback_data
         // (see sendMessageWithButtons) - pendingMultiChoiceConfirmations only
@@ -129,26 +117,20 @@ public class TelegramListener {
         // dialog with an index meant for the old one's options.
         final String nonce = java.util.UUID.randomUUID().toString();
 
-        MultiChoiceConfirmationRequest(String message, String[] options, CompletableFuture<Integer> future) {
-            this(message, options, future, null);
-        }
-
-        MultiChoiceConfirmationRequest(String message, String[] options, CompletableFuture<Integer> future, JsonObject originalMessage) {
-            this.message = message;
+        MultiChoiceConfirmationRequest(String[] options, CompletableFuture<Integer> future, JsonObject originalMessage) {
             this.options = options;
             this.future = future;
-            this.timestamp = System.currentTimeMillis();
             this.originalMessage = originalMessage;
         }
     }
 
     public TelegramListener() {
         // Load environment variables
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
+        this.logHelper = new com.calplus.ihrgstats.utils.LogHelper(discordLog, telegramLog);
         this.httpClient = HttpClient.newHttpClient();
         this.gson = new Gson();
         this.isRunning = false;
@@ -186,8 +168,6 @@ public class TelegramListener {
             this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
 
             this.webhookUrl = PropertyResolver.getProperty("internet.webhook.url", "");
-            String portStr = PropertyResolver.getProperty("internet.webhook.port", "8443");
-            this.webhookPort = Integer.parseInt(portStr);
             String timeoutStr = PropertyResolver.getProperty("internet.webhook.timeoutMs", "5000");
             this.webhookTimeoutMs = Integer.parseInt(timeoutStr);
             
@@ -277,23 +257,6 @@ public class TelegramListener {
     }
 
     /**
-     * Gets the chat ID and thread ID for log messages
-     * @return String[] with [chatId, threadId] or [chatId, null] if no thread, or null if devChatId is empty
-     */
-    private String[] getLogChatIdAndThread() {
-        // If devChatId is empty, don't send log messages
-        if (devChatId.isEmpty()) {
-            return null;
-        }
-        // If subchannel exists, use it (it's a thread in the dev channel)
-        if (!devChatIdLog.isEmpty()) {
-            return new String[]{devChatId, devChatIdLog};
-        }
-        // Otherwise use dev channel without thread
-        return new String[]{devChatId, null};
-    }
-
-    /**
      * Starts the listener
      */
     public void start() {
@@ -302,21 +265,18 @@ public class TelegramListener {
             return;
         }
 
-        discordLog.logInfo("Starting Telegram file listener...");
-        telegramLog.logInfo("Starting Telegram file listener...");
+        logHelper.logInfo("Starting Telegram file listener...");
 
         if (botToken.isEmpty()) {
             String errorMsg = "Telegram bot token not configured. Cannot start listener.";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return;
         }
 
         // If publicChatId is empty, the bot will accept messages from any channel
         // (isAllowAllChannelsProcessing() folds this in on every call - no field to set here).
         if (publicChatId.isEmpty()) {
-            discordLog.logInfo("Telegram publicChatId not configured. Bot will process messages from any channel it has access to.");
-            telegramLog.logInfo("Telegram publicChatId not configured. Bot will process messages from any channel it has access to.");
+            logHelper.logInfo("Telegram publicChatId not configured. Bot will process messages from any channel it has access to.");
         }
 
         isRunning = true;
@@ -337,8 +297,7 @@ public class TelegramListener {
     public void stop() {
         isRunning = false;
         stopStatusHeartbeat();
-        discordLog.logInfo("Telegram listener stopped");
-        telegramLog.logInfo("Telegram listener stopped");
+        logHelper.logInfo("Telegram listener stopped");
     }
 
     /**
@@ -349,27 +308,23 @@ public class TelegramListener {
         boolean webhookAccessible = testWebhookAccessibility();
         
         if (webhookAccessible) {
-            discordLog.logInfo("Webhook is accessible. Starting webhook mode...");
-            telegramLog.logInfo("Webhook is accessible. Starting webhook mode...");
+            logHelper.logInfo("Webhook is accessible. Starting webhook mode...");
             
             // Set webhook URL in Telegram
             boolean webhookSet = setTelegramWebhook();
             if (webhookSet) {
-                discordLog.logSuccess("Telegram webhook mode activated at: " + webhookUrl);
-                telegramLog.logSuccess("Telegram webhook mode activated at: " + webhookUrl);
+                logHelper.logSuccess("Telegram webhook mode activated at: " + webhookUrl);
                 
                 // Note: Actual webhook server implementation would go here
                 // For now, fall back to long polling
                 System.out.println("Note: Webhook server implementation not included. Falling back to long polling.");
                 startLongPollingMode();
             } else {
-                discordLog.logWarning("Failed to set webhook. Falling back to long polling.");
-                telegramLog.logWarning("Failed to set webhook. Falling back to long polling.");
+                logHelper.logWarning("Failed to set webhook. Falling back to long polling.");
                 startLongPollingMode();
             }
         } else {
-            discordLog.logWarning("Webhook not accessible. Falling back to long polling.");
-            telegramLog.logWarning("Webhook not accessible. Falling back to long polling.");
+            logHelper.logWarning("Webhook not accessible. Falling back to long polling.");
             startLongPollingMode();
         }
     }
@@ -423,8 +378,7 @@ public class TelegramListener {
      * Starts long polling mode
      */
     private void startLongPollingMode() {
-        discordLog.logInfo("Starting long polling mode...");
-        telegramLog.logInfo("Starting long polling mode...");
+        logHelper.logInfo("Starting long polling mode...");
 
         // Delete webhook if exists
         deleteWebhook();
@@ -434,8 +388,7 @@ public class TelegramListener {
 
         // Start polling in background thread
         Thread pollingThread = new Thread(() -> {
-            discordLog.logSuccess("Telegram long polling started successfully");
-            telegramLog.logSuccess("Telegram long polling started successfully");
+            logHelper.logSuccess("Telegram long polling started successfully");
 
             while (isRunning) {
                 try {
@@ -499,8 +452,7 @@ public class TelegramListener {
                     if (updates.size() > 0) {
                         JsonObject lastUpdate = updates.get(0).getAsJsonObject();
                         lastUpdateId = lastUpdate.get("update_id").getAsLong();
-                        discordLog.logInfo("Skipping all pending messages up to update_id " + lastUpdateId + ". Only processing new files from now on.");
-                        telegramLog.logInfo("Skipping all pending messages up to update_id " + lastUpdateId + ". Only processing new files from now on.");
+                        logHelper.logInfo("Skipping all pending messages up to update_id " + lastUpdateId + ". Only processing new files from now on.");
                     }
                 }
             }
@@ -693,8 +645,7 @@ public class TelegramListener {
             
             String userInfo = userName != null ? String.format("@%s (ID: %s)", userName, userId) : String.format("User (ID: %s)", userId);
             
-            discordLog.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
-            telegramLog.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
+            logHelper.logInfo(String.format("Button clicked by %s: %s", userInfo, data));
             
             // Answer the callback query to remove loading state
             answerCallbackQuery(callbackId);
@@ -947,8 +898,7 @@ public class TelegramListener {
                                 // enclosing handleCallbackQuery's own catch below
                                 // would have logged it to Discord/Telegram.
                                 String errorMsg = "Error processing export database callback: " + e.getMessage();
-                                discordLog.logError(errorMsg);
-                                telegramLog.logError(errorMsg);
+                                logHelper.logError(errorMsg);
                                 e.printStackTrace();
                                 sendMessageToChat(chatId, formatStatusMessage("🔴", "ERROR", errorMsg), threadId);
                             }
@@ -1065,8 +1015,7 @@ public class TelegramListener {
                             sendMessageToUploadChat("❌ This confirmation has expired - please use the latest prompt.", request.originalMessage);
                         } else if (choice >= 0 && choice < request.options.length) {
                             String selectedOption = request.options[choice];
-                            discordLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
-                            telegramLog.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
+                            logHelper.logInfo(String.format("User selected option %d: %s", choice, selectedOption));
 
                             // Send confirmation message to chat (use stored original message for routing)
                             String confirmMsg = String.format("✅ Selected: %s", selectedOption);
@@ -1091,8 +1040,7 @@ public class TelegramListener {
             }
 
         } catch (Exception e) {
-            discordLog.logError("Error handling callback query: " + e.getMessage());
-            telegramLog.logError("Error handling callback query: " + e.getMessage());
+            logHelper.logError("Error handling callback query: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1239,8 +1187,7 @@ public class TelegramListener {
                 String username = from.has("username") ? from.get("username").getAsString() : "Unknown";
                 String userInfo = from.has("username") ? String.format("@%s (ID: %s)", username, userId) : String.format("User (ID: %s)", userId);
 
-                discordLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
-                telegramLog.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
+                logHelper.logInfo(String.format("File upload detected: %s from user %s", fileName, userInfo));
 
                 // Additional safety check: validate file upload channel when allowAllChannelsProcessing is false
                 // (isAllowAllChannelsProcessing() already folds the empty-publicChatId case in).
@@ -1273,8 +1220,7 @@ public class TelegramListener {
                         sendMessageToChat(chatId, errorMsg, msgThreadId);
 
                         String logMsg = String.format("File upload rejected from wrong channel. User: %s, File: %s", username, fileName);
-                        discordLog.logWarning(logMsg);
-                        telegramLog.logWarning(logMsg);
+                        logHelper.logWarning(logMsg);
                         return;
                     }
                 }
@@ -1288,8 +1234,7 @@ public class TelegramListener {
                 if (!isAdmin) {
                     if (!isAllowNonAdminUploads()) {
                         String errorMsg = String.format("%s is not an admin. File upload rejected.", userInfo);
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         return;
                     }
 
@@ -1303,14 +1248,12 @@ public class TelegramListener {
                     // that channel still see that a confirmation was requested.
                     String confirmMsg = String.format("⚠️ %s, you are not an admin. Do you want us to process your file '%s'? Reply with 'yes' or 'no'.",
                         userInfo, fileName);
-                    discordLog.logInfo(String.format("Requesting non-admin upload confirmation from %s for file %s", userInfo, fileName));
-                    telegramLog.logInfo(String.format("Requesting non-admin upload confirmation from %s for file %s", userInfo, fileName));
+                    logHelper.logInfo(String.format("Requesting non-admin upload confirmation from %s for file %s", userInfo, fileName));
                     boolean confirmed = requestUserConfirmationViaChat(userId, confirmMsg, message);
 
                     if (!confirmed) {
                         String cancelMsg = "File processing cancelled - user did not confirm.";
-                        discordLog.logWarning(cancelMsg);
-                        telegramLog.logWarning(cancelMsg);
+                        logHelper.logWarning(cancelMsg);
                         return;
                     }
                 }
@@ -1319,8 +1262,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error handling file upload: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
             }
         });
@@ -1333,7 +1275,7 @@ public class TelegramListener {
      */
     private boolean requestUserConfirmationViaChat(String userId, String message, JsonObject originalMessage) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
-        ConfirmationRequest myRequest = new ConfirmationRequest(message, future, originalMessage);
+        ConfirmationRequest myRequest = new ConfirmationRequest(future);
         // Keyed per-user (not a single global slot) so two different non-admin
         // uploaders' pending confirmations can't clobber each other. Uses
         // putIfAbsent (not put) + a compare-and-remove cleanup below, so if
@@ -1397,8 +1339,7 @@ public class TelegramListener {
         
         if (downloadedFile == null) {
             String errorMsg = "Failed to download file from Telegram";
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             // Send error to chat where file was uploaded
             sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             return;
@@ -1419,14 +1360,12 @@ public class TelegramListener {
                 Integer year = parsedCapped.year != null ? parsedCapped.year : YearContext.getCurrentYear();
                 if (year == null) {
                     String errorMsg = "Cannot process cappedlist.csv: no current year set. An admin must set settings.currentYear first.";
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
 
-                discordLog.logInfo("Processing cappedlist.csv...");
-                telegramLog.logInfo("Processing cappedlist.csv...");
+                logHelper.logInfo("Processing cappedlist.csv...");
 
                 CappedListProcessor processor = new CappedListProcessor();
 
@@ -1439,8 +1378,7 @@ public class TelegramListener {
 
                 if (!success) {
                     String errorMsg = "Failed to process cappedlist.csv";
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     // Send error to chat where file was uploaded
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
@@ -1454,14 +1392,12 @@ public class TelegramListener {
                         "Cannot process %s: filename has no year prefix and no current year is set. " +
                         "Either upload as {year}_round_%d.csv, or have an admin set settings.currentYear first.",
                         fileName, parsed.roundOrder);
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
 
-                discordLog.logInfo(String.format("Processing round_%d.csv for %d...", parsed.roundOrder, year));
-                telegramLog.logInfo(String.format("Processing round_%d.csv for %d...", parsed.roundOrder, year));
+                logHelper.logInfo(String.format("Processing round_%d.csv for %d...", parsed.roundOrder, year));
 
                 RoundCsvProcessor processor = new RoundCsvProcessor();
 
@@ -1470,7 +1406,7 @@ public class TelegramListener {
                 processor.setMultiChoiceCallback((msg, options) -> {
                     CompletableFuture<Integer> future = new CompletableFuture<>();
                     MultiChoiceConfirmationRequest myRequest =
-                        new MultiChoiceConfirmationRequest(msg, options, future, originalMessage);
+                        new MultiChoiceConfirmationRequest(options, future, originalMessage);
                     // Keyed per-user (not a single global slot) - see the
                     // matching handleCallbackQuery lookup. putIfAbsent + the
                     // matching atomic remove(key, value) below guard against a
@@ -1505,16 +1441,14 @@ public class TelegramListener {
 
                 if (!success) {
                     String errorMsg = String.format("Failed to process round_%d.csv for %d", parsed.roundOrder, year);
-                    discordLog.logError(errorMsg);
-                    telegramLog.logError(errorMsg);
+                    logHelper.logError(errorMsg);
                     // Send error to chat where file was uploaded
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
 
             } else {
                 String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, {year}_cappedlist.csv, {year}_round_[n].csv, round_[n].csv", fileName);
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 // Send error to chat where file was uploaded
                 sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             }
@@ -1650,8 +1584,7 @@ public class TelegramListener {
      */
     private void handleRecalculateCommand(JsonObject message) {
         String userInfo = getUserInfoFromMessage(message);
-        discordLog.logInfo(String.format("%s: Processing /recalculate command", userInfo));
-        telegramLog.logInfo(String.format("%s: Processing /recalculate command", userInfo));
+        logHelper.logInfo(String.format("%s: Processing /recalculate command", userInfo));
 
         Thread recalcThread = new Thread(() -> {
             try {
@@ -1662,8 +1595,7 @@ public class TelegramListener {
                     new com.calplus.ihrgstats.telegrambot.commands.CommandRecalculate();
 
                 if (!recalcCommand.isAdmin(userId)) {
-                    discordLog.logWarning(String.format("Non-admin %s attempted to use /recalculate", userInfo));
-                    telegramLog.logWarning(String.format("Non-admin %s attempted to use /recalculate", userInfo));
+                    logHelper.logWarning(String.format("Non-admin %s attempted to use /recalculate", userInfo));
                     sendMessageToCommandsChannel("❌ Access Denied: Only administrators can run /recalculate.", message);
                     return;
                 }
@@ -1671,8 +1603,7 @@ public class TelegramListener {
                 String[] options = {"Start recalculation", "Cancel"};
 
                 CompletableFuture<Integer> future = new CompletableFuture<>();
-                MultiChoiceConfirmationRequest myRequest = new MultiChoiceConfirmationRequest(
-                    recalcCommand.buildConfirmationMessage(), options, future, message);
+                MultiChoiceConfirmationRequest myRequest = new MultiChoiceConfirmationRequest(options, future, message);
                 // Keyed per-user (not a single global slot) - see the matching
                 // handleCallbackQuery lookup. Also means only the admin who
                 // actually ran /recalculate can answer their own Start/Cancel
@@ -1717,8 +1648,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /recalculate command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -1753,8 +1683,7 @@ public class TelegramListener {
             if (response.statusCode() != 200) {
                 String errorMsg = String.format("Failed to send %s (HTTP %d): %s", context, response.statusCode(), response.body());
                 System.err.println(errorMsg);
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
 
                 if (payload.has("parse_mode")) {
                     payload.remove("parse_mode");
@@ -1767,19 +1696,16 @@ public class TelegramListener {
                     if (retryResponse.statusCode() != 200) {
                         String retryError = String.format("Plain-text fallback for %s also failed (HTTP %d): %s", context, retryResponse.statusCode(), retryResponse.body());
                         System.err.println(retryError);
-                        discordLog.logError(retryError);
-                        telegramLog.logError(retryError);
+                        logHelper.logError(retryError);
                     } else {
-                        discordLog.logWarning("Sent " + context + " as plain text after formatted send failed");
-                        telegramLog.logWarning("Sent " + context + " as plain text after formatted send failed");
+                        logHelper.logWarning("Sent " + context + " as plain text after formatted send failed");
                     }
                 }
             }
         } catch (Exception e) {
             String errorMsg = "Error sending " + context + ": " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -1833,8 +1759,7 @@ public class TelegramListener {
         } catch (Exception e) {
             String errorMsg = "Error sending message to commands channel: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -1875,17 +1800,6 @@ public class TelegramListener {
                 statusHeartbeatExecutor.shutdownNow();
             }
         }
-    }
-
-    /**
-     * Sends a fatal error message to status chat and stops the bot
-     */
-    private void sendFatalErrorAndStop(String errorMessage) {
-        if (devChatId != null && !devChatId.isEmpty()) {
-            String message = formatStatusMessage("🔴", "ERROR", "Fatal error: " + errorMessage + " - Bot shutting down");
-            sendMessageToStatusChat(message);
-        }
-        stop();
     }
 
     /**
@@ -1937,8 +1851,7 @@ public class TelegramListener {
         } catch (Exception e) {
             String errorMsg = "Error sending status message: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -1947,10 +1860,6 @@ public class TelegramListener {
      * Sends a message with inline keyboard buttons to the upload chat
      * Intelligently routes based on allowAllChannelsProcessing and original message
      */
-    private void sendMessageWithButtons(String message, String[] options) {
-        sendMessageWithButtons(message, options, null, "");
-    }
-
     /**
      * Sends a message with inline keyboard buttons, tagged with the
      * dialog's nonce (see MultiChoiceConfirmationRequest.nonce) so a stale
@@ -2031,8 +1940,7 @@ public class TelegramListener {
             sendMessagePayloadWithFallback(payload, "message with buttons");
 
         } catch (Exception e) {
-            discordLog.logError("Error sending message with buttons: " + e.getMessage());
-            telegramLog.logError("Error sending message with buttons: " + e.getMessage());
+            logHelper.logError("Error sending message with buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -2044,10 +1952,6 @@ public class TelegramListener {
     /**
      * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
      */
-    private void sendMessageToUploadChat(String message) {
-        sendMessageToUploadChat(message, null);
-    }
-
     /**
      * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
      * Intelligently routes based on allowAllChannelsProcessing and original message
@@ -2114,8 +2018,7 @@ public class TelegramListener {
         } catch (Exception e) {
             String errorMsg = "Error sending message to upload chat: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -2138,17 +2041,15 @@ public class TelegramListener {
             }
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
 
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
-            
+
             // Add parse_mode for HTML if message contains formatting tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
             }
-            
+
             // Add thread ID if provided
             if (threadId != null && !threadId.isEmpty()) {
                 try {
@@ -2157,21 +2058,11 @@ public class TelegramListener {
                     // Ignore if not a valid number
                 }
             }
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .build();
-            
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            if (response.statusCode() == 200) {
-                System.out.println("Successfully sent message to chat " + chatId + ": " + message);
-            } else {
-                System.err.println("Failed to send message to chat " + chatId + " (HTTP " + response.statusCode() + "): " + response.body());
-                discordLog.logError("Failed to send Telegram message: HTTP " + response.statusCode());
-            }
+
+            // Routed through the shared sender - previously this was the ONE
+            // send path with its own inline HTTP call and therefore no
+            // plain-text fallback retry when a formatted send failed.
+            sendMessagePayloadWithFallback(payload, "message to chat " + chatId);
         } catch (Exception e) {
             System.err.println("Error sending message to chat: " + e.getMessage());
             e.printStackTrace();
@@ -2219,8 +2110,7 @@ public class TelegramListener {
         } catch (Exception e) {
             String errorMsg = "Error sending message: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -2249,8 +2139,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /settings command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -2281,8 +2170,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /exportdatabase command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -2323,8 +2211,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /rankplayers command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2364,8 +2251,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /rankhalls command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2399,8 +2285,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /comparehalls command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2472,8 +2357,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing compare halls callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -2483,8 +2367,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing compare halls callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -2534,8 +2417,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /compareplayers command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2626,8 +2508,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing compare players callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -2637,8 +2518,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing compare players callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -2685,8 +2565,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing rank players callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -2696,8 +2575,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing rank players callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -2744,8 +2622,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing rank halls callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -2755,8 +2632,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing rank halls callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -2783,8 +2659,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /about command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2816,8 +2691,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /help command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -2854,8 +2728,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /infoplayer command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2895,8 +2768,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /infohall command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2936,8 +2808,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /infomatch command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -2977,8 +2848,7 @@ public class TelegramListener {
 
             } catch (Exception e) {
                 String errorMsg = "Error processing /infomatchhall command: " + e.getMessage();
-                discordLog.logError(errorMsg);
-                telegramLog.logError(errorMsg);
+                logHelper.logError(errorMsg);
                 e.printStackTrace();
                 sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
             }
@@ -3009,8 +2879,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /matchtypes command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -3038,8 +2907,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /admins command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -3089,8 +2957,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing admins callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3150,8 +3017,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing match types callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3174,8 +3040,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /modelstats command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -3203,8 +3068,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /predict command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -3265,8 +3129,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing predict callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3293,8 +3156,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing /lineup command: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
@@ -3335,8 +3197,7 @@ public class TelegramListener {
                         sendLongMessageToCommandsChannel(response.message, message);
                     } catch (Exception e) {
                         String errorMsg = "Error computing /lineup: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -3346,8 +3207,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing lineup callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3398,8 +3258,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing help callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3464,8 +3323,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing info player callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -3475,8 +3333,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing info player callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3532,8 +3389,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing info hall callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -3543,8 +3399,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing info hall callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3591,8 +3446,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing info match callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -3602,8 +3456,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing info match callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3659,8 +3512,7 @@ public class TelegramListener {
                         }
                     } catch (Exception e) {
                         String errorMsg = "Error processing info match hall callback: " + e.getMessage();
-                        discordLog.logError(errorMsg);
-                        telegramLog.logError(errorMsg);
+                        logHelper.logError(errorMsg);
                         e.printStackTrace();
                     }
                 });
@@ -3670,8 +3522,7 @@ public class TelegramListener {
 
         } catch (Exception e) {
             String errorMsg = "Error processing info match hall callback: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
         }
     }
@@ -3927,8 +3778,7 @@ public class TelegramListener {
             sendMessagePayloadWithFallback(payload, "settings buttons message");
 
         } catch (Exception e) {
-            discordLog.logError("Error sending settings buttons: " + e.getMessage());
-            telegramLog.logError("Error sending settings buttons: " + e.getMessage());
+            logHelper.logError("Error sending settings buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -3995,8 +3845,7 @@ public class TelegramListener {
             sendMessagePayloadWithFallback(payload, "export buttons message");
 
         } catch (Exception e) {
-            discordLog.logError("Error sending export buttons: " + e.getMessage());
-            telegramLog.logError("Error sending export buttons: " + e.getMessage());
+            logHelper.logError("Error sending export buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -4096,43 +3945,48 @@ public class TelegramListener {
             sendMessagePayloadWithFallback(payload, "generic buttons message");
 
         } catch (Exception e) {
-            discordLog.logError("Error sending generic buttons: " + e.getMessage());
-            telegramLog.logError("Error sending generic buttons: " + e.getMessage());
+            logHelper.logError("Error sending generic buttons: " + e.getMessage());
             e.printStackTrace();
         }
     }
 
     /**
-     * Sends a message with compare halls buttons (4-column layout)
+     * Shared implementation for every plain N-column button keyboard sender
+     * (compare halls/players, rank players/halls) - these were four
+     * byte-identical ~70-line copies differing only in their log-context
+     * label. Buttons are chunked into rows of {@code columnsPerRow} with no
+     * special-casing (unlike {@link #sendMessageWithGenericButtons}, which
+     * deliberately puts Cancel/Back on their own row - that layout
+     * difference is why the two senders stay separate).
      */
-    private void sendMessageWithCompareHallsButtons(String message,
+    private void sendMessageWithColumnButtons(String message,
             com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
-            JsonObject originalMessage) {
+            JsonObject originalMessage, int columnsPerRow, String context) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
 
             JsonObject payload = new JsonObject();
-            
+
             // Determine where to send
             if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
                 JsonObject chat = originalMessage.getAsJsonObject("chat");
                 payload.addProperty("chat_id", chat.get("id").getAsString());
-                
+
                 if (originalMessage.has("message_thread_id")) {
                     payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
                 if (chatAndThread == null || chatAndThread[0] == null) return;
-                
+
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
                     payload.addProperty("message_thread_id", chatAndThread[1]);
                 }
             }
-            
+
             payload.addProperty("text", message);
-            
+
             // Add parse_mode for HTML if message contains HTML tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
                 payload.addProperty("parse_mode", "HTML");
@@ -4144,270 +3998,63 @@ public class TelegramListener {
             // Sending as plain text is always safe; the fragile legacy "Markdown"
             // parse mode used to be selected here on that same residue and could
             // fail outright on a single unpaired "*"/"_" (A11).
-            
-            // Create inline keyboard with 4 columns
+
             JsonObject replyMarkup = new JsonObject();
             JsonArray keyboard = new JsonArray();
-            
-            int columnsPerRow = 4;
             JsonArray currentRow = new JsonArray();
-            
+
             for (int i = 0; i < buttonConfig.labels.length; i++) {
                 JsonObject button = new JsonObject();
                 button.addProperty("text", buttonConfig.labels[i]);
                 button.addProperty("callback_data", buttonConfig.callbacks[i]);
                 currentRow.add(button);
-                
-                // Add row when we reach 4 columns or it's the last button (except for cancel)
+
+                // Add row when we reach columnsPerRow or it's the last button
                 if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
                     keyboard.add(currentRow);
                     currentRow = new JsonArray();
                 }
             }
-            
+
             replyMarkup.add("inline_keyboard", keyboard);
             payload.add("reply_markup", replyMarkup);
 
-            sendMessagePayloadWithFallback(payload, "compare halls buttons message");
+            sendMessagePayloadWithFallback(payload, context);
 
         } catch (Exception e) {
-            discordLog.logError("Error sending compare halls buttons: " + e.getMessage());
-            telegramLog.logError("Error sending compare halls buttons: " + e.getMessage());
+            logHelper.logError("Error sending " + context + ": " + e.getMessage());
             e.printStackTrace();
         }
     }
 
-    /**
-     * Sends a message with compare players buttons (4-column or 1-column layout)
-     */
-    private void sendMessageWithComparePlayersButtons(String message, 
-            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, 
+    private void sendMessageWithCompareHallsButtons(String message,
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
+            JsonObject originalMessage) {
+        sendMessageWithColumnButtons(message, buttonConfig, originalMessage, 4, "compare halls buttons message");
+    }
+
+    private void sendMessageWithComparePlayersButtons(String message,
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage) {
         sendMessageWithComparePlayersButtons(message, buttonConfig, originalMessage, 4);
     }
 
-    /**
-     * Sends a message with compare players buttons (customizable layout)
-     */
     private void sendMessageWithComparePlayersButtons(String message,
             com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage, int columnsPerRow) {
-        try {
-            message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-
-            JsonObject payload = new JsonObject();
-            
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-                
-                if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-                
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
-                }
-            }
-            
-            payload.addProperty("text", message);
-            
-            // Add parse_mode for HTML if message contains HTML tags
-            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
-                payload.addProperty("parse_mode", "HTML");
-            }
-            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
-            // (called at the top of every send method), any remaining "**"/"```"/"__"
-            // is never legitimate markdown intent, only accidental content residue
-            // (a stray unpaired sequence, or literal characters in a name/label).
-            // Sending as plain text is always safe; the fragile legacy "Markdown"
-            // parse mode used to be selected here on that same residue and could
-            // fail outright on a single unpaired "*"/"_" (A11).
-            
-            // Create inline keyboard
-            JsonObject replyMarkup = new JsonObject();
-            JsonArray keyboard = new JsonArray();
-            
-            JsonArray currentRow = new JsonArray();
-            
-            for (int i = 0; i < buttonConfig.labels.length; i++) {
-                JsonObject button = new JsonObject();
-                button.addProperty("text", buttonConfig.labels[i]);
-                button.addProperty("callback_data", buttonConfig.callbacks[i]);
-                currentRow.add(button);
-                
-                // Add row when we reach specified columns or it's the last button
-                if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
-                    keyboard.add(currentRow);
-                    currentRow = new JsonArray();
-                }
-            }
-            
-            replyMarkup.add("inline_keyboard", keyboard);
-            payload.add("reply_markup", replyMarkup);
-
-            sendMessagePayloadWithFallback(payload, "compare players buttons message");
-
-        } catch (Exception e) {
-            discordLog.logError("Error sending compare players buttons: " + e.getMessage());
-            telegramLog.logError("Error sending compare players buttons: " + e.getMessage());
-            e.printStackTrace();
-        }
+        sendMessageWithColumnButtons(message, buttonConfig, originalMessage, columnsPerRow, "compare players buttons message");
     }
 
-    /**
-     * Sends a message with rank players buttons
-     */
     private void sendMessageWithRankPlayersButtons(String message,
             com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage) {
-        try {
-            message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-
-            JsonObject payload = new JsonObject();
-
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-
-                if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
-                }
-            }
-
-            payload.addProperty("text", message);
-
-            // Add parse_mode for HTML if message contains HTML tags
-            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
-                payload.addProperty("parse_mode", "HTML");
-            }
-            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
-            // (called at the top of every send method), any remaining "**"/"```"/"__"
-            // is never legitimate markdown intent, only accidental content residue
-            // (a stray unpaired sequence, or literal characters in a name/label).
-            // Sending as plain text is always safe; the fragile legacy "Markdown"
-            // parse mode used to be selected here on that same residue and could
-            // fail outright on a single unpaired "*"/"_" (A11).
-
-            // Create inline keyboard with 4 columns
-            JsonObject replyMarkup = new JsonObject();
-            JsonArray keyboard = new JsonArray();
-
-            int columnsPerRow = 4;
-            JsonArray currentRow = new JsonArray();
-
-            for (int i = 0; i < buttonConfig.labels.length; i++) {
-                JsonObject button = new JsonObject();
-                button.addProperty("text", buttonConfig.labels[i]);
-                button.addProperty("callback_data", buttonConfig.callbacks[i]);
-                currentRow.add(button);
-
-                // Add row when we reach 4 columns or it's the last button
-                if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
-                    keyboard.add(currentRow);
-                    currentRow = new JsonArray();
-                }
-            }
-
-            replyMarkup.add("inline_keyboard", keyboard);
-            payload.add("reply_markup", replyMarkup);
-
-            sendMessagePayloadWithFallback(payload, "rank players buttons message");
-
-        } catch (Exception e) {
-            discordLog.logError("Error sending rank players buttons: " + e.getMessage());
-            telegramLog.logError("Error sending rank players buttons: " + e.getMessage());
-            e.printStackTrace();
-        }
+        sendMessageWithColumnButtons(message, buttonConfig, originalMessage, 4, "rank players buttons message");
     }
 
-    /**
-     * Sends a message with rank halls buttons
-     */
     private void sendMessageWithRankHallsButtons(String message,
             com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage) {
-        try {
-            message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-
-            JsonObject payload = new JsonObject();
-
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-
-                if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
-                }
-            }
-
-            payload.addProperty("text", message);
-
-            // Add parse_mode for HTML if message contains HTML tags
-            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
-                payload.addProperty("parse_mode", "HTML");
-            }
-            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
-            // (called at the top of every send method), any remaining "**"/"```"/"__"
-            // is never legitimate markdown intent, only accidental content residue
-            // (a stray unpaired sequence, or literal characters in a name/label).
-            // Sending as plain text is always safe; the fragile legacy "Markdown"
-            // parse mode used to be selected here on that same residue and could
-            // fail outright on a single unpaired "*"/"_" (A11).
-
-            // Create inline keyboard with 4 columns
-            JsonObject replyMarkup = new JsonObject();
-            JsonArray keyboard = new JsonArray();
-
-            int columnsPerRow = 4;
-            JsonArray currentRow = new JsonArray();
-
-            for (int i = 0; i < buttonConfig.labels.length; i++) {
-                JsonObject button = new JsonObject();
-                button.addProperty("text", buttonConfig.labels[i]);
-                button.addProperty("callback_data", buttonConfig.callbacks[i]);
-                currentRow.add(button);
-
-                // Add row when we reach 4 columns or it's the last button
-                if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
-                    keyboard.add(currentRow);
-                    currentRow = new JsonArray();
-                }
-            }
-
-            replyMarkup.add("inline_keyboard", keyboard);
-            payload.add("reply_markup", replyMarkup);
-
-            sendMessagePayloadWithFallback(payload, "rank halls buttons message");
-
-        } catch (Exception e) {
-            discordLog.logError("Error sending rank halls buttons: " + e.getMessage());
-            telegramLog.logError("Error sending rank halls buttons: " + e.getMessage());
-            e.printStackTrace();
-        }
+        sendMessageWithColumnButtons(message, buttonConfig, originalMessage, 4, "rank halls buttons message");
     }
 
     /**
@@ -4456,16 +4103,13 @@ public class TelegramListener {
             
             if (response.statusCode() != 200) {
                 System.err.println("Failed to send file to user (HTTP " + response.statusCode() + "): " + response.body());
-                discordLog.logError("Failed to send database file to user DM: HTTP " + response.statusCode());
-                telegramLog.logError("Failed to send database file to user DM: HTTP " + response.statusCode());
+                logHelper.logError("Failed to send database file to user DM: HTTP " + response.statusCode());
             } else {
-                discordLog.logSuccess("Database file sent to user DM successfully");
-                telegramLog.logSuccess("Database file sent to user DM successfully");
+                logHelper.logSuccess("Database file sent to user DM successfully");
             }
         } catch (Exception e) {
             System.err.println("Error sending file to user: " + e.getMessage());
-            discordLog.logError("Error sending database file to user: " + e.getMessage());
-            telegramLog.logError("Error sending database file to user: " + e.getMessage());
+            logHelper.logError("Error sending database file to user: " + e.getMessage());
             e.printStackTrace();
         }
     }

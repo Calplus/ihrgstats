@@ -9,6 +9,7 @@ import com.calplus.ihrgstats.ml.MatchupPredictor;
 import com.calplus.ihrgstats.ml.ModelTrainer;
 import com.calplus.ihrgstats.ml.PredictionService;
 import com.calplus.ihrgstats.utils.Constants;
+import com.calplus.ihrgstats.utils.VictoryRecordCalculator;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -44,7 +45,7 @@ public class RoundCsvProcessor {
     private final A1_Rounds rounds = new A1_Rounds();
     private final A2_MatchTypes matchTypes = new A2_MatchTypes();
     private final A3_Halls halls = new A3_Halls();
-    private final B4_Players players = new B4_Players();
+    private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
     private final C8_Matches matches = new C8_Matches();
     private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
@@ -351,6 +352,21 @@ public class RoundCsvProcessor {
                     }
                 }
 
+                // Non-blocking warning (same convention as the max-players
+                // warning below) when a recorded score exceeds the round's
+                // match type max_score - previously never checked anywhere, so
+                // an impossible score (e.g. 190 in a max-21 format) was
+                // silently accepted. Only checkable when a match type is
+                // actually assigned; deliberately not a hard failure since
+                // max_score is admin-entered and may itself be the wrong value.
+                if (maxScore != null && (score1 > maxScore || score2 > maxScore)) {
+                    notify("🟡", String.format(
+                            "%s vs %s: recorded score %s exceeds the match type's max_score of %s - check for a data entry error.",
+                            game.name1, game.name2,
+                            VictoryRecordCalculator.formatScore(Math.max(score1, score2)),
+                            VictoryRecordCalculator.formatScore(maxScore)));
+                }
+
                 Integer seat1 = null;
                 if (!p1Walkover) {
                     String hallKey = String.valueOf(p1HallId);
@@ -414,10 +430,8 @@ public class RoundCsvProcessor {
                 if (hallId == null) continue;
                 A3_Halls.Hall hall = halls.getHallById(hallId);
                 if (hall == null || hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-                for (var status : getActiveHallPlayersForYear(hallId, year)) {
-                    if (!allPlayerIdsThisRound.contains(status.playerId)) {
-                        allPlayerIdsThisRound.add(status.playerId);
-                    }
+                for (var status : playerYearStatus.getStatusesForHallAndYear(hallId, year)) {
+                    allPlayerIdsThisRound.add(status.playerId);
                 }
             }
 
@@ -564,10 +578,6 @@ public class RoundCsvProcessor {
             }
             predictions.upsertPrediction(rb.matchId, winnerId, winnerProbability, modelVersion, nowTimestamp);
         }
-    }
-
-    private List<B6_PlayerYearStatus.Status> getActiveHallPlayersForYear(int hallId, int year) throws SQLException {
-        return new B6_PlayerYearStatus().getStatusesForHallAndYear(hallId, year);
     }
 
     private EloCalculator.Glicko2Rating resolveSeedRating(String playerId, int year, int roundOrder, int ratingTypeId) throws SQLException {

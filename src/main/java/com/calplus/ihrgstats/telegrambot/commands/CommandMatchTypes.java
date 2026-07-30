@@ -3,9 +3,7 @@ package com.calplus.ihrgstats.telegrambot.commands;
 import com.calplus.ihrgstats.databasemanager.A1_Rounds;
 import com.calplus.ihrgstats.databasemanager.A2_MatchTypes;
 import com.calplus.ihrgstats.databasemanager.C8_Matches;
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 import com.calplus.ihrgstats.utils.TelegramHtml;
@@ -24,8 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * whenever a walkover is present in an uploaded round.
  */
 public class CommandMatchTypes {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
     private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private final A2_MatchTypes matchTypes = new A2_MatchTypes();
     private final A1_Rounds rounds = new A1_Rounds();
@@ -43,11 +40,9 @@ public class CommandMatchTypes {
     }
 
     public CommandMatchTypes() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
+        this.logHelper = new LogHelper();
     }
 
     /** Fails closed (denies) on a database error rather than risking a false "admin". */
@@ -55,21 +50,18 @@ public class CommandMatchTypes {
         try {
             return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
         } catch (java.sql.SQLException e) {
-            discordLog.logError("Database error checking admin status: " + e.getMessage());
-            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            logHelper.logError("Database error checking admin status: " + e.getMessage());
             return false;
         }
     }
 
     public CommandResponse handleCommand(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
-        discordLog.logInfo(String.format("%s requested /matchtypes command", userInfo));
-        telegramLog.logInfo(String.format("%s requested /matchtypes command", userInfo));
+        logHelper.logInfo(String.format("%s requested /matchtypes command", userInfo));
 
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can manage match types.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to use /matchtypes", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to use /matchtypes", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to use /matchtypes", userInfo));
             return new CommandResponse(errorMsg, (java.nio.file.Path) null, null);
         }
 
@@ -104,8 +96,7 @@ public class CommandMatchTypes {
 
             return new CommandResponse(sb.toString(), (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error listing match types: " + e.getMessage());
-            telegramLog.logError("Database error listing match types: " + e.getMessage());
+            logHelper.logError("Database error listing match types: " + e.getMessage());
             return new CommandResponse("❌ Database error listing match types.", (java.nio.file.Path) null, null);
         }
     }
@@ -147,8 +138,7 @@ public class CommandMatchTypes {
             String message = "✏️ <b>Edit Match Type</b>\n\nSelect a match type to edit:";
             return new CommandResponse(message, (java.nio.file.Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching match types: " + e.getMessage());
-            telegramLog.logError("Database error fetching match types: " + e.getMessage());
+            logHelper.logError("Database error fetching match types: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching match types.", (java.nio.file.Path) null, null);
         }
     }
@@ -173,8 +163,7 @@ public class CommandMatchTypes {
                     existing.id, TelegramHtml.escape(existing.typeName), TelegramHtml.escape(existing.typeName));
             return new CommandResponse(message, (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching match type: " + e.getMessage());
-            telegramLog.logError("Database error fetching match type: " + e.getMessage());
+            logHelper.logError("Database error fetching match type: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching match type.", (java.nio.file.Path) null, null);
         }
     }
@@ -209,8 +198,7 @@ public class CommandMatchTypes {
             String message = "🔧 <b>Assign Match Type to a Round</b>\n\nSelect the match type to assign:";
             return new CommandResponse(message, (java.nio.file.Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching match types: " + e.getMessage());
-            telegramLog.logError("Database error fetching match types: " + e.getMessage());
+            logHelper.logError("Database error fetching match types: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching match types.", (java.nio.file.Path) null, null);
         }
     }
@@ -236,8 +224,7 @@ public class CommandMatchTypes {
                 TelegramHtml.escape(existing.typeName));
             return new CommandResponse(message, (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching match type: " + e.getMessage());
-            telegramLog.logError("Database error fetching match type: " + e.getMessage());
+            logHelper.logError("Database error fetching match type: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching match type.", (java.nio.file.Path) null, null);
         }
     }
@@ -328,21 +315,18 @@ public class CommandMatchTypes {
                 String successMsg = String.format("✅ Created match type <b>#%d - %s</b> (max score: %s, time limit: %s).",
                         newId, TelegramHtml.escape(state.typeName), formatNumber(state.maxScore),
                         state.timeLimitMinutes != null ? state.timeLimitMinutes + " min" : "not set");
-                discordLog.logSuccess(String.format("Admin %s created match type #%d (%s)", userId, newId, state.typeName));
-                telegramLog.logSuccess(String.format("Admin %s created match type #%d (%s)", userId, newId, state.typeName));
+                logHelper.logSuccess(String.format("Admin %s created match type #%d (%s)", userId, newId, state.typeName));
                 return new CommandResponse(successMsg, (java.nio.file.Path) null, null);
             } else {
                 matchTypes.updateMatchType(state.editingId, state.typeName, state.maxScore, state.timeLimitMinutes, description, nowTimestamp);
                 String successMsg = String.format("✅ Updated match type <b>#%d - %s</b> (max score: %s, time limit: %s).",
                         state.editingId, TelegramHtml.escape(state.typeName), formatNumber(state.maxScore),
                         state.timeLimitMinutes != null ? state.timeLimitMinutes + " min" : "not set");
-                discordLog.logSuccess(String.format("Admin %s updated match type #%d (%s)", userId, state.editingId, state.typeName));
-                telegramLog.logSuccess(String.format("Admin %s updated match type #%d (%s)", userId, state.editingId, state.typeName));
+                logHelper.logSuccess(String.format("Admin %s updated match type #%d (%s)", userId, state.editingId, state.typeName));
                 return new CommandResponse(successMsg, (java.nio.file.Path) null, null);
             }
         } catch (SQLException e) {
-            discordLog.logError("Database error saving match type: " + e.getMessage());
-            telegramLog.logError("Database error saving match type: " + e.getMessage());
+            logHelper.logError("Database error saving match type: " + e.getMessage());
             return new CommandResponse("❌ Database error saving match type: " + e.getMessage(), (java.nio.file.Path) null, null);
         }
     }
@@ -383,12 +367,10 @@ public class CommandMatchTypes {
 
             String successMsg = String.format("✅ Assigned match type <b>%s</b> to round %d of %d.",
                     TelegramHtml.escape(matchType != null ? matchType.typeName : ("#" + matchTypeId)), roundOrder, year);
-            discordLog.logSuccess(String.format("Admin %s assigned match type #%d to round %d/%d", userId, matchTypeId, roundOrder, year));
-            telegramLog.logSuccess(String.format("Admin %s assigned match type #%d to round %d/%d", userId, matchTypeId, roundOrder, year));
+            logHelper.logSuccess(String.format("Admin %s assigned match type #%d to round %d/%d", userId, matchTypeId, roundOrder, year));
             return new CommandResponse(successMsg, (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error assigning match type to round: " + e.getMessage());
-            telegramLog.logError("Database error assigning match type to round: " + e.getMessage());
+            logHelper.logError("Database error assigning match type to round: " + e.getMessage());
             return new CommandResponse("❌ Database error assigning match type to round.", (java.nio.file.Path) null, null);
         }
     }

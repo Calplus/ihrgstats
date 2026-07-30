@@ -1,9 +1,8 @@
 package com.calplus.ihrgstats.databasemanager;
 
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.LogHelper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,16 +17,13 @@ import java.sql.*;
  * A1_PlayerStats/A2_CappedPlayers wide-table design.
  */
 public class DatabaseSchema {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
 
     public DatabaseSchema() {
         // Load environment variables first
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
-        
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
+
+        this.logHelper = new LogHelper();
     }
 
     /**
@@ -38,15 +34,12 @@ public class DatabaseSchema {
             stmt.execute(createSQL);
             String successMsg = String.format("Table '%s' ensured.", tableName);
             System.out.println(successMsg);
-            discordLog.batchInfo(successMsg);
-            telegramLog.batchInfo(successMsg);
+            logHelper.batchInfo(successMsg);
         } catch (SQLException e) {
-            discordLog.flushBatch(); // Flush batch before error
-            telegramLog.flushBatch();
+            logHelper.flushBatch();
             String errorMsg = String.format("Error creating table %s: %s", tableName, e.getMessage());
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -59,15 +52,12 @@ public class DatabaseSchema {
             stmt.execute(indexSQL);
             String successMsg = String.format("Index '%s' created on '%s(%s)'.", indexName, tableName, columns);
             System.out.println(successMsg);
-            discordLog.batchInfo(successMsg);
-            telegramLog.batchInfo(successMsg);
+            logHelper.batchInfo(successMsg);
         } catch (SQLException e) {
-            discordLog.flushBatch(); // Flush batch before error
-            telegramLog.flushBatch();
+            logHelper.flushBatch();
             String errorMsg = String.format("Error creating index %s on %s: %s", indexName, tableName, e.getMessage());
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
     }
 
@@ -88,8 +78,7 @@ public class DatabaseSchema {
         } catch (SQLException e) {
             String errorMsg = "Failed to enable foreign key enforcement: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
         }
 
         // ====================================================================
@@ -374,8 +363,7 @@ public class DatabaseSchema {
         // Log INFO: database is being created/running (initial message, send immediately)
         String infoMsgStart = String.format("Database creation started for: %s", dbName);
         System.out.println(infoMsgStart);
-        discordLog.logInfo(infoMsgStart);
-        telegramLog.logInfo(infoMsgStart);
+        logHelper.logInfo(infoMsgStart);
 
         // Create database directory if it doesn't exist
         if (!dbExists) {
@@ -384,15 +372,12 @@ public class DatabaseSchema {
                 Files.createFile(dbPath);
                 String infoMsgBlank = String.format("Blank database file '%s' created at %s", dbName, dbPath);
                 System.out.println(infoMsgBlank);
-                discordLog.batchInfo(infoMsgBlank); // Batch subsequent info messages
-                telegramLog.batchInfo(infoMsgBlank);
+                logHelper.batchInfo(infoMsgBlank);
             } catch (IOException e) {
-                discordLog.flushBatch(); // Flush batch before error
-                telegramLog.flushBatch();
+                logHelper.flushBatch();
                 String errMsg = String.format("Failed to create database file: %s. Error: %s. Check the console log for details.", dbPath, e.getMessage());
                 System.err.println(errMsg);
-                discordLog.logError(errMsg);
-                telegramLog.logError(errMsg);
+                logHelper.logError(errMsg);
                 throw new RuntimeException(errMsg, e);
             }
         }
@@ -401,25 +386,20 @@ public class DatabaseSchema {
         try (Connection conn = DatabaseHelper.getConnection(dbPath.toString())) {
             String infoMsgOpen = String.format("Database '%s' opened", dbName);
             System.out.println(infoMsgOpen);
-            discordLog.batchInfo(infoMsgOpen); // Batch this info message
-            telegramLog.batchInfo(infoMsgOpen);
+            logHelper.batchInfo(infoMsgOpen);
 
             defineTableStructures(conn);
 
-            discordLog.flushBatch(); // Flush batch before final success message
-            telegramLog.flushBatch();
+            logHelper.flushBatch();
             String successMsg = String.format("Database created successfully: %s", dbPath);
             System.out.println(successMsg);
-            discordLog.logSuccess(successMsg);
-            telegramLog.logSuccess(successMsg);
+            logHelper.logSuccess(successMsg);
 
         } catch (SQLException e) {
-            discordLog.flushBatch(); // Flush batch before error
-            telegramLog.flushBatch();
+            logHelper.flushBatch();
             String errMsg = String.format("Database creation failed for %s: %s", dbName, e.getMessage());
             System.err.println(errMsg);
-            discordLog.logError(errMsg);
-            telegramLog.logError(errMsg);
+            logHelper.logError(errMsg);
             throw new RuntimeException(errMsg, e);
         }
     }

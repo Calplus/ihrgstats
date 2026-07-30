@@ -237,23 +237,9 @@ public class TableImageGenerator {
      */
     public static Path generatePlayerTable(String[] headers, List<String[]> rows,
                                           TableFormatter.Alignment[] alignments,
-                                          int[] columnWidths) throws IOException {
-        return generatePlayerTable(headers, rows, alignments, columnWidths, null, null, "RankPlayers", "");
-    }
-    
-    public static Path generatePlayerTable(String[] headers, List<String[]> rows,
-                                          TableFormatter.Alignment[] alignments,
                                           int[] columnWidths,
                                           ImageMetadata metadata) throws IOException {
         return generatePlayerTable(headers, rows, alignments, columnWidths, metadata, null, "RankPlayers", "");
-    }
-
-    public static Path generatePlayerTable(String[] headers, List<String[]> rows,
-                                          TableFormatter.Alignment[] alignments,
-                                          int[] columnWidths,
-                                          ImageMetadata metadata,
-                                          Set<Integer> highlightRows) throws IOException {
-        return generatePlayerTable(headers, rows, alignments, columnWidths, metadata, highlightRows, "RankPlayers", "");
     }
 
     public static Path generatePlayerTable(String[] headers, List<String[]> rows,
@@ -368,25 +354,9 @@ public class TableImageGenerator {
     public static Path generateHallTable(String[] headers, List<String[]> rows,
                                         List<String> hallNames,
                                         TableFormatter.Alignment[] alignments,
-                                        int[] columnWidths) throws IOException {
-        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, null, null, "RankHalls", "");
-    }
-    
-    public static Path generateHallTable(String[] headers, List<String[]> rows,
-                                        List<String> hallNames,
-                                        TableFormatter.Alignment[] alignments,
                                         int[] columnWidths,
                                         ImageMetadata metadata) throws IOException {
         return generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, null, "RankHalls", "");
-    }
-
-    public static Path generateHallTable(String[] headers, List<String[]> rows,
-                                        List<String> hallNames,
-                                        TableFormatter.Alignment[] alignments,
-                                        int[] columnWidths,
-                                        ImageMetadata metadata,
-                                        Set<Integer> highlightRows) throws IOException {
-        return generateHallTable(headers, rows, hallNames, alignments, columnWidths, metadata, highlightRows, "RankHalls", "");
     }
 
     public static Path generateHallTable(String[] headers, List<String[]> rows,

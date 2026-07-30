@@ -1,9 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.F16_Admins;
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
@@ -19,8 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * maintain. Refuses to remove the last remaining admin (lockout guard).
  */
 public class CommandAdmins {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
     private final F16_Admins admins = new F16_Admins();
 
     private static final Map<String, AdminsSelectionState> userSelectionStates = new ConcurrentHashMap<>();
@@ -30,11 +27,9 @@ public class CommandAdmins {
     }
 
     public CommandAdmins() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
+        this.logHelper = new LogHelper();
     }
 
     /** Fails closed (denies) on a database error rather than risking a false "admin". */
@@ -42,21 +37,18 @@ public class CommandAdmins {
         try {
             return admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, userId);
         } catch (SQLException e) {
-            discordLog.logError("Database error checking admin status: " + e.getMessage());
-            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            logHelper.logError("Database error checking admin status: " + e.getMessage());
             return false;
         }
     }
 
     public CommandResponse handleCommand(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
-        discordLog.logInfo(String.format("%s requested /admins command", userInfo));
-        telegramLog.logInfo(String.format("%s requested /admins command", userInfo));
+        logHelper.logInfo(String.format("%s requested /admins command", userInfo));
 
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can manage admins.";
-            discordLog.logWarning(String.format("Non-admin %s attempted to use /admins", userInfo));
-            telegramLog.logWarning(String.format("Non-admin %s attempted to use /admins", userInfo));
+            logHelper.logWarning(String.format("Non-admin %s attempted to use /admins", userInfo));
             return new CommandResponse(errorMsg, (java.nio.file.Path) null, null);
         }
 
@@ -91,8 +83,7 @@ public class CommandAdmins {
             }
             return new CommandResponse(sb.toString(), (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error listing admins: " + e.getMessage());
-            telegramLog.logError("Database error listing admins: " + e.getMessage());
+            logHelper.logError("Database error listing admins: " + e.getMessage());
             return new CommandResponse("❌ Database error listing admins.", (java.nio.file.Path) null, null);
         }
     }
@@ -134,8 +125,7 @@ public class CommandAdmins {
             String message = "➖ <b>Remove Admin</b>\n\nSelect an admin to remove:";
             return new CommandResponse(message, (java.nio.file.Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
         } catch (SQLException e) {
-            discordLog.logError("Database error fetching admins: " + e.getMessage());
-            telegramLog.logError("Database error fetching admins: " + e.getMessage());
+            logHelper.logError("Database error fetching admins: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching admins.", (java.nio.file.Path) null, null);
         }
     }
@@ -173,12 +163,10 @@ public class CommandAdmins {
             admins.removeAdmin(target.platform, target.platformUserId);
 
             String successMsg = String.format("✅ Removed admin <b>%s %s</b>.", TelegramHtml.escape(target.platform), TelegramHtml.escape(target.platformUserId));
-            discordLog.logSuccess(String.format("Admin %s removed admin %s/%s", userId, target.platform, target.platformUserId));
-            telegramLog.logSuccess(String.format("Admin %s removed admin %s/%s", userId, target.platform, target.platformUserId));
+            logHelper.logSuccess(String.format("Admin %s removed admin %s/%s", userId, target.platform, target.platformUserId));
             return new CommandResponse(successMsg, (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error removing admin: " + e.getMessage());
-            telegramLog.logError("Database error removing admin: " + e.getMessage());
+            logHelper.logError("Database error removing admin: " + e.getMessage());
             return new CommandResponse("❌ Database error removing admin.", (java.nio.file.Path) null, null);
         }
     }
@@ -229,12 +217,10 @@ public class CommandAdmins {
             String successMsg = String.format("✅ Added admin <b>%s %s</b>%s.",
                     TelegramHtml.escape(platform), TelegramHtml.escape(platformUserId),
                     displayName != null && !displayName.isEmpty() ? " (" + TelegramHtml.escape(displayName) + ")" : "");
-            discordLog.logSuccess(String.format("Admin %s added admin %s/%s", userId, platform, platformUserId));
-            telegramLog.logSuccess(String.format("Admin %s added admin %s/%s", userId, platform, platformUserId));
+            logHelper.logSuccess(String.format("Admin %s added admin %s/%s", userId, platform, platformUserId));
             return new CommandResponse(successMsg, (java.nio.file.Path) null, null);
         } catch (SQLException e) {
-            discordLog.logError("Database error adding admin: " + e.getMessage());
-            telegramLog.logError("Database error adding admin: " + e.getMessage());
+            logHelper.logError("Database error adding admin: " + e.getMessage());
             return new CommandResponse("❌ Database error adding admin.", (java.nio.file.Path) null, null);
         }
     }

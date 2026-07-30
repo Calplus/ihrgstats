@@ -5,10 +5,9 @@ import com.calplus.ihrgstats.databasemanager.B4_Players;
 import com.calplus.ihrgstats.databasemanager.D10_RatingTypes;
 import com.calplus.ihrgstats.databasemanager.DatabaseSchema;
 import com.calplus.ihrgstats.databasemanager.F16_Admins;
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
 import java.nio.file.Files;
@@ -30,39 +29,33 @@ public class Main {
     public static final ZonedDateTime LAUNCH_TIME = computeLaunchTime();
 
     private static ZonedDateTime computeLaunchTime() {
-        new EnvironmentManager().loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         return TimezoneHelper.now();
     }
 
     public static void main(String[] args) {
         // Initialize logging
-        DiscordLog discordLog = new DiscordLog();
-        TelegramLog telegramLog = new TelegramLog();
+        LogHelper logHelper = new LogHelper();
 
         // Load environment variables from .env.properties file
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
 
         System.out.println("====================================");
         System.out.println("   IHRG Stats Application Started");
         System.out.println("====================================");
         
-        discordLog.logInfo("IHRG Stats Application Started");
-        telegramLog.logInfo("IHRG Stats Application Started");
+        logHelper.logInfo("IHRG Stats Application Started");
         
-        discordLog.batchInfo("Environment variables loaded successfully");
-        telegramLog.batchInfo("Environment variables loaded successfully");
+        logHelper.batchInfo("Environment variables loaded successfully");
         
         // Check and initialize database if needed
-        initializeDatabase(discordLog, telegramLog);
+        initializeDatabase(logHelper);
         
         // Start Telegram file listener
-        discordLog.batchInfo("Initializing Telegram file listener...");
-        telegramLog.batchInfo("Initializing Telegram file listener...");
+        logHelper.batchInfo("Initializing Telegram file listener...");
         
-        discordLog.flushBatch();
-        telegramLog.flushBatch();
+        logHelper.flushBatch();
         
         try {
             TelegramListener listener = new TelegramListener();
@@ -74,15 +67,12 @@ public class Main {
                 System.out.println("   IHRG Stats Application Shutting Down");
                 System.out.println("==========================================");
                 
-                discordLog.logInfo("IHRG Stats Application shutting down...");
-                telegramLog.logInfo("IHRG Stats Application shutting down...");
+                logHelper.logInfo("IHRG Stats Application shutting down...");
                 
                 listener.stop();
                 
-                discordLog.flushBatch();
-                telegramLog.flushBatch();
-                discordLog.flush();
-                telegramLog.flush();
+                logHelper.flushBatch();
+                logHelper.flush();
             }));
             
             System.out.println("\nApplication is running. Press Ctrl+C to stop.");
@@ -94,8 +84,7 @@ public class Main {
         } catch (Exception e) {
             String errorMsg = "Fatal error in main application: " + e.getMessage();
             System.err.println(errorMsg);
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             e.printStackTrace();
             System.exit(1);
         }
@@ -108,21 +97,18 @@ public class Main {
      * as player_ratings_snapshot, appear in a database created by an older
      * version.
      */
-    private static void initializeDatabase(DiscordLog discordLog, TelegramLog telegramLog) {
+    private static void initializeDatabase(LogHelper logHelper) {
         Path dbPath = com.calplus.ihrgstats.utils.DatabaseHelper.getDefaultDatabasePath();
         boolean dbExisted = Files.exists(dbPath);
 
         if (dbExisted) {
-            discordLog.batchInfo("Database already exists at: " + dbPath + " - ensuring schema is up to date");
-            telegramLog.batchInfo("Database already exists at: " + dbPath + " - ensuring schema is up to date");
+            logHelper.batchInfo("Database already exists at: " + dbPath + " - ensuring schema is up to date");
             System.out.println("Database found: " + dbPath + " (ensuring schema is up to date)");
         } else {
-            discordLog.batchInfo("Database not found. Creating new database...");
-            telegramLog.batchInfo("Database not found. Creating new database...");
+            logHelper.batchInfo("Database not found. Creating new database...");
             System.out.println("Database not found. Creating new database at: " + dbPath);
 
-            discordLog.flushBatch();
-            telegramLog.flushBatch();
+            logHelper.flushBatch();
         }
 
         try {
@@ -130,20 +116,18 @@ public class Main {
             schema.createDatabase("default.db");
 
             if (!dbExisted) {
-                discordLog.logSuccess("Database created successfully");
-                telegramLog.logSuccess("Database created successfully");
+                logHelper.logSuccess("Database created successfully");
                 System.out.println("Database created successfully");
             }
         } catch (Exception e) {
             String errorMsg = "Failed to " + (dbExisted ? "update database schema" : "create database") + ": " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             System.err.println(errorMsg);
             e.printStackTrace();
             System.exit(1);
         }
 
-        seedReferenceData(discordLog, telegramLog);
+        seedReferenceData(logHelper);
     }
 
     /**
@@ -154,7 +138,7 @@ public class Main {
      * on every startup regardless of whether the database file already
      * existed.
      */
-    private static void seedReferenceData(DiscordLog discordLog, TelegramLog telegramLog) {
+    private static void seedReferenceData(LogHelper logHelper) {
         String now = TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss.SSS");
         try {
             new A3_Halls().seedDefaults(now);
@@ -162,13 +146,11 @@ public class Main {
             new D10_RatingTypes().seedDefaults(now);
             new F16_Admins().seedDefaults(now);
 
-            discordLog.batchInfo("Reference data seeded (halls, WLKOVR sentinel, rating types, admins)");
-            telegramLog.batchInfo("Reference data seeded (halls, WLKOVR sentinel, rating types, admins)");
+            logHelper.batchInfo("Reference data seeded (halls, WLKOVR sentinel, rating types, admins)");
             System.out.println("Reference data seeded (halls, WLKOVR sentinel, rating types, admins)");
         } catch (Exception e) {
             String errorMsg = "Failed to seed reference data: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             System.err.println(errorMsg);
             e.printStackTrace();
             System.exit(1);

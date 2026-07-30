@@ -24,8 +24,7 @@ public class CommandHelp {
     }
     
     public CommandHelp() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         
         this.logHelper = new LogHelper();
     }

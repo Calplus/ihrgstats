@@ -27,8 +27,7 @@ public class CommandRankPlayers {
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
     public CommandRankPlayers() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -281,27 +280,8 @@ public class CommandRankPlayers {
         String table = TableFormatter.formatTable(RANK_TABLE_HEADERS, buildRankRows(players), RANK_TABLE_ALIGNMENTS, RANK_TABLE_COLUMN_WIDTHS);
 
         if (!homeHall.isEmpty()) {
-            String[] lines = table.split("\n");
-            StringBuilder result = new StringBuilder();
-            int rowIndex = 0;
-            for (int i = 0; i < lines.length; i++) {
-                String line = lines[i];
-                if (i < 3) {
-                    result.append(line).append("\n");
-                } else if (line.contains("----")) {
-                    result.append(line).append("\n");
-                } else if (line.trim().equals("```")) {
-                    result.append(line);
-                } else {
-                    if (rowIndex < players.size() && players.get(rowIndex).hall.equalsIgnoreCase(homeHall)) {
-                        result.append(line).append("*\n");
-                    } else {
-                        result.append(line).append("\n");
-                    }
-                    rowIndex++;
-                }
-            }
-            return result.toString().trim();
+            return TableFormatter.markRows(table,
+                    i -> i < players.size() && players.get(i).hall.equalsIgnoreCase(homeHall));
         }
 
         return table;

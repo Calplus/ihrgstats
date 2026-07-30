@@ -2,6 +2,36 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 20] - 2026-07-30
+
+Whole-app refactor sweep: every package reviewed end to end against the last manually-verified release (v1.1.5) - duplicated code combined, dead code removed, hot paths sped up. Behavior-preserving throughout (full suite green before and after); ~750 lines of main code removed net.
+
+### Changed
+
+- `.env.properties` is now read from disk once per working directory per process (`EnvironmentManager.ensureSystemPropertiesLoaded()`) instead of on every command construction - previously every incoming Telegram message re-read and re-parsed the file across 17 constructor call sites. Runtime `/settings` changes still apply instantly (they already mirror into system properties directly). Also cuts the test suite's wall time by ~25%.
+- Dual Discord+Telegram logging pairs collapsed into the existing `LogHelper` across `DatabaseSchema`, `Main`, `TelegramListener`, `/settings`, `/admins`, `/exportdatabase` and `/matchtypes` (~120 duplicated call pairs removed). `LogHelper` gained a wrapping constructor and `flush()` for the listener's deliberately asymmetric single-platform logging.
+- Four byte-identical ~70-line button-keyboard senders in `TelegramListener` (compare halls/players, rank players/halls) merged into one shared column-layout sender; `sendMessageToChat` now goes through the same shared sender as every sibling, gaining the plain-text fallback retry it alone lacked.
+- `deltaString` and `formatScorePair` (five and five private copies across the info/compare commands) centralized into `VictoryRecordCalculator`; the home-hall `*` row-marker post-processing duplicated between `/rankplayers` and `/rankhalls` extracted to `TableFormatter.markRows`; `/rankhalls` now shares its table constants/row builder between text and image like `/rankplayers` already did; `/infomatch`'s per-matchup display logic deduplicated between its text and image builders.
+- `TimezoneHelper`'s triple property-read consolidated; timezone display formatting shared between `TimezoneHelper` and `/settings`.
+- `OutcomeIconRenderer` now caches failed icon loads with a sentinel (mirroring `HallIconLoader`) instead of re-reading the classpath on every row render.
+- `/infomatchhall` no longer refetches the full per-round rating map once per player (was O(players²) queries per view).
+
+### Removed
+
+- **JDA (Java Discord API) dependency removed from the build** - its only consumer was `DiscordOnlineStatus`, a presence-setting class with zero callers in this codebase AND in v1.1.5 (verified). Discord *logging* is unaffected (it uses Discord's plain HTTP API). Shaded jar shrinks accordingly.
+- Dead code, verified unused in v1.1.5 too before deletion: `CommandAbout.formatTimezone` (never called) plus its dead locals/imports, `VictoryRecordCalculator.calculateWinPercentage` (zero callers ever), `TableFormatter`'s unreachable no-separator row format, two unused `generatePlayerTable`/`generateHallTable` overloads each, `TelegramListener`'s unused `webhookPort` field, `getLogChatIdAndThread`, `sendFatalErrorAndStop`, two unused send overloads, and unused fields on its confirmation-request holders; `RoundCsvProcessor`'s unused `B4_Players` field and a single-use wrapper method.
+
+### Added
+
+- Round upload now warns (non-blocking, same convention as the max-players warning) when a recorded score exceeds the round's match type `max_score` - previously an impossible score like 190 in a max-21 format was silently accepted.
+- `/settings` now expires stale manual-input states after 10 minutes via the same `cleanupOldStates` every other wizard already used (it was the only state-holding command that never cleaned up).
+
+### Notes
+
+- v1.1.5 cross-check: every deletion in code that existed at v1.1.5 was first verified against that tag (`git show v1.1.5:...`); the v1.1.5-only classes (`HallUtils`, `RoundDetector`, `RoundUtils`, `CommandExportPlayers`) were each traced to their v2 successor or confirmed deliberately dropped with the schema redesign.
+- Deliberately NOT merged: the ML post-processing hook trios in `RoundCsvProcessor` vs `/recalculate` (reporting semantics genuinely differ) and `TelegramLog` vs `DiscordLog` (structure matches but APIs, char limits, and escaping differ materially - a shared core is a follow-up, not a sweep-level change).
+- 241 tests, 0 failures (unchanged count; suite time 1:52 → 1:22).
+
 ## [Beta 3 Update 19] - 2026-07-26
 
 ExpElo - the AI/ML layer's first directly visible rating, shown alongside TrueElo in `/rankplayers`.

@@ -25,8 +25,7 @@ public class CommandRankHalls {
     private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
 
     public CommandRankHalls() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -231,41 +230,12 @@ public class CommandRankHalls {
     }
 
     private String formatHallsTable(List<HallRankData> halls, String homeHall) {
-        String[] headers = {"Rank", "Hall", "Cap", "Avg Elo"};
-        Alignment[] alignments = {Alignment.RIGHT, Alignment.LEFT, Alignment.RIGHT, Alignment.RIGHT};
-        int[] columnWidths = {4, 10, 3, 7};
-
-        List<String[]> rows = new ArrayList<>();
-        int rank = 1;
-        for (HallRankData hall : halls) {
-            rows.add(new String[]{String.valueOf(rank), hall.hallName, String.valueOf(hall.cappedCount), String.format("%.1f", hall.averageElo)});
-            rank++;
-        }
-
-        String table = TableFormatter.formatTable(headers, rows, alignments, columnWidths);
+        String table = TableFormatter.formatTable(HALL_TABLE_HEADERS, buildHallRows(halls, null),
+                HALL_TABLE_ALIGNMENTS, HALL_TABLE_COLUMN_WIDTHS);
 
         if (!homeHall.isEmpty()) {
-            String[] lines = table.split("\n");
-            StringBuilder result = new StringBuilder();
-            int rowIndex = 0;
-            for (int i = 0; i < lines.length; i++) {
-                String line = lines[i];
-                if (i < 3) {
-                    result.append(line).append("\n");
-                } else if (line.contains("----")) {
-                    result.append(line).append("\n");
-                } else if (line.trim().equals("```")) {
-                    result.append(line);
-                } else {
-                    if (rowIndex < halls.size() && halls.get(rowIndex).hallName.equalsIgnoreCase(homeHall)) {
-                        result.append(line).append("*\n");
-                    } else {
-                        result.append(line).append("\n");
-                    }
-                    rowIndex++;
-                }
-            }
-            return result.toString().trim();
+            return TableFormatter.markRows(table,
+                    i -> i < halls.size() && halls.get(i).hallName.equalsIgnoreCase(homeHall));
         }
 
         return table;

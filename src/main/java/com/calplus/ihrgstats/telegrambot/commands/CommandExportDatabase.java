@@ -1,10 +1,9 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
-import com.calplus.ihrgstats.discordbot.logs.DiscordLog;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
-import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.OutputPaths;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
@@ -34,18 +33,15 @@ import java.util.UUID;
  *   this replaces it).
  */
 public class CommandExportDatabase {
-    private final DiscordLog discordLog;
-    private final TelegramLog telegramLog;
+    private final LogHelper logHelper;
     private final com.calplus.ihrgstats.databasemanager.F16_Admins admins = new com.calplus.ihrgstats.databasemanager.F16_Admins();
     private final Path dbPath;
 
     public CommandExportDatabase() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
-        this.dbPath = Paths.get(System.getProperty("user.dir"), "database", "core", "default.db");
+        this.logHelper = new LogHelper();
+        this.dbPath = DatabaseHelper.getDefaultDatabasePath();
     }
 
     /** Fails closed (denies) on a database error rather than risking a false "admin". */
@@ -53,8 +49,7 @@ public class CommandExportDatabase {
         try {
             return admins.isAdmin(com.calplus.ihrgstats.databasemanager.F16_Admins.PLATFORM_TELEGRAM, userId);
         } catch (java.sql.SQLException e) {
-            discordLog.logError("Database error checking admin status: " + e.getMessage());
-            telegramLog.logError("Database error checking admin status: " + e.getMessage());
+            logHelper.logError("Database error checking admin status: " + e.getMessage());
             return false;
         }
     }
@@ -67,20 +62,17 @@ public class CommandExportDatabase {
      */
     public ExportResponse requestFormatChoice(String userId) {
         String userInfo = TelegramListener.formatUserInfo(userId);
-        discordLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
-        telegramLog.logInfo(String.format("%s requested /exportdatabase command", userInfo));
+        logHelper.logInfo(String.format("%s requested /exportdatabase command", userInfo));
 
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can export the database.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to use /exportdatabase", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to use /exportdatabase", userId));
+            logHelper.logWarning(String.format("Non-admin user %s attempted to use /exportdatabase", userId));
             return new ExportResponse(errorMsg, null, false);
         }
 
         if (!Files.exists(dbPath)) {
             String errorMsg = "❌ Error: Database file not found at: " + dbPath;
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
 
@@ -94,8 +86,7 @@ public class CommandExportDatabase {
         String[] buttonLabels = {"📊 Full export (.xlsx)", "🗄️ Database file (.db)", "❌ Cancel"};
         String[] buttonCallbacks = {"export_db_xlsx", "export_db_confirm", "export_db_cancel"};
 
-        discordLog.logInfo(String.format("Sent export format choice to admin %s", userId));
-        telegramLog.logInfo(String.format("Sent export format choice to admin %s", userId));
+        logHelper.logInfo(String.format("Sent export format choice to admin %s", userId));
 
         return new ExportResponse(message, new ButtonConfig(buttonLabels, buttonCallbacks), false);
     }
@@ -104,18 +95,15 @@ public class CommandExportDatabase {
     public ExportResponse executeDbExport(String userId) {
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can export the database.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
+            logHelper.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
             return new ExportResponse(errorMsg, null, false);
         }
 
-        discordLog.logInfo(String.format("Admin %s confirmed .db file export", userId));
-        telegramLog.logInfo(String.format("Admin %s confirmed .db file export", userId));
+        logHelper.logInfo(String.format("Admin %s confirmed .db file export", userId));
 
         if (!Files.exists(dbPath)) {
             String errorMsg = "❌ Error: Database file not found at: " + dbPath;
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
 
@@ -154,15 +142,13 @@ public class CommandExportDatabase {
                     "Filename: " + exportFileName + "\n" +
                     "Timestamp: " + timestamp;
 
-            discordLog.logSuccess(String.format("Database file exported successfully for admin %s", userId));
-            telegramLog.logSuccess(String.format("Database file exported successfully for admin %s", userId));
+            logHelper.logSuccess(String.format("Database file exported successfully for admin %s", userId));
 
             return new ExportResponse(successMsg, null, true, exportPath);
 
         } catch (IOException | SQLException e) {
             String errorMsg = "❌ Error: Failed to export database file: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
     }
@@ -175,13 +161,11 @@ public class CommandExportDatabase {
     public ExportResponse executeXlsxExport(String userId) {
         if (!isAdmin(userId)) {
             String errorMsg = "❌ Access Denied: Only administrators can export the database.";
-            discordLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
-            telegramLog.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
+            logHelper.logWarning(String.format("Non-admin user %s attempted to confirm export", userId));
             return new ExportResponse(errorMsg, null, false);
         }
 
-        discordLog.logInfo(String.format("Admin %s confirmed full .xlsx export", userId));
-        telegramLog.logInfo(String.format("Admin %s confirmed full .xlsx export", userId));
+        logHelper.logInfo(String.format("Admin %s confirmed full .xlsx export", userId));
 
         try (Connection conn = DatabaseHelper.getDefaultConnection();
              XSSFWorkbook workbook = new XSSFWorkbook()) {
@@ -207,14 +191,12 @@ public class CommandExportDatabase {
             String successMsg = String.format(
                     "✅ Full database export completed: %d populated tables exported to %s.",
                     tableCount, filename);
-            discordLog.logSuccess(successMsg);
-            telegramLog.logSuccess(successMsg);
+            logHelper.logSuccess(successMsg);
             return new ExportResponse(successMsg, null, true, xlsxPath);
 
         } catch (Exception e) {
             String errorMsg = "❌ Error: Full export failed: " + e.getMessage();
-            discordLog.logError(errorMsg);
-            telegramLog.logError(errorMsg);
+            logHelper.logError(errorMsg);
             return new ExportResponse(errorMsg, null, false);
         }
     }
@@ -273,8 +255,7 @@ public class CommandExportDatabase {
     }
 
     public String handleCancel(String userId) {
-        discordLog.logInfo(String.format("Admin %s cancelled database export", userId));
-        telegramLog.logInfo(String.format("Admin %s cancelled database export", userId));
+        logHelper.logInfo(String.format("Admin %s cancelled database export", userId));
         return "ℹ️ Database export cancelled.";
     }
 

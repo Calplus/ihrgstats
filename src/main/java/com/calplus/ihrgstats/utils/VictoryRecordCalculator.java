@@ -66,6 +66,39 @@ public class VictoryRecordCalculator {
     }
     
     /**
+     * Formats a rank/ELO change as "+n", "-n" or "=" - shared by every
+     * info/compare command's ΔRank/ΔELO columns (previously five identical
+     * private copies).
+     */
+    public static String deltaString(int change) {
+        if (change > 0) return "+" + change;
+        if (change < 0) return "-" + Math.abs(change);
+        return "=";
+    }
+
+    /**
+     * Formats "myScore-oppScore" for a single board, rendering a timed-out
+     * side as the literal "TIMEOUT" (previously three identical private
+     * copies across the info/compare commands).
+     */
+    public static String formatScorePair(Double myScore, Double oppScore, boolean selfTimeout, boolean oppTimeout) {
+        String myStr = selfTimeout ? "TIMEOUT" : (myScore != null ? formatScore(myScore) : "?");
+        String oppStr = oppTimeout ? "TIMEOUT" : (oppScore != null ? formatScore(oppScore) : "0");
+        return myStr + "-" + oppStr;
+    }
+
+    /**
+     * Formats a hall-level "a-b" score pair - whole numbers without
+     * decimals, otherwise one decimal place each.
+     */
+    public static String formatScorePair(double hallScore, double oppScore) {
+        if (hallScore == Math.floor(hallScore) && oppScore == Math.floor(oppScore)) {
+            return String.format("%d-%d", (int) hallScore, (int) oppScore);
+        }
+        return String.format("%.1f-%.1f", hallScore, oppScore);
+    }
+
+    /**
      * Formats hall name: "Hall 4" for numeric, "Binjai Hall" for non-numeric, WALKOVER unchanged
      */
     public static String formatHallName(String hallName) {
@@ -80,20 +113,5 @@ public class VictoryRecordCalculator {
         }
     }
     
-    /**
-     * Calculates win percentage
-     * @param wins Number of wins
-     * @param draws Number of draws
-     * @param losses Number of losses
-     * @return Win percentage as string
-     */
-    public static String calculateWinPercentage(int wins, int draws, int losses) {
-        int total = wins + draws + losses;
-        if (total == 0) {
-            return "0.0%";
-        }
-        double winRate = ((wins * 1.0 + draws * 0.5) / total) * 100;
-        return String.format("%.2f%%", winRate);
-    }
 }
 

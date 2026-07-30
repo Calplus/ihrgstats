@@ -15,8 +15,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -29,14 +27,13 @@ public class CommandAbout {
     private final LogHelper logHelper;
     private final String version;
     private final String author = "Calplus";
-    private final String lastUpdated = "26 Jul 2026";
+    private final String lastUpdated = "30 Jul 2026";
     private final String botToken;
     private final HttpClient httpClient;
     private final Gson gson;
 
     public CommandAbout(String botToken) {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
 
         this.logHelper = new LogHelper();
         this.version = loadVersion();
@@ -56,23 +53,6 @@ public class CommandAbout {
     private static String loadVersion() {
         String implVersion = CommandAbout.class.getPackage().getImplementationVersion();
         return implVersion != null && !implVersion.isEmpty() ? implVersion : "Development Build";
-    }
-    
-    /**
-     * Formats timezone offset as UTC+/-n
-     */
-    private String formatTimezone(ZoneId zoneId, ZonedDateTime dateTime) {
-        ZoneOffset offset = dateTime.getOffset();
-        int totalSeconds = offset.getTotalSeconds();
-        int hours = totalSeconds / 3600;
-        
-        if (hours == 0) {
-            return "UTC";
-        } else if (hours > 0) {
-            return "UTC+" + hours;
-        } else {
-            return "UTC" + hours;  // Already has negative sign
-        }
     }
     
     /**
@@ -131,7 +111,6 @@ public class CommandAbout {
             List<F16_Admins.Admin> telegramAdmins = new F16_Admins().getAllAdmins().stream()
                     .filter(admin -> F16_Admins.PLATFORM_TELEGRAM.equals(admin.platform))
                     .collect(java.util.stream.Collectors.toList());
-            ZoneId timezone = TimezoneHelper.getConfiguredZoneId();
             ZonedDateTime now = TimezoneHelper.now();
             
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
@@ -166,13 +145,11 @@ public class CommandAbout {
             }
 
             message.append("<i>For help with commands, use</i> <code>/help</code>");
-            String userInfo2 = TelegramListener.formatUserInfo(userId);
-            logHelper.logSuccess(String.format("%s received about information", userInfo2));
+            logHelper.logSuccess(String.format("%s received about information", userInfo));
             return new CommandResponse(message.toString(), (java.nio.file.Path) null);
-            
+
         } catch (Exception e) {
-            String userInfo3 = TelegramListener.formatUserInfo(userId);
-            logHelper.logError(String.format("Error generating about info for %s: %s", userInfo3, e.getMessage()));
+            logHelper.logError(String.format("Error generating about info for %s: %s", userInfo, e.getMessage()));
             return new CommandResponse("❌ Error generating about information. Please try again later.", (java.nio.file.Path) null);
         }
     }

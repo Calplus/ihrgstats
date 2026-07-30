@@ -24,7 +24,13 @@ public class OutcomeIconRenderer {
     // a real, not just theoretical, possibility (matches HallIconLoader's
     // cache, which already used ConcurrentHashMap for the same reason).
     private static final Map<String, BufferedImage> iconCache = new ConcurrentHashMap<>();
-    
+
+    // Sentinel cached for icons that failed to load, so a broken/missing
+    // resource is only attempted (and logged) once instead of re-read from
+    // the classpath on every single row render (same pattern as
+    // HallIconLoader.NOT_FOUND).
+    private static final BufferedImage NOT_FOUND = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+
     /**
      * Loads an outcome icon from resources
      * @param outcome Outcome value (1=win, 0=draw, -1=loss, null=unknown)
@@ -35,32 +41,28 @@ public class OutcomeIconRenderer {
         if (outcome == null) {
             return null; // No icon for unknown outcome, will render "?" text instead
         }
-        
+
         String iconName = getIconFileName(outcome);
         if (iconName == null) {
             return null;
         }
-        
-        String cacheKey = iconName + "_" + size;
-        if (iconCache.containsKey(cacheKey)) {
-            return iconCache.get(cacheKey);
-        }
-        
+
+        BufferedImage cached = iconCache.computeIfAbsent(iconName + "_" + size,
+            key -> readAndResizeIcon(iconName, size));
+        return cached == NOT_FOUND ? null : cached;
+    }
+
+    private static BufferedImage readAndResizeIcon(String iconName, int size) {
         try (InputStream is = OutcomeIconRenderer.class.getResourceAsStream(ICON_PATH + iconName)) {
             if (is == null) {
                 System.err.println("Icon not found: " + ICON_PATH + iconName);
-                return null;
+                return NOT_FOUND;
             }
-            
-            BufferedImage original = ImageIO.read(is);
-            BufferedImage resized = resizeIcon(original, size);
-            iconCache.put(cacheKey, resized);
-            return resized;
-            
+            return resizeIcon(ImageIO.read(is), size);
         } catch (Exception e) {
             System.err.println("Failed to load icon: " + iconName);
             e.printStackTrace();
-            return null;
+            return NOT_FOUND;
         }
     }
     

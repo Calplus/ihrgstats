@@ -29,13 +29,8 @@ public class CommandInfoMatch {
 
     private static final Map<String, SelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
-    private static class MatchInfoSelectionState extends SelectionState {
-        String selectedRound;
-    }
-
     public CommandInfoMatch() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -49,7 +44,7 @@ public class CommandInfoMatch {
         logHelper.logInfo(String.format("%s requested /infomatch command", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
 
         TelegramCommandUtils.cleanupOldStates(userSelectionStates);
-        userSelectionStates.put(userId, new MatchInfoSelectionState());
+        userSelectionStates.put(userId, new SelectionState());
 
         Integer year = YearContext.getCurrentYear();
         if (year == null) {
@@ -137,6 +132,40 @@ public class CommandInfoMatch {
         int outcome; // 1 = hall1 win, 0 = draw, -1 = hall1 loss
         Double hall1Elo;
         Double hall2Elo;
+
+        /** Outcome from hall2's perspective. */
+        int oppOutcome() {
+            return outcome == 0 ? 0 : -outcome;
+        }
+
+        String elo1Display() {
+            return hall1Elo != null ? String.format("%.0f", hall1Elo) : ("WALKOVER".equalsIgnoreCase(hall1Name) ? "-" : "?");
+        }
+
+        String elo2Display() {
+            return hall2Elo != null ? String.format("%.0f", hall2Elo) : ("WALKOVER".equalsIgnoreCase(hall2Name) ? "-" : "?");
+        }
+
+        /**
+         * The displayed "a-b" score string. For a walkover matchup the losing
+         * (walkover) side displays 0 and the winner displays the normalized
+         * default score - by right the walkover side gets no points at all,
+         * not the "hallScore - winner" minimum-margin convention.
+         */
+        String scoreDisplay() {
+            double displayScore1 = hall1Score;
+            double displayScore2 = hall2Score;
+            if ("WALKOVER".equalsIgnoreCase(hall2Name)) {
+                displayScore1 = MatchScoreUtils.computeWalkoverDefaultScore(hall1Score);
+                displayScore2 = 0.0;
+            } else if ("WALKOVER".equalsIgnoreCase(hall1Name)) {
+                displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(hall2Score);
+                displayScore1 = 0.0;
+            }
+            return (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
+                    ? String.format("%.0f-%.0f", displayScore1, displayScore2)
+                    : String.format("%.1f-%.1f", displayScore1, displayScore2);
+        }
     }
 
     private static class HallScoreData {
@@ -369,31 +398,10 @@ public class CommandInfoMatch {
         } else {
             for (MatchupData m : matchups) {
                 String emoji1 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome);
-                int oppOutcome = m.outcome == 0 ? 0 : -m.outcome;
-                String emoji2 = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
-
-                String elo1 = m.hall1Elo != null ? String.format("%.0f", m.hall1Elo) : ("WALKOVER".equalsIgnoreCase(m.hall1Name) ? "-" : "?");
-                String elo2 = m.hall2Elo != null ? String.format("%.0f", m.hall2Elo) : ("WALKOVER".equalsIgnoreCase(m.hall2Name) ? "-" : "?");
-
-                double displayScore1 = m.hall1Score;
-                double displayScore2 = m.hall2Score;
-                if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                    // By right the losing (walkover) side gets no points at
-                    // all - not the "hallScore - winner" minimum-margin
-                    // convention.
-                    displayScore1 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
-                    displayScore2 = 0.0;
-                } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                    displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
-                    displayScore1 = 0.0;
-                }
-
-                String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
-                        ? String.format("%.0f-%.0f", displayScore1, displayScore2)
-                        : String.format("%.1f-%.1f", displayScore1, displayScore2);
+                String emoji2 = VictoryRecordCalculator.getOutcomeEmoji(m.oppOutcome());
 
                 String line = String.format("%s %-4s %-15s %s %-15s %-4s %s",
-                        emoji1, elo1, m.hall1Name, scoreStr, m.hall2Name, elo2, emoji2);
+                        emoji1, m.elo1Display(), m.hall1Name, m.scoreDisplay(), m.hall2Name, m.elo2Display(), emoji2);
 
                 if (!homeHall.isEmpty() && (m.hall1Name.equals(homeHall) || m.hall2Name.equals(homeHall))) {
                     line += "*";
@@ -427,44 +435,19 @@ public class CommandInfoMatch {
 
         InfoImageGenerator.Section matchInfoSection = new InfoImageGenerator.Section("Match Info");
         for (MatchupData m : matchups) {
-            String emoji1 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome);
-            String emoji2 = VictoryRecordCalculator.getOutcomeEmoji(m.outcome == 0 ? 0 : -m.outcome);
-
-            String elo1 = m.hall1Elo != null ? String.format("%.0f", m.hall1Elo) : ("WALKOVER".equalsIgnoreCase(m.hall1Name) ? "-" : "?");
-            String elo2 = m.hall2Elo != null ? String.format("%.0f", m.hall2Elo) : ("WALKOVER".equalsIgnoreCase(m.hall2Name) ? "-" : "?");
-
-            String hall1Display = formatHallNameForMatch(m.hall1Name);
-            String hall2Display = formatHallNameForMatch(m.hall2Name);
-
-            double displayScore1 = m.hall1Score;
-            double displayScore2 = m.hall2Score;
-            if ("WALKOVER".equalsIgnoreCase(m.hall2Name)) {
-                // By right the losing (walkover) side gets no points at all -
-                // not the "hallScore - winner" minimum-margin convention.
-                displayScore1 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall1Score);
-                displayScore2 = 0.0;
-            } else if ("WALKOVER".equalsIgnoreCase(m.hall1Name)) {
-                displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(m.hall2Score);
-                displayScore1 = 0.0;
-            }
-
-            String scoreStr = (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
-                    ? String.format("%.0f-%.0f", displayScore1, displayScore2)
-                    : String.format("%.1f-%.1f", displayScore1, displayScore2);
-
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = "";
-            entry.hallEmoji = emoji1;
+            entry.hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(m.outcome);
             entry.hallOutcome = m.outcome;
-            entry.playerElo = elo1;
-            entry.playerName = hall1Display;
+            entry.playerElo = m.elo1Display();
+            entry.playerName = VictoryRecordCalculator.formatHallName(m.hall1Name);
             entry.playerHall = "";
-            entry.score = scoreStr;
-            entry.opponentName = hall2Display;
-            entry.opponentElo = elo2;
+            entry.score = m.scoreDisplay();
+            entry.opponentName = VictoryRecordCalculator.formatHallName(m.hall2Name);
+            entry.opponentElo = m.elo2Display();
             entry.opponentHall = "";
-            entry.oppEmoji = emoji2;
-            entry.oppOutcome = m.outcome == 0 ? 0 : -m.outcome;
+            entry.oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(m.oppOutcome());
+            entry.oppOutcome = m.oppOutcome();
             entry.highlightPlayer = !homeHall.isEmpty() && m.hall1Name.equals(homeHall);
             entry.highlightOpponent = !homeHall.isEmpty() && m.hall2Name.equals(homeHall);
 
@@ -482,17 +465,5 @@ public class CommandInfoMatch {
         sections.add(scoresSection);
 
         return InfoImageGenerator.generateInfoImage(metadata, sections, null, "InfoMatch", round.roundLabel);
-    }
-
-    private String formatHallNameForMatch(String hallName) {
-        if ("WALKOVER".equalsIgnoreCase(hallName)) {
-            return "WALKOVER";
-        }
-        try {
-            int num = Integer.parseInt(hallName);
-            return "Hall " + num;
-        } catch (NumberFormatException e) {
-            return hallName + " Hall";
-        }
     }
 }

@@ -35,8 +35,7 @@ public class CommandInfoMatchHall {
     }
 
     public CommandInfoMatchHall() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -186,6 +185,16 @@ public class CommandInfoMatchHall {
         List<HallPlayerData> players = new ArrayList<>();
         List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(hallId, year);
 
+        // Rank context is identical for every player in this loop - fetch the
+        // full this-round (and previous-round) rating maps ONCE, not once per
+        // player (each fetch is itself a per-active-player query series, so
+        // the previous inside-the-loop placement cost O(players^2) queries).
+        Map<String, D11_PlayerRatings.Rating> allRatings =
+                rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId);
+        Map<String, D11_PlayerRatings.Rating> allPrevRatings = prevRound != null
+                ? rankingQueryHelper.getLatestRatingsUpToRound(year, prevRound.roundOrder, trueEloTypeId)
+                : null;
+
         for (B6_PlayerYearStatus.Status status : statuses) {
             D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
             if (rating == null) continue; // no data this round
@@ -196,14 +205,12 @@ public class CommandInfoMatchHall {
             player.hall = hallName;
             player.currentElo = (int) Math.round(rating.ratingValue);
 
-            Map<String, D11_PlayerRatings.Rating> allRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId);
             player.currentRank = rankingQueryHelper.calculateRank(allRatings, rating.ratingValue);
 
             if (prevRound != null) {
                 D11_PlayerRatings.Rating prevRating = rankingQueryHelper.getPointInTimeRating(status.playerId, prevRound.id, trueEloTypeId);
                 if (prevRating != null) {
                     player.prevElo = (int) Math.round(prevRating.ratingValue);
-                    Map<String, D11_PlayerRatings.Rating> allPrevRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, prevRound.roundOrder, trueEloTypeId);
                     player.prevRank = rankingQueryHelper.calculateRank(allPrevRatings, prevRating.ratingValue);
                 }
             }
@@ -347,8 +354,8 @@ public class CommandInfoMatchHall {
         sb.append(String.format("%-18s %-6s %-10s %-6s %-10s\n", "------------------", "------", "----------", "------", "----------"));
         for (HallPlayerData player : players) {
             if (player.currentRank == null || player.currentElo == null) continue;
-            String deltaRank = player.prevRank == null ? "-" : deltaString(player.prevRank - player.currentRank);
-            String deltaElo = player.prevElo == null ? "-" : deltaString(player.currentElo - player.prevElo);
+            String deltaRank = player.prevRank == null ? "-" : VictoryRecordCalculator.deltaString(player.prevRank - player.currentRank);
+            String deltaElo = player.prevElo == null ? "-" : VictoryRecordCalculator.deltaString(player.currentElo - player.prevElo);
             sb.append(String.format("%-18s %-6d %-10s %-6d %-10s\n", player.name, player.currentRank, deltaRank, player.currentElo, deltaElo));
         }
         sb.append("```\n\n");
@@ -390,7 +397,7 @@ public class CommandInfoMatchHall {
                 oppHallFormatted = player.oppHall != null ? TableFormatter.shortenHallName(player.oppHall) : "??";
             }
 
-            String score = formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
+            String score = VictoryRecordCalculator.formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
 
             String line = String.format("%-3d %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                     player.seat != null ? player.seat : 0, emoji, playerHallFormatted, playerEloStr, player.name,
@@ -422,8 +429,8 @@ public class CommandInfoMatchHall {
         eloSection.addMonospacedRow(String.format("%-18s %-6s %-10s %-6s %-10s", "Name", "Rank", "ΔRank", "ELO", "ΔELO"));
         for (HallPlayerData player : players) {
             if (player.currentRank == null || player.currentElo == null) continue;
-            String deltaRank = player.prevRank == null ? "-" : deltaString(player.prevRank - player.currentRank);
-            String deltaElo = player.prevElo == null ? "-" : deltaString(player.currentElo - player.prevElo);
+            String deltaRank = player.prevRank == null ? "-" : VictoryRecordCalculator.deltaString(player.prevRank - player.currentRank);
+            String deltaElo = player.prevElo == null ? "-" : VictoryRecordCalculator.deltaString(player.currentElo - player.prevElo);
             eloSection.addMonospacedRow(String.format("%-18s %-6d %-10s %-6d %-10s", player.name, player.currentRank, deltaRank, player.currentElo, deltaElo));
         }
         sections.add(eloSection);
@@ -464,7 +471,7 @@ public class CommandInfoMatchHall {
                 oppEloStr = "-";
             }
 
-            String score = formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
+            String score = VictoryRecordCalculator.formatScorePair(player.score, player.oppScore, player.selfTimeout, player.oppTimeout);
 
             InfoImageGenerator.VictoryEntry entry = new InfoImageGenerator.VictoryEntry();
             entry.round = player.seat != null ? String.valueOf(player.seat) : "?";
@@ -486,18 +493,5 @@ public class CommandInfoMatchHall {
 
         String fileName = String.format("%s_%s", hallName, round.roundLabel);
         return InfoImageGenerator.generateInfoImage(metadata, sections, hallName, "InfoMatchHall", fileName);
-    }
-
-    private static String deltaString(int change) {
-        if (change > 0) return "+" + change;
-        if (change < 0) return "-" + Math.abs(change);
-        return "=";
-    }
-
-    /** Formats "myScore-oppScore" - both sides' raw scores are stored directly now, no formula derivation needed. */
-    private String formatScorePair(Double myScore, Double oppScore, boolean selfTimeout, boolean oppTimeout) {
-        String myStr = selfTimeout ? "TIMEOUT" : (myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?");
-        String oppStr = oppTimeout ? "TIMEOUT" : (oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0");
-        return myStr + "-" + oppStr;
     }
 }

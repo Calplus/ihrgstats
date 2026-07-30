@@ -42,8 +42,7 @@ public class CommandComparePlayers {
     }
 
     public CommandComparePlayers() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -459,8 +458,8 @@ public class CommandComparePlayers {
         Integer prevElo = null;
         for (YearSummary s : yearSummaries) {
             if (s.finalRank == null || s.finalElo == null) continue;
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
-            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(s.finalElo - prevElo);
             sb.append(String.format("%-6d %-6d %-10s %-6d %-10s\n", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
             prevRank = s.finalRank;
             prevElo = s.finalElo;
@@ -510,8 +509,8 @@ public class CommandComparePlayers {
         Integer prevElo = null;
         for (YearSummary s : yearSummaries) {
             if (s.finalRank == null || s.finalElo == null) continue;
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalRank);
-            String deltaElo = prevElo == null ? "-" : deltaString(s.finalElo - prevElo);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalRank);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(s.finalElo - prevElo);
             statsLines.add(String.format("%-6d %-6d %-10s %-6d %-10s", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
             prevRank = s.finalRank;
             prevElo = s.finalElo;
@@ -569,8 +568,8 @@ public class CommandComparePlayers {
             Integer rank = player.rankByRound.get(order);
             Integer elo = player.eloByRound.get(order);
             if (rank == null || elo == null) continue;
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : deltaString(elo - prevElo);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(elo - prevElo);
             sb.append(String.format("%-4s %-6d %-10s %-6d %-10s\n", player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
             prevRank = rank;
             prevElo = elo;
@@ -619,7 +618,7 @@ public class CommandComparePlayers {
                 oppHallFormatted = oppHall != null ? TableFormatter.shortenHallName(oppHall) : "??";
             }
 
-            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
+            String score = VictoryRecordCalculator.formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
 
             String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
                     roundName, hallEmoji, playerHallFormatted, playerEloStr, player.name, score,
@@ -665,8 +664,8 @@ public class CommandComparePlayers {
             Integer rank = player.rankByRound.get(order);
             Integer elo = player.eloByRound.get(order);
             if (rank == null || elo == null) continue;
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : deltaString(elo - prevElo);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(elo - prevElo);
             statsLines.add(String.format("%-4s %-6d %-10s %-6d %-10s", player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
             prevRank = rank;
             prevElo = elo;
@@ -714,7 +713,7 @@ public class CommandComparePlayers {
                 oppEloStr = "-";
             }
 
-            String score = formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
+            String score = VictoryRecordCalculator.formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
 
             ComparisonImageGenerator.PlayerVictoryEntry entry = new ComparisonImageGenerator.PlayerVictoryEntry(
                     roundName, hallEmoji, playerHallFormatted, playerEloStr, player.name, score,
@@ -726,15 +725,4 @@ public class CommandComparePlayers {
         return sections;
     }
 
-    private static String deltaString(int change) {
-        if (change > 0) return "+" + change;
-        if (change < 0) return "-" + Math.abs(change);
-        return "=";
-    }
-
-    private String formatScorePair(Double myScore, Double oppScore, boolean selfTimeout, boolean oppTimeout) {
-        String myStr = selfTimeout ? "TIMEOUT" : (myScore != null ? VictoryRecordCalculator.formatScore(myScore) : "?");
-        String oppStr = oppTimeout ? "TIMEOUT" : (oppScore != null ? VictoryRecordCalculator.formatScore(oppScore) : "0");
-        return myStr + "-" + oppStr;
-    }
 }

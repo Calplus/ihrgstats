@@ -34,8 +34,7 @@ public class CommandInfoHall {
     }
 
     public CommandInfoHall() {
-        EnvironmentManager envManager = new EnvironmentManager();
-        envManager.loadIntoSystemProperties();
+        EnvironmentManager.ensureSystemPropertiesLoaded();
         this.logHelper = new LogHelper();
     }
 
@@ -285,7 +284,7 @@ public class CommandInfoHall {
                 sb.append(String.format("%-6d %-6s %-10s %-8s %-10s\n", s.year, "-", "-", "-", "-"));
                 continue;
             }
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalHallRank);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalHallRank);
             String deltaElo = prevElo == null ? "-" : deltaDoubleString(s.finalHallElo - prevElo);
             sb.append(String.format("%-6d %-6d %-10s %-8s %-10s\n", s.year, s.finalHallRank, deltaRank, String.format("%.1f", s.finalHallElo), deltaElo));
             prevElo = s.finalHallElo;
@@ -321,7 +320,7 @@ public class CommandInfoHall {
 
         sb.append("**🏆 Season Record (total boards won-lost per year):**\n```\n");
         for (YearSummary s : yearSummaries) {
-            sb.append(String.format("%-6d %s\n", s.year, formatScorePair(s.totalHallScore, s.totalOppScore)));
+            sb.append(String.format("%-6d %s\n", s.year, VictoryRecordCalculator.formatScorePair(s.totalHallScore, s.totalOppScore)));
         }
         sb.append("```");
 
@@ -346,7 +345,7 @@ public class CommandInfoHall {
                 hallEloSection.addMonospacedRow(String.format("%-6d %-6s %-8s %-8s %-8s", s.year, "-", "-", "-", "-"));
                 continue;
             }
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - s.finalHallRank);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalHallRank);
             String deltaElo = prevElo == null ? "-" : deltaDoubleString(s.finalHallElo - prevElo);
             hallEloSection.addMonospacedRow(String.format("%-6d %-6d %-8s %-8s %-8s", s.year, s.finalHallRank, deltaRank, String.format("%.1f", s.finalHallElo), deltaElo));
             prevElo = s.finalHallElo;
@@ -382,7 +381,7 @@ public class CommandInfoHall {
 
         InfoImageGenerator.Section seasonSection = new InfoImageGenerator.Section("Season Record");
         for (YearSummary s : yearSummaries) {
-            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, formatScorePair(s.totalHallScore, s.totalOppScore)));
+            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, VictoryRecordCalculator.formatScorePair(s.totalHallScore, s.totalOppScore)));
         }
         sections.add(seasonSection);
 
@@ -649,7 +648,7 @@ public class CommandInfoHall {
                 sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", round.roundLabel, "-", "-", "-", "-"));
                 continue;
             }
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
             String deltaElo = prevElo == null ? "-" : deltaDoubleString(elo - prevElo);
             sb.append(String.format("%-4s %-6d %-10s %-8s %-10s\n", round.roundLabel, rank, deltaRank, String.format("%.1f", elo), deltaElo));
             prevElo = elo;
@@ -706,7 +705,7 @@ public class CommandInfoHall {
             String formattedOppHall = "WALKOVER".equalsIgnoreCase(record.oppHallName) ? "WALKOVER" : formatHallNameForImage(record.oppHallName);
             if ("WALKOVER".equalsIgnoreCase(record.oppHallName)) oppEloStr = "-";
 
-            String score = formatScorePair(record.hallScore, record.oppScore);
+            String score = VictoryRecordCalculator.formatScorePair(record.hallScore, record.oppScore);
 
             String line = String.format("%-3s %s %-4s %-15s %s %-15s %-4s %s",
                     round.roundLabel, hallEmoji, hallEloStr, formattedHall, score, formattedOppHall, oppEloStr, oppEmoji);
@@ -737,7 +736,7 @@ public class CommandInfoHall {
                 hallEloSection.addMonospacedRow(String.format("%-4s %-6s %-8s %-8s %-8s", round.roundLabel, "-", "-", "-", "-"));
                 continue;
             }
-            String deltaRank = prevRank == null ? "-" : deltaString(prevRank - rank);
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
             String deltaElo = prevElo == null ? "-" : deltaDoubleString(elo - prevElo);
             hallEloSection.addMonospacedRow(String.format("%-4s %-6d %-8s %-8s %-8s", round.roundLabel, rank, deltaRank, String.format("%.1f", elo), deltaElo));
             prevElo = elo;
@@ -802,7 +801,7 @@ public class CommandInfoHall {
                 oppHallFormatted = formatHallNameForImage(record.oppHallName);
             }
 
-            String score = formatScorePair(record.hallScore, record.oppScore);
+            String score = VictoryRecordCalculator.formatScorePair(record.hallScore, record.oppScore);
 
             entry.hallEmoji = hallEmoji;
             entry.hallOutcome = record.outcome;
@@ -831,23 +830,10 @@ public class CommandInfoHall {
             return hallName + " Hall";
         }
     }
-
-    private static String deltaString(int change) {
-        if (change > 0) return "+" + change;
-        if (change < 0) return "-" + Math.abs(change);
-        return "=";
-    }
-
+
     private static String deltaDoubleString(double change) {
         if (change > 0) return String.format("+%.1f", change);
         if (change < 0) return String.format("-%.1f", Math.abs(change));
         return "=";
     }
-
-    private String formatScorePair(double hallScore, double oppScore) {
-        if (hallScore == Math.floor(hallScore) && oppScore == Math.floor(oppScore)) {
-            return String.format("%d-%d", (int) hallScore, (int) oppScore);
-        }
-        return String.format("%.1f-%.1f", hallScore, oppScore);
-    }
-}
+}

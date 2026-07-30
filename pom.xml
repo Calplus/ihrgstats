@@ -6,7 +6,7 @@
 
     <groupId>com.calplus.ihrgstats</groupId>
     <artifactId>ihrgstats</artifactId>
-    <version>Beta 3 Update 19</version>
+    <version>Beta 3 Update 20</version>
 
     <properties>
         <maven.compiler.source>24</maven.compiler.source>
@@ -22,13 +22,6 @@
             <version>3.47.1.0</version>
         </dependency>
 
-        <!-- JDA (Java Discord API) for Discord bot functionality -->
-        <dependency>
-            <groupId>net.dv8tion</groupId>
-            <artifactId>JDA</artifactId>
-            <version>5.2.1</version>
-        </dependency>
-
         <!-- Telegram Bots API for Telegram bot functionality -->
         <dependency>
             <groupId>org.telegram</groupId>
@@ -36,7 +29,7 @@
             <version>6.9.7.1</version>
         </dependency>
 
-        <!-- SLF4J API for logging (required by JDA and Telegram) -->
+        <!-- SLF4J API for logging (required by the Telegram library) -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

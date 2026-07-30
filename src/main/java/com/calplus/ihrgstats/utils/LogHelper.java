@@ -12,8 +12,19 @@ public class LogHelper {
     private final TelegramLog telegramLog;
     
     public LogHelper() {
-        this.discordLog = new DiscordLog();
-        this.telegramLog = new TelegramLog();
+        this(new DiscordLog(), new TelegramLog());
+    }
+
+    /**
+     * Wraps existing log instances instead of creating fresh ones - for
+     * callers (e.g. TelegramListener) that also need direct access to one
+     * side for deliberately asymmetric logging (a Telegram send failure is
+     * logged to Discord only, etc.) while still using this helper for the
+     * both-sides case.
+     */
+    public LogHelper(DiscordLog discordLog, TelegramLog telegramLog) {
+        this.discordLog = discordLog;
+        this.telegramLog = telegramLog;
     }
     
     /**
@@ -62,6 +73,14 @@ public class LogHelper {
     public void flushBatch() {
         discordLog.flushBatch();
         telegramLog.flushBatch();
+    }
+
+    /**
+     * Final flush of any queued messages on both platforms (shutdown path)
+     */
+    public void flush() {
+        discordLog.flush();
+        telegramLog.flush();
     }
     
     /**
