@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
@@ -65,18 +66,8 @@ public class CommandInfoPlayer {
             return new InfoResponse("❌ Database error fetching halls.", (Path) null, null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        for (A3_Halls.Hall hall : allHalls) {
-            if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-            labels.add(hall.hallName);
-            callbacks.add("infoplayer_hall_" + hall.id);
-        }
-        labels.add("❌ Cancel");
-        callbacks.add("infoplayer_cancel");
-
         String message = "**👤 Player Information**\n\nSelect the **player's hall**:";
-        return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new InfoResponse(message, (Path) null, SelectionKeyboards.hallButtons(allHalls, "infoplayer_hall_", "infoplayer_cancel"));
     }
 
     public InfoResponse handleHallSelection(String userId, int hallId) {
@@ -99,18 +90,12 @@ public class CommandInfoPlayer {
                 return new InfoResponse(String.format("ℹ️ No active players found in %s for %d.", VictoryRecordCalculator.formatHallName(state.hallName), year), (Path) null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (B6_PlayerYearStatus.Status status : statuses) {
-                String name = playerNames.getNameForYear(status.playerId, year);
-                labels.add(name != null ? name : status.playerId);
-                callbacks.add("infoplayer_player_" + status.playerId);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("infoplayer_cancel");
-
+            Integer nameYear = year;
             String message = String.format("**👤 Player Information**\n\nHall: **%s**\nSelect the **player**:", VictoryRecordCalculator.formatHallName(state.hallName));
-            return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+            return new InfoResponse(message, (Path) null, SelectionKeyboards.playerButtons(statuses, pid -> {
+                String name = playerNames.getNameForYear(pid, nameYear);
+                return name != null ? name : pid;
+            }, "infoplayer_player_", "infoplayer_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new InfoResponse("❌ Database error.", (Path) null, null);
@@ -138,22 +123,9 @@ public class CommandInfoPlayer {
                 return new InfoResponse("ℹ️ No round data available for " + year + ".", (Path) null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            labels.add("All Rounds");
-            callbacks.add("infoplayer_round_all");
-            labels.add("🌐 All Years");
-            callbacks.add("infoplayer_round_allyears");
-            for (A1_Rounds.Round round : availableRounds) {
-                labels.add(round.roundLabel);
-                callbacks.add("infoplayer_round_" + round.roundOrder);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("infoplayer_cancel");
-
             String message = String.format("**👤 Player Information**\n\nPlayer: **%s** (%s)\n\nSelect rounds to display:",
                     TelegramHtml.escape(state.playerName), VictoryRecordCalculator.formatHallName(state.hallName));
-            return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            return new InfoResponse(message, (Path) null, SelectionKeyboards.roundButtons(availableRounds, "infoplayer_round_", "infoplayer_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new InfoResponse("❌ Database error.", (Path) null, null);

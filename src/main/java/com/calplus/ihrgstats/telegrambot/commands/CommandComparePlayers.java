@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
@@ -56,6 +57,7 @@ public class CommandComparePlayers {
         String userInfo = TelegramListener.formatUserInfo(userId);
         logHelper.logInfo(String.format("%s requested /compareplayers command", userInfo));
 
+        TelegramCommandUtils.cleanupOldStates(userSelectionStates);
         userSelectionStates.put(userId, new PlayerCompareSelectionState());
 
         Integer year = YearContext.getCurrentYear();
@@ -71,18 +73,8 @@ public class CommandComparePlayers {
             return new CompareResponse("\u274C Database error fetching halls.", null, null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        for (A3_Halls.Hall hall : allHalls) {
-            if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-            labels.add(hall.hallName);
-            callbacks.add("compareplayers_selecthall1_" + hall.id);
-        }
-        labels.add("\u274C Cancel");
-        callbacks.add("compareplayers_cancel");
-
         String message = "**\uD83D\uDC65 Player Comparison**\n\nSelect the **first player's hall**:";
-        return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new CompareResponse(message, null, SelectionKeyboards.hallButtons(allHalls, "compareplayers_selecthall1_", "compareplayers_cancel"));
     }
 
     public CompareResponse handleFirstHallSelection(String userId, int firstHallId) {
@@ -103,18 +95,12 @@ public class CommandComparePlayers {
                 return new CompareResponse("\u2139\uFE0F No players found in hall " + VictoryRecordCalculator.formatHallName(state.firstHallName) + ".", null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (B6_PlayerYearStatus.Status status : statuses) {
-                String name = playerNames.getNameForYear(status.playerId, year);
-                labels.add(name != null ? name : status.playerId);
-                callbacks.add("compareplayers_selectplayer1_" + status.playerId);
-            }
-            labels.add("\u274C Cancel");
-            callbacks.add("compareplayers_cancel");
-
+            Integer nameYear = year;
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player's hall: **%s**\nSelect the **first player**:", VictoryRecordCalculator.formatHallName(state.firstHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+            return new CompareResponse(message, null, SelectionKeyboards.playerButtons(statuses, pid -> {
+                String name = playerNames.getNameForYear(pid, nameYear);
+                return name != null ? name : pid;
+            }, "compareplayers_selectplayer1_", "compareplayers_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("\u274C Database error.", null, null);
@@ -135,19 +121,9 @@ public class CommandComparePlayers {
             state.firstPlayerName = playerNames.getNameForYear(firstPlayerId, year);
 
             List<A3_Halls.Hall> allHalls = halls.getAllHalls();
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A3_Halls.Hall hall : allHalls) {
-                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-                labels.add(hall.hallName);
-                callbacks.add("compareplayers_selecthall2_" + hall.id);
-            }
-            labels.add("\u274C Cancel");
-            callbacks.add("compareplayers_cancel");
-
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSelect the **second player's hall**:",
                     TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            return new CompareResponse(message, null, SelectionKeyboards.hallButtons(allHalls, "compareplayers_selecthall2_", "compareplayers_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("\u274C Database error.", null, null);
@@ -176,19 +152,13 @@ public class CommandComparePlayers {
                 return new CompareResponse("\u2139\uFE0F No other players available in hall " + VictoryRecordCalculator.formatHallName(state.secondHallName) + ".", null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (B6_PlayerYearStatus.Status status : statuses) {
-                String name = playerNames.getNameForYear(status.playerId, year);
-                labels.add(name != null ? name : status.playerId);
-                callbacks.add("compareplayers_selectplayer2_" + status.playerId);
-            }
-            labels.add("\u274C Cancel");
-            callbacks.add("compareplayers_cancel");
-
+            Integer nameYear = year;
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player's hall: **%s**\nSelect the **second player**:",
                     TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName), VictoryRecordCalculator.formatHallName(state.secondHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+            return new CompareResponse(message, null, SelectionKeyboards.playerButtons(statuses, pid -> {
+                String name = playerNames.getNameForYear(pid, nameYear);
+                return name != null ? name : pid;
+            }, "compareplayers_selectplayer2_", "compareplayers_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("\u274C Database error.", null, null);
@@ -214,23 +184,10 @@ public class CommandComparePlayers {
                 return new CompareResponse("\u2139\uFE0F No round data available for " + year + ".", null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            labels.add("All Rounds");
-            callbacks.add("compareplayers_selectround_all");
-            labels.add("🌐 All Years");
-            callbacks.add("compareplayers_selectround_allyears");
-            for (A1_Rounds.Round round : availableRounds) {
-                labels.add(round.roundLabel);
-                callbacks.add("compareplayers_selectround_" + round.roundOrder);
-            }
-            labels.add("\u274C Cancel");
-            callbacks.add("compareplayers_cancel");
-
             String message = String.format("**\uD83D\uDC65 Player Comparison**\n\nFirst player: **%s** (%s)\nSecond player: **%s** (%s)\n\nSelect rounds to compare:",
                     TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName),
                     TelegramHtml.escape(state.secondPlayerName), VictoryRecordCalculator.formatHallName(state.secondHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            return new CompareResponse(message, null, SelectionKeyboards.roundButtons(availableRounds, "compareplayers_selectround_", "compareplayers_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("\u274C Database error.", null, null);
@@ -271,7 +228,6 @@ public class CommandComparePlayers {
 
     /** Per-round player data, keyed by round_order for display. */
     private static class PlayerData {
-        String playerId;
         String name;
         String hall;
         Map<Integer, String> roundLabelByOrder = new TreeMap<>();
@@ -291,7 +247,6 @@ public class CommandComparePlayers {
 
     private PlayerData fetchPlayerData(String playerId, String name, String hall, int year, List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
         PlayerData player = new PlayerData();
-        player.playerId = playerId;
         player.name = name != null ? name : playerId;
         player.hall = hall;
 

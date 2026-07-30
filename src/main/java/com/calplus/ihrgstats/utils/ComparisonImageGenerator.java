@@ -2,7 +2,6 @@ package com.calplus.ihrgstats.utils;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
-import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -285,8 +284,8 @@ public class ComparisonImageGenerator {
         
         // Save to temp file with new naming convention
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
-        String leftName = sanitizeName(leftEntityName);
-        String rightName = sanitizeName(rightEntityName);
+        String leftName = ImageRenderSupport.sanitizeName(leftEntityName);
+        String rightName = ImageRenderSupport.sanitizeName(rightEntityName);
         
         // Build filename based on what entity names are provided
         String filename;
@@ -474,47 +473,11 @@ public class ComparisonImageGenerator {
     /**
      * Draws tiled background pattern (constrained to specified region)
      */
-    private static void drawTiledBackground(Graphics2D g2d, String hallName, int x, int y, 
+    private static void drawTiledBackground(Graphics2D g2d, String hallName, int x, int y,
                                            int width, int height) {
         BufferedImage icon = loadHallIcon(hallName);
         if (icon == null) return;
-        
-        // Create semi-transparent version
-        BufferedImage tiledIcon = new BufferedImage(icon.getWidth(), icon.getHeight(), 
-                                                    BufferedImage.TYPE_INT_ARGB);
-        Graphics2D iconG2d = tiledIcon.createGraphics();
-        iconG2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.2f));
-        iconG2d.drawImage(icon, 0, 0, null);
-        iconG2d.dispose();
-        
-        // Save current transform and clip
-        AffineTransform oldTransform = g2d.getTransform();
-        Shape oldClip = g2d.getClip();
-        
-        // Set clip to constrain drawing to this side only
-        g2d.setClip(x, y, width, height);
-        
-        // Rotate 15 degrees around center of this region
-        g2d.translate(x + width / 2, y + height / 2);
-        g2d.rotate(Math.toRadians(-15));
-        g2d.translate(-(x + width / 2), -(y + height / 2));
-        
-        // Tile the icon (with extra tiles to cover rotation)
-        int iconSize = 100;
-        int tilesX = (int) Math.ceil((double) width / iconSize) + 4;
-        int tilesY = (int) Math.ceil((double) height / iconSize) + 4;
-        
-        for (int i = -2; i < tilesX; i++) {
-            for (int j = -2; j < tilesY; j++) {
-                int tileX = x + i * iconSize;
-                int tileY = y + j * iconSize;
-                g2d.drawImage(tiledIcon, tileX, tileY, iconSize, iconSize, null);
-            }
-        }
-        
-        // Restore transform and clip
-        g2d.setTransform(oldTransform);
-        g2d.setClip(oldClip);
+        ImageRenderSupport.tileIconWatermark(g2d, icon, x, y, width, height);
     }
     
     /**
@@ -1039,11 +1002,4 @@ public class ComparisonImageGenerator {
         return HallIconLoader.loadRawIcon(hallName);
     }
     
-    /**
-     * Sanitizes a name for use in a filename by removing invalid characters
-     */
-    private static String sanitizeName(String name) {
-        if (name == null || name.isEmpty()) return "";
-        return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
-    }
 }

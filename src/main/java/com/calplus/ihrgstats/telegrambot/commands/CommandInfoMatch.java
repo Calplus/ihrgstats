@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
@@ -63,26 +64,10 @@ public class CommandInfoMatch {
             return new MatchResponse("ℹ️ No rounds found. Please upload round data first.", null, null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-
-        // Round picker spans every year (not just the current one) - round
-        // numbers repeat across years, so each button's label/callback must
-        // disambiguate by year too.
         A1_Rounds.Round latest = availableRounds.get(availableRounds.size() - 1);
-        labels.add("⏱️ Latest Round (" + latest.year + " · " + latest.roundLabel + ")");
-        callbacks.add("infomatch_round_latest");
-
-        for (A1_Rounds.Round round : availableRounds) {
-            labels.add(round.year + " · " + round.roundLabel);
-            callbacks.add("infomatch_round_" + round.year + "_" + round.roundOrder);
-        }
-
-        labels.add("❌ Cancel");
-        callbacks.add("infomatch_cancel");
-
         String message = "**⚔️ Match Information**\n\nSelect a **round**:";
-        return new MatchResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new MatchResponse(message, null, SelectionKeyboards.yearRoundButtons(availableRounds, "infomatch_round_", "infomatch_cancel",
+                "⏱️ Latest Round (" + latest.year + " · " + latest.roundLabel + ")", "infomatch_round_latest"));
     }
 
     public MatchResponse handleRoundSelection(String userId, String selectedRound) {

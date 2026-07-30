@@ -6,6 +6,7 @@ import com.calplus.ihrgstats.ml.lineup.LineupExplainer;
 import com.calplus.ihrgstats.ml.lineup.LineupOptimizer;
 import com.calplus.ihrgstats.ml.lineup.OpponentModel;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TableFormatter.Alignment;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig;
@@ -66,19 +67,10 @@ public class CommandLineup {
             A3_Halls.Hall ourHall = homeHallName.isEmpty() ? null : halls.getHallByName(homeHallName);
 
             List<A3_Halls.Hall> allHalls = halls.getAllHalls();
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A3_Halls.Hall hall : allHalls) {
-                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-                if (ourHall != null && hall.id == ourHall.id) continue; // can't play yourself
-                labels.add(hall.hallName);
-                callbacks.add("lineup_selectopponent_" + hall.id);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("lineup_cancel");
+            allHalls.removeIf(hall -> ourHall != null && hall.id == ourHall.id); // can't play yourself
 
             return new CommandResponse("🎯 <b>Lineup Optimizer</b>\n\nSelect the <b>opponent hall</b>:",
-                    new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+                    SelectionKeyboards.hallButtons(allHalls, "lineup_selectopponent_", "lineup_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error fetching halls: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching halls.", (java.nio.file.Path) null, null);

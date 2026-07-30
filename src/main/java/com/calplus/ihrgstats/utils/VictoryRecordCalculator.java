@@ -112,6 +112,17 @@ public class VictoryRecordCalculator {
             return hallName + " Hall";
         }
     }
-    
+
+    /**
+     * Signed one-decimal delta for fractional values (hall Elo etc.) -
+     * kept separate from deltaString(int) so an int-typed delta can never
+     * silently switch to "+3.0" formatting.
+     */
+    public static String deltaDoubleString(double change) {
+        if (change > 0) return String.format("+%.1f", change);
+        if (change < 0) return String.format("-%.1f", Math.abs(change));
+        return "=";
+    }
+
 }
 

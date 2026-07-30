@@ -652,184 +652,53 @@ public class TelegramListener {
             
             // Handle settings toggle callbacks
             if (data.startsWith("setting_toggle_")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                String toggleResponse = settingsCommand.handleToggle(data, userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response to same chat/thread
-                    sendMessageToChat(chatId, toggleResponse, threadId);
-                }
+                deliverSettingsCallbackResponse(callbackQuery,
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleToggle(data, userId), null);
                 return;
             }
             
             // Handle home hall selection request callback
             if (data.equals("setting_homeHall_select")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse hallSelectionResponse = 
-                    settingsCommand.handleHomeHallSelection(userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response with buttons using the same method as settings command
-                    if (hallSelectionResponse.buttons != null) {
-                        sendMessageWithSettingsButtons(hallSelectionResponse.message, 
-                            hallSelectionResponse.buttons, 
-                            message);
-                    } else {
-                        sendMessageToChat(chatId, hallSelectionResponse.message, threadId);
-                    }
-                }
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse hallSelectionResponse =
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleHomeHallSelection(userId);
+                deliverSettingsCallbackResponse(callbackQuery, hallSelectionResponse.message, hallSelectionResponse.buttons);
                 return;
             }
             
             // Handle home hall selection callbacks
             if (data.startsWith("setting_homeHall_")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                String hallResponse = settingsCommand.handleHomeHallCallback(data, userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response to same chat/thread
-                    sendMessageToChat(chatId, hallResponse, threadId);
-                }
+                deliverSettingsCallbackResponse(callbackQuery,
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleHomeHallCallback(data, userId), null);
                 return;
             }
             
             // Handle timezone selection request callback
             if (data.equals("setting_timezone_select")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse timezoneSelectionResponse = 
-                    settingsCommand.handleTimezoneSelection(userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response with buttons using the same method as settings command
-                    if (timezoneSelectionResponse.buttons != null) {
-                        sendMessageWithSettingsButtons(timezoneSelectionResponse.message, 
-                            timezoneSelectionResponse.buttons, 
-                            message);
-                    } else {
-                        sendMessageToChat(chatId, timezoneSelectionResponse.message, threadId);
-                    }
-                }
+                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse timezoneSelectionResponse =
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleTimezoneSelection(userId);
+                deliverSettingsCallbackResponse(callbackQuery, timezoneSelectionResponse.message, timezoneSelectionResponse.buttons);
                 return;
             }
             
             // Handle current year selection request callback
             if (data.equals("setting_currentYear_select")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse currentYearSelectionResponse = 
-                    settingsCommand.handleCurrentYearSelection(userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response (no buttons for manual input)
-                    sendMessageToChat(chatId, currentYearSelectionResponse.message, threadId);
-                }
+                // Manual-input prompt - deliberately delivered without buttons.
+                deliverSettingsCallbackResponse(callbackQuery,
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleCurrentYearSelection(userId).message, null);
                 return;
             }
             
             // Handle timezone selection callbacks
             if (data.startsWith("setting_timezone_")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                String timezoneResponse = settingsCommand.handleTimezoneCallback(data, userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response to same chat/thread
-                    sendMessageToChat(chatId, timezoneResponse, threadId);
-                }
+                deliverSettingsCallbackResponse(callbackQuery,
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleTimezoneCallback(data, userId), null);
                 return;
             }
             
             // Handle settings cancel callback
             if (data.equals("settings_cancel")) {
-                com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-                
-                String cancelResponse = settingsCommand.handleCancel(userId);
-                
-                // Get original message info to send response to same chat
-                JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-                
-                if (message != null) {
-                    JsonObject chat = message.getAsJsonObject("chat");
-                    String chatId = chat.get("id").getAsString();
-                    String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
-                    
-                    // Remove buttons from original message
-                    removeInlineKeyboard(chatId, message.get("message_id").getAsString());
-                    
-                    // Send response to same chat/thread
-                    sendMessageToChat(chatId, cancelResponse, threadId);
-                }
+                deliverSettingsCallbackResponse(callbackQuery,
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleCancel(userId), null);
                 return;
             }
             
@@ -2300,76 +2169,120 @@ public class TelegramListener {
      * heaviest code path here - runs on a background thread, matching the
      * export_db_* callback precedent, so it doesn't stall the polling thread.
      */
-    private void handleCompareHallsCallback(JsonObject callbackQuery, String data, String userId) {
+    /** Command-specific routing for one callback click; may throw - the scaffold logs failures. */
+    private interface CallbackRouting {
+        void route(JsonObject message) throws Exception;
+    }
+
+    /**
+     * Shared scaffold for every per-command callback handler: strips the
+     * keyboard off the clicked message synchronously, then runs the
+     * command-specific routing - on a daemon worker thread when the step
+     * can be slow (report/image generation), so the polling thread stays
+     * free to receive further updates (including the very confirmations
+     * some flows block on).
+     */
+    private void runCallbackRouting(JsonObject callbackQuery, String context, boolean onWorkerThread,
+            CallbackRouting routing) {
         try {
-            // Get original message
             JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+            if (message == null) return;
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
+            JsonObject chat = message.getAsJsonObject("chat");
+            removeInlineKeyboard(chat.get("id").getAsString(), message.get("message_id").getAsString());
 
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread compareHallsThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls compareCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response;
-
-                        if (data.equals("comparehalls_cancel")) {
-                            response = compareCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("comparehalls_select1_")) {
-                            int hallId = Integer.parseInt(data.substring("comparehalls_select1_".length()));
-                            response = compareCommand.handleFirstHallSelection(userId, hallId);
-
-                            // Send message with buttons for second selection
-                            if (response.buttonConfig != null) {
-                                sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("comparehalls_select2_")) {
-                            int hallId = Integer.parseInt(data.substring("comparehalls_select2_".length()));
-                            response = compareCommand.handleSecondHallSelection(userId, hallId);
-
-                            // Send message with buttons for round selection
-                            if (response.buttonConfig != null) {
-                                sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("comparehalls_selectround_")) {
-                            String round = data.substring("comparehalls_selectround_".length());
-                            response = compareCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing compare halls callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                compareHallsThread.setDaemon(true);
-                compareHallsThread.start();
+            if (!onWorkerThread) {
+                routing.route(message);
+                return;
             }
-
+            Thread worker = new Thread(() -> {
+                try {
+                    routing.route(message);
+                } catch (Exception e) {
+                    String errorMsg = "Error processing " + context + ": " + e.getMessage();
+                    logHelper.logError(errorMsg);
+                    e.printStackTrace();
+                }
+            });
+            worker.setDaemon(true);
+            worker.start();
         } catch (Exception e) {
-            String errorMsg = "Error processing compare halls callback: " + e.getMessage();
+            String errorMsg = "Error processing " + context + ": " + e.getMessage();
             logHelper.logError(errorMsg);
             e.printStackTrace();
         }
+    }
+
+    /** Wizard-step reply: keyboard steps use the generic button sender; plain steps go to the commands channel. */
+    private void sendStepOrPlain(String messageText, com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig, JsonObject message) {
+        if (buttonConfig != null) {
+            sendMessageWithGenericButtons(messageText, buttonConfig, message);
+        } else {
+            sendMessageToCommandsChannel(messageText, message);
+        }
+    }
+
+    /** Terminal wizard step: chunked text report plus the rendered image when present. */
+    private void sendReportWithImage(String messageText, java.nio.file.Path imagePath, JsonObject message) {
+        sendLongMessageToCommandsChannel(messageText, message);
+        if (imagePath != null) {
+            sendImageToCommandsChannel(imagePath, message);
+        }
+    }
+
+    /**
+     * Scaffold shared by the /settings callback branches: strips the keyboard
+     * off the clicked message, then delivers the response to that same
+     * chat/thread - with a fresh settings keyboard when the step has one.
+     */
+    private void deliverSettingsCallbackResponse(JsonObject callbackQuery, String text,
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttons) {
+        JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        if (message == null) return;
+
+        JsonObject chat = message.getAsJsonObject("chat");
+        String chatId = chat.get("id").getAsString();
+        String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
+        removeInlineKeyboard(chatId, message.get("message_id").getAsString());
+
+        if (buttons != null) {
+            sendMessageWithSettingsButtons(text, buttons, message);
+        } else {
+            sendMessageToChat(chatId, text, threadId);
+        }
+    }
+
+    private void handleCompareHallsCallback(JsonObject callbackQuery, String data, String userId) {
+        runCallbackRouting(callbackQuery, "compare halls callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls compareCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls();
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response;
+
+            if (data.equals("comparehalls_cancel")) {
+                response = compareCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("comparehalls_select1_")) {
+                int hallId = Integer.parseInt(data.substring("comparehalls_select1_".length()));
+                response = compareCommand.handleFirstHallSelection(userId, hallId);
+                if (response.buttonConfig != null) {
+                    sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("comparehalls_select2_")) {
+                int hallId = Integer.parseInt(data.substring("comparehalls_select2_".length()));
+                response = compareCommand.handleSecondHallSelection(userId, hallId);
+                if (response.buttonConfig != null) {
+                    sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("comparehalls_selectround_")) {
+                String round = data.substring("comparehalls_selectround_".length());
+                response = compareCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
+            }
+        });
     }
 
     /**
@@ -2432,95 +2345,52 @@ public class TelegramListener {
      * see {@link #handleCompareHallsCallback} for why.
      */
     private void handleComparePlayersCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "compare players callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers compareCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers();
+            com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.CompareResponse response;
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread comparePlayersThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers compareCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.CompareResponse response;
-
-                        if (data.equals("compareplayers_cancel")) {
-                            response = compareCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("compareplayers_selecthall1_")) {
-                            int hallId = Integer.parseInt(data.substring("compareplayers_selecthall1_".length()));
-                            response = compareCommand.handleFirstHallSelection(userId, hallId);
-
-                            // Send message with buttons for player selection
-                            if (response.buttonConfig != null) {
-                                sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message, 1);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("compareplayers_selectplayer1_")) {
-                            String player = data.substring("compareplayers_selectplayer1_".length());
-                            response = compareCommand.handleFirstPlayerSelection(userId, player);
-
-                            // Send message with buttons for second hall selection
-                            if (response.buttonConfig != null) {
-                                sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("compareplayers_selecthall2_")) {
-                            int hallId = Integer.parseInt(data.substring("compareplayers_selecthall2_".length()));
-                            response = compareCommand.handleSecondHallSelection(userId, hallId);
-
-                            // Send message with buttons for second player selection
-                            if (response.buttonConfig != null) {
-                                sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message, 1);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("compareplayers_selectplayer2_")) {
-                            String player = data.substring("compareplayers_selectplayer2_".length());
-                            response = compareCommand.handleSecondPlayerSelection(userId, player);
-
-                            // Send message with round selection buttons
-                            if (response.buttonConfig != null) {
-                                sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("compareplayers_selectround_")) {
-                            String round = data.substring("compareplayers_selectround_".length());
-                            response = compareCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing compare players callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                comparePlayersThread.setDaemon(true);
-                comparePlayersThread.start();
+            if (data.equals("compareplayers_cancel")) {
+                response = compareCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("compareplayers_selecthall1_")) {
+                int hallId = Integer.parseInt(data.substring("compareplayers_selecthall1_".length()));
+                response = compareCommand.handleFirstHallSelection(userId, hallId);
+                if (response.buttonConfig != null) {
+                    sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message, 1);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("compareplayers_selectplayer1_")) {
+                String player = data.substring("compareplayers_selectplayer1_".length());
+                response = compareCommand.handleFirstPlayerSelection(userId, player);
+                if (response.buttonConfig != null) {
+                    sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("compareplayers_selecthall2_")) {
+                int hallId = Integer.parseInt(data.substring("compareplayers_selecthall2_".length()));
+                response = compareCommand.handleSecondHallSelection(userId, hallId);
+                if (response.buttonConfig != null) {
+                    sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message, 1);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("compareplayers_selectplayer2_")) {
+                String player = data.substring("compareplayers_selectplayer2_".length());
+                response = compareCommand.handleSecondPlayerSelection(userId, player);
+                if (response.buttonConfig != null) {
+                    sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
+                } else {
+                    sendMessageToCommandsChannel(response.message, message);
+                }
+            } else if (data.startsWith("compareplayers_selectround_")) {
+                String round = data.substring("compareplayers_selectround_".length());
+                response = compareCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing compare players callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -2529,55 +2399,19 @@ public class TelegramListener {
      * {@link #handleCompareHallsCallback} for why.
      */
     private void handleRankPlayersCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "rank players callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers rankCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers();
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread rankPlayersThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers rankCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers.RankResponse response;
-
-                        if (data.equals("rankplayers_cancel")) {
-                            response = rankCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("rankplayers_round_")) {
-                            String round = data.substring("rankplayers_round_".length());
-                            response = rankCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing rank players callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                rankPlayersThread.setDaemon(true);
-                rankPlayersThread.start();
+            if (data.equals("rankplayers_cancel")) {
+                sendMessageToCommandsChannel(rankCommand.handleCancel(userId).message, message);
+            } else if (data.startsWith("rankplayers_round_")) {
+                String round = data.substring("rankplayers_round_".length());
+                com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers.RankResponse response =
+                    rankCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing rank players callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -2586,55 +2420,19 @@ public class TelegramListener {
      * {@link #handleCompareHallsCallback} for why.
      */
     private void handleRankHallsCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "rank halls callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls rankCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls();
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread rankHallsThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls rankCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls.RankResponse response;
-
-                        if (data.equals("rankhalls_cancel")) {
-                            response = rankCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("rankhalls_round_")) {
-                            String round = data.substring("rankhalls_round_".length());
-                            response = rankCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing rank halls callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                rankHallsThread.setDaemon(true);
-                rankHallsThread.start();
+            if (data.equals("rankhalls_cancel")) {
+                sendMessageToCommandsChannel(rankCommand.handleCancel(userId).message, message);
+            } else if (data.startsWith("rankhalls_round_")) {
+                String round = data.substring("rankhalls_round_".length());
+                com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls.RankResponse response =
+                    rankCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing rank halls callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -2917,109 +2715,65 @@ public class TelegramListener {
      * Handles admins callback queries (admin-only)
      */
     private void handleAdminsCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
+        runCallbackRouting(callbackQuery, "admins callback", false, message -> {
             com.calplus.ihrgstats.telegrambot.commands.CommandAdmins adminsCommand =
                 new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins();
-
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
 
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                removeInlineKeyboard(chatId, messageId);
-
-                if (data.equals("admins_cancel")) {
-                    response = adminsCommand.handleCancel(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("admins_list")) {
-                    response = adminsCommand.handleList(userId);
-                    sendLongMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("admins_addstart")) {
-                    response = adminsCommand.handleAddStart(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("admins_removeselect")) {
-                    response = adminsCommand.handleRemoveSelect(userId);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("admins_remove_")) {
-                    int adminRowId = Integer.parseInt(data.substring("admins_remove_".length()));
-                    response = adminsCommand.handleRemoveConfirm(userId, adminRowId);
-                    sendMessageToCommandsChannel(response.message, message);
-                }
+            if (data.equals("admins_cancel")) {
+                response = adminsCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("admins_list")) {
+                response = adminsCommand.handleList(userId);
+                sendLongMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("admins_addstart")) {
+                response = adminsCommand.handleAddStart(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("admins_removeselect")) {
+                response = adminsCommand.handleRemoveSelect(userId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("admins_remove_")) {
+                int adminRowId = Integer.parseInt(data.substring("admins_remove_".length()));
+                response = adminsCommand.handleRemoveConfirm(userId, adminRowId);
+                sendMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing admins callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
      * Handles match types callback queries (admin-only)
      */
     private void handleMatchTypesCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
+        runCallbackRouting(callbackQuery, "match types callback", false, message -> {
             com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
                 new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
-
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
 
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                removeInlineKeyboard(chatId, messageId);
-
-                if (data.equals("matchtypes_cancel")) {
-                    response = matchTypesCommand.handleCancel(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("matchtypes_create")) {
-                    response = matchTypesCommand.handleCreateNew(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("matchtypes_list")) {
-                    response = matchTypesCommand.handleList(userId);
-                    sendLongMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("matchtypes_editselect")) {
-                    response = matchTypesCommand.handleEditSelection(userId);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("matchtypes_edit_")) {
-                    int matchTypeId = Integer.parseInt(data.substring("matchtypes_edit_".length()));
-                    response = matchTypesCommand.handleEditStart(userId, matchTypeId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.equals("matchtypes_assignselect")) {
-                    response = matchTypesCommand.handleAssignSelection(userId);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("matchtypes_assignmt_")) {
-                    int matchTypeId = Integer.parseInt(data.substring("matchtypes_assignmt_".length()));
-                    response = matchTypesCommand.handleAssignStart(userId, matchTypeId);
-                    sendMessageToCommandsChannel(response.message, message);
-                }
+            if (data.equals("matchtypes_cancel")) {
+                response = matchTypesCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("matchtypes_create")) {
+                response = matchTypesCommand.handleCreateNew(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("matchtypes_list")) {
+                response = matchTypesCommand.handleList(userId);
+                sendLongMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("matchtypes_editselect")) {
+                response = matchTypesCommand.handleEditSelection(userId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("matchtypes_edit_")) {
+                int matchTypeId = Integer.parseInt(data.substring("matchtypes_edit_".length()));
+                response = matchTypesCommand.handleEditStart(userId, matchTypeId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("matchtypes_assignselect")) {
+                response = matchTypesCommand.handleAssignSelection(userId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("matchtypes_assignmt_")) {
+                int matchTypeId = Integer.parseInt(data.substring("matchtypes_assignmt_".length()));
+                response = matchTypesCommand.handleAssignStart(userId, matchTypeId);
+                sendMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing match types callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3078,60 +2832,32 @@ public class TelegramListener {
      * Handles predict callback queries (admin-only wizard steps)
      */
     private void handlePredictCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
+        runCallbackRouting(callbackQuery, "predict callback", false, message -> {
             com.calplus.ihrgstats.telegrambot.commands.CommandPredict predictCommand =
                 new com.calplus.ihrgstats.telegrambot.commands.CommandPredict();
-
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
 
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                removeInlineKeyboard(chatId, messageId);
-
-                if (data.equals("predict_cancel")) {
-                    response = predictCommand.handleCancel(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.startsWith("predict_selecthall1_")) {
-                    int hallId = Integer.parseInt(data.substring("predict_selecthall1_".length()));
-                    response = predictCommand.handleFirstHallSelection(userId, hallId);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("predict_selectplayer1_")) {
-                    String player = data.substring("predict_selectplayer1_".length());
-                    response = predictCommand.handleFirstPlayerSelection(userId, player);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("predict_selecthall2_")) {
-                    int hallId = Integer.parseInt(data.substring("predict_selecthall2_".length()));
-                    response = predictCommand.handleSecondHallSelection(userId, hallId);
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("predict_selectplayer2_")) {
-                    String player = data.substring("predict_selectplayer2_".length());
-                    response = predictCommand.handleSecondPlayerSelection(userId, player);
-                    sendLongMessageToCommandsChannel(response.message, message);
-                }
+            if (data.equals("predict_cancel")) {
+                response = predictCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("predict_selecthall1_")) {
+                int hallId = Integer.parseInt(data.substring("predict_selecthall1_".length()));
+                response = predictCommand.handleFirstHallSelection(userId, hallId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("predict_selectplayer1_")) {
+                String player = data.substring("predict_selectplayer1_".length());
+                response = predictCommand.handleFirstPlayerSelection(userId, player);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("predict_selecthall2_")) {
+                int hallId = Integer.parseInt(data.substring("predict_selecthall2_".length()));
+                response = predictCommand.handleSecondHallSelection(userId, hallId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("predict_selectplayer2_")) {
+                String player = data.substring("predict_selectplayer2_".length());
+                response = predictCommand.handleSecondPlayerSelection(userId, player);
+                sendLongMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing predict callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3216,51 +2942,33 @@ public class TelegramListener {
      * Handles help callback queries
      */
     private void handleHelpCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            com.calplus.ihrgstats.telegrambot.commands.CommandHelp helpCommand = 
+        runCallbackRouting(callbackQuery, "help callback", false, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandHelp helpCommand =
                 new com.calplus.ihrgstats.telegrambot.commands.CommandHelp();
-            
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response;
-            
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
-            
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-                
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-                
-                if (data.equals("help_cancel")) {
-                    response = helpCommand.handleCancel(userId);
-                    sendMessageToCommandsChannel(response.message, message);
-                } else if (data.startsWith("help_category_")) {
-                    String category = data.substring("help_category_".length());
-                    response = helpCommand.handleCategorySelection(userId, category);
-                    
-                    if (response.buttonConfig != null) {
-                        sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                    } else {
-                        sendLongMessageToCommandsChannel(response.message, message);
-                    }
-                } else if (data.startsWith("help_cmd_")) {
-                    String command = data.substring("help_cmd_".length());
-                    response = helpCommand.handleCommandDetail(userId, command);
-                    sendLongMessageToCommandsChannel(response.message, message);
-                } else if (data.startsWith("help_filetype_")) {
-                    String fileType = data.substring("help_filetype_".length());
-                    response = helpCommand.handleFileTypeSelection(userId, fileType);
+
+            if (data.equals("help_cancel")) {
+                response = helpCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("help_category_")) {
+                String category = data.substring("help_category_".length());
+                response = helpCommand.handleCategorySelection(userId, category);
+                // Category text falls back to the CHUNKED sender - help pages can exceed one message.
+                if (response.buttonConfig != null) {
+                    sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+                } else {
                     sendLongMessageToCommandsChannel(response.message, message);
                 }
+            } else if (data.startsWith("help_cmd_")) {
+                String command = data.substring("help_cmd_".length());
+                response = helpCommand.handleCommandDetail(userId, command);
+                sendLongMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("help_filetype_")) {
+                String fileType = data.substring("help_filetype_".length());
+                response = helpCommand.handleFileTypeSelection(userId, fileType);
+                sendLongMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing help callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3269,73 +2977,28 @@ public class TelegramListener {
      * {@link #handleCompareHallsCallback} for why.
      */
     private void handleInfoPlayerCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "info player callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer infoCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer();
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response;
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread infoPlayerThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer infoCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response;
-
-                        if (data.equals("infoplayer_cancel")) {
-                            response = infoCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("infoplayer_hall_")) {
-                            int hallId = Integer.parseInt(data.substring("infoplayer_hall_".length()));
-                            response = infoCommand.handleHallSelection(userId, hallId);
-
-                            if (response.buttonConfig != null) {
-                                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("infoplayer_player_")) {
-                            String player = data.substring("infoplayer_player_".length());
-                            response = infoCommand.handlePlayerSelection(userId, player);
-
-                            if (response.buttonConfig != null) {
-                                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("infoplayer_round_")) {
-                            String round = data.substring("infoplayer_round_".length());
-                            response = infoCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing info player callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                infoPlayerThread.setDaemon(true);
-                infoPlayerThread.start();
+            if (data.equals("infoplayer_cancel")) {
+                response = infoCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("infoplayer_hall_")) {
+                int hallId = Integer.parseInt(data.substring("infoplayer_hall_".length()));
+                response = infoCommand.handleHallSelection(userId, hallId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("infoplayer_player_")) {
+                String player = data.substring("infoplayer_player_".length());
+                response = infoCommand.handlePlayerSelection(userId, player);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("infoplayer_round_")) {
+                String round = data.substring("infoplayer_round_".length());
+                response = infoCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing info player callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3344,64 +3007,24 @@ public class TelegramListener {
      * {@link #handleCompareHallsCallback} for why.
      */
     private void handleInfoHallCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "info hall callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall infoCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall();
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response;
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread infoHallThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall infoCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response;
-
-                        if (data.equals("infohall_cancel")) {
-                            response = infoCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("infohall_hall_")) {
-                            int hallId = Integer.parseInt(data.substring("infohall_hall_".length()));
-                            response = infoCommand.handleHallSelection(userId, hallId);
-
-                            if (response.buttonConfig != null) {
-                                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("infohall_round_")) {
-                            String round = data.substring("infohall_round_".length());
-                            response = infoCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing info hall callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                infoHallThread.setDaemon(true);
-                infoHallThread.start();
+            if (data.equals("infohall_cancel")) {
+                response = infoCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("infohall_hall_")) {
+                int hallId = Integer.parseInt(data.substring("infohall_hall_".length()));
+                response = infoCommand.handleHallSelection(userId, hallId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("infohall_round_")) {
+                String round = data.substring("infohall_round_".length());
+                response = infoCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing info hall callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3410,55 +3033,19 @@ public class TelegramListener {
      * {@link #handleCompareHallsCallback} for why.
      */
     private void handleInfoMatchCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "info match callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch infoCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch();
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread infoMatchThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch infoCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response;
-
-                        if (data.equals("infomatch_cancel")) {
-                            response = infoCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("infomatch_round_")) {
-                            String round = data.substring("infomatch_round_".length());
-                            response = infoCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing info match callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                infoMatchThread.setDaemon(true);
-                infoMatchThread.start();
+            if (data.equals("infomatch_cancel")) {
+                sendMessageToCommandsChannel(infoCommand.handleCancel(userId).message, message);
+            } else if (data.startsWith("infomatch_round_")) {
+                String round = data.substring("infomatch_round_".length());
+                com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response =
+                    infoCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing info match callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3467,64 +3054,24 @@ public class TelegramListener {
      * see {@link #handleCompareHallsCallback} for why.
      */
     private void handleInfoMatchHallCallback(JsonObject callbackQuery, String data, String userId) {
-        try {
-            // Get original message
-            JsonObject message = callbackQuery.has("message") ? callbackQuery.getAsJsonObject("message") : null;
+        runCallbackRouting(callbackQuery, "info match hall callback", true, message -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall infoCommand =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall();
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response;
 
-            if (message != null) {
-                JsonObject chat = message.getAsJsonObject("chat");
-                String chatId = chat.get("id").getAsString();
-                String messageId = message.get("message_id").getAsString();
-
-                // Remove buttons from original message
-                removeInlineKeyboard(chatId, messageId);
-
-                Thread infoMatchHallThread = new Thread(() -> {
-                    try {
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall infoCommand =
-                            new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall();
-
-                        com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response;
-
-                        if (data.equals("infomatchhall_cancel")) {
-                            response = infoCommand.handleCancel(userId);
-                            sendMessageToCommandsChannel(response.message, message);
-                        } else if (data.startsWith("infomatchhall_hall_")) {
-                            int hallId = Integer.parseInt(data.substring("infomatchhall_hall_".length()));
-                            response = infoCommand.handleHallSelection(userId, hallId);
-
-                            if (response.buttonConfig != null) {
-                                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                            } else {
-                                sendMessageToCommandsChannel(response.message, message);
-                            }
-                        } else if (data.startsWith("infomatchhall_round_")) {
-                            String round = data.substring("infomatchhall_round_".length());
-                            response = infoCommand.handleRoundSelection(userId, round);
-
-                            // Send message
-                            sendLongMessageToCommandsChannel(response.message, message);
-
-                            // Send image if available
-                            if (response.imagePath != null) {
-                                sendImageToCommandsChannel(response.imagePath, message);
-                            }
-                        }
-                    } catch (Exception e) {
-                        String errorMsg = "Error processing info match hall callback: " + e.getMessage();
-                        logHelper.logError(errorMsg);
-                        e.printStackTrace();
-                    }
-                });
-                infoMatchHallThread.setDaemon(true);
-                infoMatchHallThread.start();
+            if (data.equals("infomatchhall_cancel")) {
+                response = infoCommand.handleCancel(userId);
+                sendMessageToCommandsChannel(response.message, message);
+            } else if (data.startsWith("infomatchhall_hall_")) {
+                int hallId = Integer.parseInt(data.substring("infomatchhall_hall_".length()));
+                response = infoCommand.handleHallSelection(userId, hallId);
+                sendStepOrPlain(response.message, response.buttonConfig, message);
+            } else if (data.startsWith("infomatchhall_round_")) {
+                String round = data.substring("infomatchhall_round_".length());
+                response = infoCommand.handleRoundSelection(userId, round);
+                sendReportWithImage(response.message, response.imagePath, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing info match hall callback: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
@@ -3709,85 +3256,20 @@ public class TelegramListener {
         }
     }
 
-    /**
-     * Sends a message with settings buttons
-     */
     private void sendMessageWithSettingsButtons(String message,
-            com.calplus.ihrgstats.telegrambot.commands.CommandSettings.ButtonConfig buttonConfig,
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage) {
-        try {
-            message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-
-            JsonObject payload = new JsonObject();
-            
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-                
-                if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-                
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
-                }
-            }
-            
-            payload.addProperty("text", message);
-            
-            // Add parse_mode for HTML if message contains HTML tags
-            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
-                payload.addProperty("parse_mode", "HTML");
-            }
-            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
-            // (called at the top of every send method), any remaining "**"/"```"/"__"
-            // is never legitimate markdown intent, only accidental content residue
-            // (a stray unpaired sequence, or literal characters in a name/label).
-            // Sending as plain text is always safe; the fragile legacy "Markdown"
-            // parse mode used to be selected here on that same residue and could
-            // fail outright on a single unpaired "*"/"_" (A11).
-            
-            // Create inline keyboard with support for multiple columns
-            JsonObject replyMarkup = new JsonObject();
-            JsonArray keyboard = new JsonArray();
-            
-            int columnsPerRow = buttonConfig.columnsPerRow;
-            JsonArray currentRow = new JsonArray();
-            
-            for (int i = 0; i < buttonConfig.labels.length; i++) {
-                JsonObject button = new JsonObject();
-                button.addProperty("text", buttonConfig.labels[i]);
-                button.addProperty("callback_data", buttonConfig.callbacks[i]);
-                currentRow.add(button);
-                
-                // Add row when we reach columnsPerRow or it's the last button
-                if (currentRow.size() >= columnsPerRow || i == buttonConfig.labels.length - 1) {
-                    keyboard.add(currentRow);
-                    currentRow = new JsonArray();
-                }
-            }
-            
-            replyMarkup.add("inline_keyboard", keyboard);
-            payload.add("reply_markup", replyMarkup);
-
-            sendMessagePayloadWithFallback(payload, "settings buttons message");
-
-        } catch (Exception e) {
-            logHelper.logError("Error sending settings buttons: " + e.getMessage());
-            e.printStackTrace();
-        }
+        // Settings keyboards historically defaulted to ONE column, unlike
+        // the shared 4-column default - hence the explicit fallback.
+        int columnsPerRow = buttonConfig.columnsPerRow != null ? buttonConfig.columnsPerRow : 1;
+        sendMessageWithColumnButtons(message, buttonConfig, originalMessage, columnsPerRow, "settings buttons message");
     }
 
     /**
      * Sends a message with export database buttons
      */
     private void sendMessageWithExportButtons(String message,
-            com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase.ButtonConfig buttonConfig,
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig buttonConfig,
             JsonObject originalMessage, String userId) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);

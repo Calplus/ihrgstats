@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
@@ -59,18 +60,8 @@ public class CommandInfoMatchHall {
             return new InfoResponse("❌ Database error fetching halls.", (Path) null, null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        for (A3_Halls.Hall hall : allHalls) {
-            if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-            labels.add(hall.hallName);
-            callbacks.add("infomatchhall_hall_" + hall.id);
-        }
-        labels.add("❌ Cancel");
-        callbacks.add("infomatchhall_cancel");
-
         String message = "**🏛️ Hall Match Information**\n\nSelect the **hall**:";
-        return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new InfoResponse(message, (Path) null, SelectionKeyboards.hallButtons(allHalls, "infomatchhall_hall_", "infomatchhall_cancel"));
     }
 
     public InfoResponse handleHallSelection(String userId, int hallId) {
@@ -91,17 +82,8 @@ public class CommandInfoMatchHall {
                 return new InfoResponse("ℹ️ No round data available.", (Path) null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A1_Rounds.Round round : availableRounds) {
-                labels.add(round.year + " · " + round.roundLabel);
-                callbacks.add("infomatchhall_round_" + round.year + "_" + round.roundOrder);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("infomatchhall_cancel");
-
             String message = String.format("**🏛️ Hall Match Information**\n\nHall: **%s**\nSelect the **round**:", VictoryRecordCalculator.formatHallName(state.hallName));
-            return new InfoResponse(message, (Path) null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            return new InfoResponse(message, (Path) null, SelectionKeyboards.yearRoundButtons(availableRounds, "infomatchhall_round_", "infomatchhall_cancel", null, null));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new InfoResponse("❌ Database error.", (Path) null, null);

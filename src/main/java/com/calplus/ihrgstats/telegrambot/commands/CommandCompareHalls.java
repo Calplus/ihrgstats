@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
@@ -51,6 +52,7 @@ public class CommandCompareHalls {
         String userInfo = TelegramListener.formatUserInfo(userId);
         logHelper.logInfo(String.format("%s requested /comparehalls command", userInfo));
 
+        TelegramCommandUtils.cleanupOldStates(userSelectionStates);
         userSelectionStates.put(userId, new HallCompareSelectionState());
 
         List<A3_Halls.Hall> allHalls;
@@ -66,17 +68,8 @@ public class CommandCompareHalls {
             return new CompareResponse("ℹ️ At least 2 halls are required for comparison. Current halls: " + allHalls.size(), null, null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-        for (A3_Halls.Hall hall : allHalls) {
-            labels.add(hall.hallName);
-            callbacks.add("comparehalls_select1_" + hall.id);
-        }
-        labels.add("❌ Cancel");
-        callbacks.add("comparehalls_cancel");
-
         String message = "**🏛️ Hall Comparison**\n\nSelect the **first hall** to compare:";
-        return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new CompareResponse(message, null, SelectionKeyboards.hallButtons(allHalls, "comparehalls_select1_", "comparehalls_cancel"));
     }
 
     public CompareResponse handleFirstHallSelection(String userId, int firstHallId) {
@@ -96,17 +89,8 @@ public class CommandCompareHalls {
                 return new CompareResponse("ℹ️ No other halls available for comparison.", null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A3_Halls.Hall hall2 : allHalls) {
-                labels.add(hall2.hallName);
-                callbacks.add("comparehalls_select2_" + hall2.id);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("comparehalls_cancel");
-
-            String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSelect the **second hall** to compare:", formatHallNameForImage(state.firstHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSelect the **second hall** to compare:", VictoryRecordCalculator.formatHallName(state.firstHallName));
+            return new CompareResponse(message, null, SelectionKeyboards.hallButtons(allHalls, "comparehalls_select2_", "comparehalls_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("❌ Database error.", null, null);
@@ -135,22 +119,9 @@ public class CommandCompareHalls {
                 return new CompareResponse("ℹ️ No round data available for " + year + ".", null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            labels.add("All Rounds");
-            callbacks.add("comparehalls_selectround_all");
-            labels.add("🌐 All Years");
-            callbacks.add("comparehalls_selectround_allyears");
-            for (A1_Rounds.Round round : availableRounds) {
-                labels.add(round.roundLabel);
-                callbacks.add("comparehalls_selectround_" + round.roundOrder);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("comparehalls_cancel");
-
             String message = String.format("**🏛️ Hall Comparison**\n\nFirst hall: **%s**\nSecond hall: **%s**\n\nSelect rounds to compare:",
-                    formatHallNameForImage(state.firstHallName), formatHallNameForImage(state.secondHallName));
-            return new CompareResponse(message, null, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+                    VictoryRecordCalculator.formatHallName(state.firstHallName), VictoryRecordCalculator.formatHallName(state.secondHallName));
+            return new CompareResponse(message, null, SelectionKeyboards.roundButtons(availableRounds, "comparehalls_selectround_", "comparehalls_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CompareResponse("❌ Database error.", null, null);
@@ -241,8 +212,8 @@ public class CommandCompareHalls {
         HallData data1 = fetchHallData(hall1Id, hall1Name, year, roundsToInclude, trueEloTypeId, top5AvgByRoundThenHall);
         HallData data2 = fetchHallData(hall2Id, hall2Name, year, roundsToInclude, trueEloTypeId, top5AvgByRoundThenHall);
 
-        if (data1.players.isEmpty()) throw new Exception(formatHallNameForImage(hall1Name) + " has no data for " + year);
-        if (data2.players.isEmpty()) throw new Exception(formatHallNameForImage(hall2Name) + " has no data for " + year);
+        if (data1.players.isEmpty()) throw new Exception(VictoryRecordCalculator.formatHallName(hall1Name) + " has no data for " + year);
+        if (data2.players.isEmpty()) throw new Exception(VictoryRecordCalculator.formatHallName(hall2Name) + " has no data for " + year);
 
         double winProbability = calculateWinningProbability(data1, data2);
 
@@ -309,8 +280,8 @@ public class CommandCompareHalls {
         List<YearSummary> summaries1 = buildYearSummaries(hall1Id, hall1Name, trueEloTypeId, latest1Holder);
         List<YearSummary> summaries2 = buildYearSummaries(hall2Id, hall2Name, trueEloTypeId, latest2Holder);
 
-        if (latest1Holder[0] == null) throw new Exception(formatHallNameForImage(hall1Name) + " has no data for any year");
-        if (latest2Holder[0] == null) throw new Exception(formatHallNameForImage(hall2Name) + " has no data for any year");
+        if (latest1Holder[0] == null) throw new Exception(VictoryRecordCalculator.formatHallName(hall1Name) + " has no data for any year");
+        if (latest2Holder[0] == null) throw new Exception(VictoryRecordCalculator.formatHallName(hall2Name) + " has no data for any year");
 
         double winProbability = calculateWinningProbability(latest1Holder[0], latest2Holder[0]);
         double hall2WinProbability = calculateWinningProbability(latest2Holder[0], latest1Holder[0]);
@@ -325,15 +296,15 @@ public class CommandCompareHalls {
 
     private String generateTextOutputAllYears(String hall1Name, List<YearSummary> summaries1, String hall2Name, List<YearSummary> summaries2, double winProbability) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("**🏛️ Hall Comparison (All Years)**\n\n%s vs %s\n\n", formatHallNameForImage(hall1Name), formatHallNameForImage(hall2Name)));
+        sb.append(String.format("**🏛️ Hall Comparison (All Years)**\n\n%s vs %s\n\n", VictoryRecordCalculator.formatHallName(hall1Name), VictoryRecordCalculator.formatHallName(hall2Name)));
 
-        sb.append(String.format("**%s - Season Record (by year):**\n```\n", formatHallNameForImage(hall1Name)));
+        sb.append(String.format("**%s - Season Record (by year):**\n```\n", VictoryRecordCalculator.formatHallName(hall1Name)));
         for (YearSummary s : summaries1) {
             sb.append(String.format("%-6d %s\n", s.year, VictoryRecordCalculator.formatScorePair(s.totalHallScore, s.totalOppScore)));
         }
         sb.append("```\n\n");
 
-        sb.append(String.format("**%s - Season Record (by year):**\n```\n", formatHallNameForImage(hall2Name)));
+        sb.append(String.format("**%s - Season Record (by year):**\n```\n", VictoryRecordCalculator.formatHallName(hall2Name)));
         for (YearSummary s : summaries2) {
             sb.append(String.format("%-6d %s\n", s.year, VictoryRecordCalculator.formatScorePair(s.totalHallScore, s.totalOppScore)));
         }
@@ -346,7 +317,7 @@ public class CommandCompareHalls {
 
     private Path generateImageAllYears(String hall1Name, List<YearSummary> summaries1, HallData latest1, double winProbability1,
                                         String hall2Name, List<YearSummary> summaries2, HallData latest2, double winProbability2) throws Exception {
-        String description = String.format("%s vs %s (All Years)", formatHallNameForImage(hall1Name), formatHallNameForImage(hall2Name));
+        String description = String.format("%s vs %s (All Years)", VictoryRecordCalculator.formatHallName(hall1Name), VictoryRecordCalculator.formatHallName(hall2Name));
         String lastYearLabel = summaries1.isEmpty() ? null : String.valueOf(summaries1.get(summaries1.size() - 1).year);
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Hall Comparison", description, lastYearLabel);
 
@@ -373,7 +344,7 @@ public class CommandCompareHalls {
                 continue;
             }
             String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalHallRank);
-            String deltaElo = prevElo == null ? "-" : deltaDoubleString(s.finalHallElo - prevElo);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaDoubleString(s.finalHallElo - prevElo);
             hallEloLines.add(String.format("%-6d %-6d %-8s %-8s %-8s", s.year, s.finalHallRank, deltaRank, String.format("%.1f", s.finalHallElo), deltaElo));
             prevElo = s.finalHallElo;
             prevRank = s.finalHallRank;
@@ -783,8 +754,8 @@ public class CommandCompareHalls {
     private String generateTextOutput(HallData hall1, HallData hall2, List<A1_Rounds.Round> roundsToInclude, double winProbability, String selectedRound) {
         StringBuilder sb = new StringBuilder();
         sb.append("**🏛️ Hall Comparison**\n\n");
-        sb.append(String.format("**%s** vs **%s**\n\n", formatHallNameForImage(hall1.hallName), formatHallNameForImage(hall2.hallName)));
-        sb.append(String.format("📊 **Winning Probability:** %s has **%.1f%%** chance to win\n", formatHallNameForImage(hall1.hallName), winProbability));
+        sb.append(String.format("**%s** vs **%s**\n\n", VictoryRecordCalculator.formatHallName(hall1.hallName), VictoryRecordCalculator.formatHallName(hall2.hallName)));
+        sb.append(String.format("📊 **Winning Probability:** %s has **%.1f%%** chance to win\n", VictoryRecordCalculator.formatHallName(hall1.hallName), winProbability));
         sb.append(String.format("📅 **Rounds:** %s\n\n", selectedRound.equalsIgnoreCase("all") ? "All" : selectedRound));
 
         sb.append(generateHallDetails(hall1, roundsToInclude));
@@ -796,7 +767,7 @@ public class CommandCompareHalls {
 
     private String generateHallDetails(HallData hall, List<A1_Rounds.Round> roundsToInclude) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("━━━ **%s** ━━━\n\n", formatHallNameForImage(hall.hallName)));
+        sb.append(String.format("━━━ **%s** ━━━\n\n", VictoryRecordCalculator.formatHallName(hall.hallName)));
 
         sb.append("**🏛️ Hall Elo:**\n```\n");
         sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", "Rnd", "Rank", "ΔRank", "Elo", "ΔElo"));
@@ -812,7 +783,7 @@ public class CommandCompareHalls {
                 continue;
             }
             String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : deltaDoubleString(elo - prevElo);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaDoubleString(elo - prevElo);
             sb.append(String.format("%-4s %-6d %-10s %-8s %-10s\n", round.roundLabel, rank, deltaRank, String.format("%.1f", elo), deltaElo));
             prevElo = elo;
             prevRank = rank;
@@ -864,8 +835,8 @@ public class CommandCompareHalls {
             int oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
 
-            String formattedHall = formatHallNameForImage(hall.hallName);
-            String formattedOppHall = "WALKOVER".equalsIgnoreCase(record.oppHallName) ? "WALKOVER" : formatHallNameForImage(record.oppHallName);
+            String formattedHall = VictoryRecordCalculator.formatHallName(hall.hallName);
+            String formattedOppHall = "WALKOVER".equalsIgnoreCase(record.oppHallName) ? "WALKOVER" : VictoryRecordCalculator.formatHallName(record.oppHallName);
             if ("WALKOVER".equalsIgnoreCase(record.oppHallName)) oppEloStr = "-";
 
             String score = VictoryRecordCalculator.formatScorePair(record.hallScore, record.oppScore);
@@ -895,7 +866,7 @@ public class CommandCompareHalls {
 
     private Path generateImage(HallData hall1, HallData hall2, List<A1_Rounds.Round> roundsToInclude, double winProbability) throws Exception {
         String lastRoundLabel = latestRoundLabelAcrossBothHalls(hall1, hall2);
-        String description = String.format("%s vs %s", formatHallNameForImage(hall1.hallName), formatHallNameForImage(hall2.hallName));
+        String description = String.format("%s vs %s", VictoryRecordCalculator.formatHallName(hall1.hallName), VictoryRecordCalculator.formatHallName(hall2.hallName));
         ComparisonImageGenerator.ImageMetadata metadata = new ComparisonImageGenerator.ImageMetadata("Hall Comparison", description, lastRoundLabel);
 
         // hall2's own win probability is computed independently (not
@@ -933,7 +904,7 @@ public class CommandCompareHalls {
                 continue;
             }
             String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : deltaDoubleString(elo - prevElo);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaDoubleString(elo - prevElo);
             hallEloLines.add(String.format("%-4s %-6d %-8s %-8s %-8s", round.roundLabel, rank, deltaRank, String.format("%.1f", elo), deltaElo));
             prevElo = elo;
             prevRank = rank;
@@ -983,14 +954,14 @@ public class CommandCompareHalls {
             int oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
             String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
 
-            String hallFormatted = formatHallNameForImage(hall.hallName);
+            String hallFormatted = VictoryRecordCalculator.formatHallName(hall.hallName);
             String oppHallFormatted;
             if ("WALKOVER".equalsIgnoreCase(record.oppHallName)) {
                 oppHallFormatted = "WALKOVER";
                 oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
                 oppEloStr = "-";
             } else {
-                oppHallFormatted = formatHallNameForImage(record.oppHallName);
+                oppHallFormatted = VictoryRecordCalculator.formatHallName(record.oppHallName);
             }
 
             String score = VictoryRecordCalculator.formatScorePair(record.hallScore, record.oppScore);
@@ -1006,18 +977,5 @@ public class CommandCompareHalls {
         return sections;
     }
 
-    private String formatHallNameForImage(String hallName) {
-        try {
-            Integer.parseInt(hallName);
-            return "Hall " + hallName;
-        } catch (NumberFormatException e) {
-            return hallName + " Hall";
-        }
-    }
-
-    private static String deltaDoubleString(double change) {
-        if (change > 0) return String.format("+%.1f", change);
-        if (change < 0) return String.format("-%.1f", Math.abs(change));
-        return "=";
-    }
+
 }

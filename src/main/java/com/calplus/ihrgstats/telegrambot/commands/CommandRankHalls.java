@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
@@ -75,26 +76,9 @@ public class CommandRankHalls {
             return new RankResponse("ℹ️ No rounds with data found for " + year + ".", (Path) null);
         }
 
-        List<String> labels = new ArrayList<>();
-        List<String> callbacks = new ArrayList<>();
-
-        labels.add("All Rounds");
-        callbacks.add("rankhalls_round_all");
-
-        labels.add("🌐 All Years");
-        callbacks.add("rankhalls_round_allyears");
-
-        for (A1_Rounds.Round round : availableRounds) {
-            labels.add(round.roundLabel);
-            callbacks.add("rankhalls_round_" + round.roundOrder);
-        }
-
-        labels.add("❌ Cancel");
-        callbacks.add("rankhalls_cancel");
-
         String message = "🏆 **Hall Rankings** (" + year + ")\n\nSelect which round to rank halls up to:";
 
-        return new RankResponse(message, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+        return new RankResponse(message, SelectionKeyboards.roundButtons(availableRounds, "rankhalls_round_", "rankhalls_cancel"));
     }
 
     public RankResponse handleRoundSelection(String userId, String selectedRound) {

@@ -5,6 +5,7 @@ import com.calplus.ihrgstats.utils.DatabaseHelper;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.OutputPaths;
+import com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
 
 import org.apache.poi.ss.usermodel.Row;
@@ -278,14 +279,4 @@ public class CommandExportDatabase {
         }
     }
 
-    /** Button configuration for inline keyboard. */
-    public static class ButtonConfig {
-        public final String[] labels;
-        public final String[] callbacks;
-
-        public ButtonConfig(String[] labels, String[] callbacks) {
-            this.labels = labels;
-            this.callbacks = callbacks;
-        }
-    }
 }

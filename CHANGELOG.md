@@ -2,6 +2,33 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 21] - 2026-07-30
+
+Structural deduplication pass - the large extractions deliberately deferred from the previous update's sweep, each locked in behind new or existing tests first. Behavior-preserving throughout; ~1,200 lines of main code removed net while test count grows 241 → 270.
+
+### Added
+
+- `CommandInfoHall` characterization tests - the largest previously untested class (853 lines) now has 7 tests covering the hall→round wizard, the all-rounds/single-round/all-years report bodies, walkover attribution, name truncation, session expiry and cancel.
+- `/matchtypes` create-wizard tests (step walkthrough, per-step validation, fail-closed admin gate, cancel), `CsvLineParser` tests (quoted comma-names, escaped quotes, empty fields), `VictoryRecordCalculator` contract tests (all outcome/score/delta/hall-name formatting), and tests for the new shared keyboard builders. 29 new tests total.
+
+### Changed
+
+- **Shared wizard keyboards**: the hall-picker, player-picker and round-picker inline keyboards - previously ~15 hand-rolled copies across the eleven selection wizards (`/infohall`, `/infoplayer`, `/infomatch`, `/infomatchhall`, `/compareplayers`, `/comparehalls`, `/rankplayers`, `/rankhalls`, `/predict`, `/lineup`) - are now built by one `SelectionKeyboards` class. Button labels, ordering, callbacks and the unknown-hall exclusion are unchanged and pinned by tests.
+- **One `ButtonConfig`**: `/settings` and `/exportdatabase` had their own private near-copies of the shared button class (with a different default column count), each requiring its own typed sender in the listener - both now use the shared class, with `/settings`' historical one-column default preserved explicitly. The ~70-line settings sender collapsed to a delegate of the shared column sender.
+- **`TelegramListener` callback scaffolding deduplicated**: all 13 per-command callback handlers repeated the same ~25-line frame (extract message → strip keyboard → spawn worker thread → error logging) plus the same reply patterns - now one `runCallbackRouting` scaffold plus shared `sendStepOrPlain` / `sendReportWithImage` helpers. Which handlers run on a worker thread vs inline is unchanged per handler. The seven inline `/settings` callback branches likewise collapsed onto one delivery helper.
+- **`TelegramLog`/`DiscordLog` shared core**: the two structurally twin log classes (~1,350 lines maintained in parallel) now extend one `ChannelLog` base holding the ordered send queue, batch buffer, INFO-accumulation buffer, char-limit splitting and shutdown flush. Everything wire-specific stays per-platform: config keys, HTML escaping (Telegram only), send format, rate-limit parsing, the deliberately different retry strategies, and admin mention formats.
+- **Image generators**: the byte-identical rotated-watermark tiling and filename sanitization (three copies) extracted to `ImageRenderSupport`. Header layouts were compared and deliberately kept per-generator - they are genuinely different designs, not duplicates.
+- `/compareplayers`, `/comparehalls` and `/predict` now expire stale wizard states after 10 minutes like every other wizard (they were the last three commands whose abandoned selections lingered forever).
+
+### Removed
+
+- The private `formatHallNameForImage` copies in `/infohall` and `/comparehalls` (now the shared `VictoryRecordCalculator.formatHallName`, making zero-padded numeric hall names render consistently with `/infomatch`/`/infoplayer`) and the duplicated `deltaDoubleString` copies; a write-only `playerId` field in `/compareplayers` (verified absent in v1.1.5).
+
+### Notes
+
+- Still open for the next passes: direct `CommandRecalculate`/`RankingQueryHelper`/DAO-edge tests (currently exercised indirectly through the pipeline and command tests) and the performance batch (transaction batching, N+1 elimination, shared feature extraction).
+- 270 tests, 0 failures.
+
 ## [Beta 3 Update 20] - 2026-07-30
 
 Whole-app refactor sweep: every package reviewed end to end against the last manually-verified release (v1.1.5) - duplicated code combined, dead code removed, hot paths sped up. Behavior-preserving throughout (full suite green before and after); ~750 lines of main code removed net.

@@ -3,8 +3,8 @@ package com.calplus.ihrgstats.telegrambot.commands;
 import com.calplus.ihrgstats.databasemanager.*;
 import com.calplus.ihrgstats.ml.*;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
+import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
 import com.calplus.ihrgstats.utils.*;
-import com.calplus.ihrgstats.utils.TelegramCommandUtils.ButtonConfig;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.SelectionState;
 
@@ -70,22 +70,13 @@ public class CommandPredict {
             return accessDenied(userId);
         }
         logHelper.logInfo(String.format("%s started /predict", TelegramListener.formatUserInfo(userId)));
+        TelegramCommandUtils.cleanupOldStates(userSelectionStates);
         userSelectionStates.put(userId, new PredictSelectionState());
 
         try {
             List<A3_Halls.Hall> allHalls = halls.getAllHalls();
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A3_Halls.Hall hall : allHalls) {
-                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-                labels.add(hall.hallName);
-                callbacks.add("predict_selecthall1_" + hall.id);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("predict_cancel");
-
             return new CommandResponse("🔮 <b>Predict Matchup</b>\n\nSelect the <b>first player's hall</b>:",
-                    new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+                    SelectionKeyboards.hallButtons(allHalls, "predict_selecthall1_", "predict_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error fetching halls: " + e.getMessage());
             return new CommandResponse("❌ Database error fetching halls.", (java.nio.file.Path) null, null);
@@ -110,18 +101,9 @@ public class CommandPredict {
                 return new CommandResponse("ℹ️ No players found in hall " + VictoryRecordCalculator.formatHallName(state.firstHallName) + ".", (java.nio.file.Path) null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (B6_PlayerYearStatus.Status status : statuses) {
-                labels.add(nameFor(status.playerId));
-                callbacks.add("predict_selectplayer1_" + status.playerId);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("predict_cancel");
-
             String message = String.format("🔮 <b>Predict Matchup</b>\n\nFirst player's hall: <b>%s</b>\nSelect the <b>first player</b>:",
                     VictoryRecordCalculator.formatHallName(state.firstHallName));
-            return new CommandResponse(message, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+            return new CommandResponse(message, SelectionKeyboards.playerButtons(statuses, this::nameFor, "predict_selectplayer1_", "predict_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CommandResponse("❌ Database error.", (java.nio.file.Path) null, null);
@@ -141,19 +123,9 @@ public class CommandPredict {
 
         try {
             List<A3_Halls.Hall> allHalls = halls.getAllHalls();
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (A3_Halls.Hall hall : allHalls) {
-                if (hall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) continue;
-                labels.add(hall.hallName);
-                callbacks.add("predict_selecthall2_" + hall.id);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("predict_cancel");
-
             String message = String.format("🔮 <b>Predict Matchup</b>\n\nFirst player: <b>%s</b> (%s)\nSelect the <b>second player's hall</b>:",
                     TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName));
-            return new CommandResponse(message, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0])));
+            return new CommandResponse(message, SelectionKeyboards.hallButtons(allHalls, "predict_selecthall2_", "predict_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CommandResponse("❌ Database error.", (java.nio.file.Path) null, null);
@@ -181,18 +153,9 @@ public class CommandPredict {
                 return new CommandResponse("ℹ️ No other players available in hall " + VictoryRecordCalculator.formatHallName(state.secondHallName) + ".", (java.nio.file.Path) null, null);
             }
 
-            List<String> labels = new ArrayList<>();
-            List<String> callbacks = new ArrayList<>();
-            for (B6_PlayerYearStatus.Status status : statuses) {
-                labels.add(nameFor(status.playerId));
-                callbacks.add("predict_selectplayer2_" + status.playerId);
-            }
-            labels.add("❌ Cancel");
-            callbacks.add("predict_cancel");
-
             String message = String.format("🔮 <b>Predict Matchup</b>\n\nFirst player: <b>%s</b> (%s)\nSecond player's hall: <b>%s</b>\nSelect the <b>second player</b>:",
                     TelegramHtml.escape(state.firstPlayerName), VictoryRecordCalculator.formatHallName(state.firstHallName), VictoryRecordCalculator.formatHallName(state.secondHallName));
-            return new CommandResponse(message, new ButtonConfig(labels.toArray(new String[0]), callbacks.toArray(new String[0]), 1));
+            return new CommandResponse(message, SelectionKeyboards.playerButtons(statuses, this::nameFor, "predict_selectplayer2_", "predict_cancel"));
         } catch (SQLException e) {
             logHelper.logError("Database error: " + e.getMessage());
             return new CommandResponse("❌ Database error.", (java.nio.file.Path) null, null);

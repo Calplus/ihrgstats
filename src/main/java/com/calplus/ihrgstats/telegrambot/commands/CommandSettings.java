@@ -168,9 +168,10 @@ public class CommandSettings {
 
         logHelper.logSuccess(String.format("Sent settings list to admin %s", com.calplus.ihrgstats.telegrambot.listener.TelegramListener.formatUserInfo(userId)));
 
-        return new SettingsResponse(message.toString(), 
-            new ButtonConfig(buttonLabels.toArray(new String[0]), 
-                           buttonCallbacks.toArray(new String[0])));
+        return new SettingsResponse(message.toString(),
+            new ButtonConfig(buttonLabels.toArray(new String[0]),
+                           buttonCallbacks.toArray(new String[0]),
+                           1)); // one setting per row
     }
     
     /**
@@ -807,22 +808,4 @@ public class CommandSettings {
         }
     }
 
-    /**
-     * Button configuration for inline keyboard
-     */
-    public static class ButtonConfig {
-        public final String[] labels;
-        public final String[] callbacks;
-        public final int columnsPerRow; // Number of columns per row (default: 1)
-
-        public ButtonConfig(String[] labels, String[] callbacks) {
-            this(labels, callbacks, 1);
-        }
-
-        public ButtonConfig(String[] labels, String[] callbacks, int columnsPerRow) {
-            this.labels = labels;
-            this.callbacks = callbacks;
-            this.columnsPerRow = columnsPerRow;
-        }
-    }
 }

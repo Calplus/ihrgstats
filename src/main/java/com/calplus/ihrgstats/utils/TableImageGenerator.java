@@ -330,7 +330,7 @@ public class TableImageGenerator {
 
         // Generate filename with convention: {command}_{name}_{date}_{time}.png
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
-        String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
+        String sanitizedName = entityName.isEmpty() ? "" : ImageRenderSupport.sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
 
         // Save to the shared, dedicated output directory (not the OS temp
@@ -455,7 +455,7 @@ public class TableImageGenerator {
 
         // Generate filename with convention: {command}_{name}_{date}_{time}.png
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
-        String sanitizedName = entityName.isEmpty() ? "" : sanitizeName(entityName) + "_";
+        String sanitizedName = entityName.isEmpty() ? "" : ImageRenderSupport.sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
         
         // Save to the shared, dedicated output directory (not the OS temp
@@ -600,11 +600,4 @@ public class TableImageGenerator {
         return resized;
     }
     
-    /**
-     * Sanitizes a name for use in a filename by removing invalid characters
-     */
-    private static String sanitizeName(String name) {
-        if (name == null || name.isEmpty()) return "";
-        return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
-    }
 }
