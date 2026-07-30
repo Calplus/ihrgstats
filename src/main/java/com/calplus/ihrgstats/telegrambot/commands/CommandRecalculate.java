@@ -88,6 +88,21 @@ public class CommandRecalculate {
                 trainingNote = "<i>AI model retraining failed:</i> " + e.getMessage();
             }
 
+            // ExpElo distillation, same isolation as training above - rewrites
+            // the reserved ExpElo slot from the (possibly just-recrowned)
+            // champion's win probabilities. A no-op until a champion exists.
+            String expEloNote;
+            try {
+                com.calplus.ihrgstats.ml.MatchupPredictor freshChampion = new com.calplus.ihrgstats.ml.PredictionService().loadChampion();
+                com.calplus.ihrgstats.ml.ExpEloDistiller.DistillResult distilled =
+                        new com.calplus.ihrgstats.ml.ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
+                expEloNote = distilled.rowsWritten > 0
+                        ? "<i>ExpElo distilled:</i> " + distilled.roundsProcessed + " rounds, " + distilled.rowsWritten + " rating rows updated."
+                        : "<i>ExpElo not distilled:</i> no trained AI model yet.";
+            } catch (Exception e) {
+                expEloNote = "<i>ExpElo distillation failed:</i> " + e.getMessage();
+            }
+
             try {
                 new com.calplus.ihrgstats.ml.RollingCacheUpdater().updateAll(nowTimestamp);
             } catch (Exception e) {
@@ -100,7 +115,7 @@ public class CommandRecalculate {
                     "<b>Rating rows written:</b> " + result.ratingRowsWritten + "\n" +
                     "<b>Passes:</b> " + result.passes + "\n\n" +
                     "<i>Point-in-time snapshots were left untouched.</i>\n\n" +
-                    trainingNote;
+                    trainingNote + "\n" + expEloNote;
             logHelper.logSuccess(String.format("%s completed /recalculate: %d rounds, %d rows",
                     userInfo, result.roundsRecalculated, result.ratingRowsWritten));
             return new CommandResponse(message, (java.nio.file.Path) null);

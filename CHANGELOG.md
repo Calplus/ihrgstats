@@ -2,6 +2,21 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 19] - 2026-07-26
+
+ExpElo - the AI/ML layer's first directly visible rating, shown alongside TrueElo in `/rankplayers`.
+
+### Added
+
+- `ExpEloDistiller`: distills the champion model's win probabilities into a scalar rating via a hand-rolled least-squares Bradley-Terry projection - for every round, the minimal equal-and-opposite adjustment to both players' running ExpElo that makes the standard rating-diff formula reproduce the champion's predicted expected score exactly. A player who didn't play a given round simply carries their ExpElo forward unchanged.
+- ExpElo now gets written to the long-reserved `ExpElo` rating slot after every retrain (round upload and `/recalculate`), covering exactly the same players as TrueElo for every round - a no-op until a champion model exists.
+- `/rankplayers` gains an **ExpElo** column (text table and image) shown alongside Elo (TrueElo); TrueElo remains authoritative for sorting and everywhere else.
+- 5 new tests plus 2 new end-to-end pipeline assertions, 241 total passing.
+
+### Scope note
+
+`/infoplayer` and `/compareplayers` still show TrueElo only - extending their (more involved) per-round image/text layouts to include ExpElo is a real follow-up, deliberately deferred rather than rushed.
+
 ## [Beta 3 Update 18] - 2026-07-26
 
 Hand-built neural-network player embeddings. **Internal only - no bot-facing changes** (`/predict`, `/lineup`, `/modelstats` surface the result automatically since both already display whichever family is champion).

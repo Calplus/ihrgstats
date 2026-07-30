@@ -118,6 +118,11 @@ public class MlPipelineIntegrationTest {
 
         E13_PlayerRollingCache.RollingCache p1Cache = rollingCache.getCache(resolvePlayerId("P1"));
         assertNotNull(p1Cache, "player_rolling_cache should have a row for an active player after upload-triggered refresh");
+
+        // Once a champion exists, ExpElo distillation must have run automatically too.
+        Integer expEloTypeId = new D10_RatingTypes().getRatingTypeId(D10_RatingTypes.EXP_ELO);
+        D11_PlayerRatings.Rating p1ExpElo = new D11_PlayerRatings().getRating(resolvePlayerId("P1"), lastRoundId, expEloTypeId);
+        assertNotNull(p1ExpElo, "ExpElo should have a row for the last round once a champion has been trained");
     }
 
     @Test
@@ -129,6 +134,12 @@ public class MlPipelineIntegrationTest {
                 "A single round is far below the walk-forward burn-in floor - ml_models must stay empty, not crash or half-populate");
         // The pipeline itself must still have fully succeeded despite no champion existing yet.
         assertNotNull(new A1_Rounds().getRoundByYearAndOrder(YEAR, 1));
+
+        // No champion yet -> ExpElo distillation must be a no-op, not a half-populated table.
+        Integer expEloTypeId = new D10_RatingTypes().getRatingTypeId(D10_RatingTypes.EXP_ELO);
+        int roundId = new A1_Rounds().getRoundByYearAndOrder(YEAR, 1).id;
+        assertTrue(new D11_PlayerRatings().getRatingsForRound(roundId, expEloTypeId).isEmpty(),
+                "ExpElo must stay empty until a champion model exists");
     }
 
     private static String resolvePlayerId(String name) throws Exception {

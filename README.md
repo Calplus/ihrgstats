@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%203%20Update%2018-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2026,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2019-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2026,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -70,7 +70,7 @@ Get comprehensive statistics for any player. View their Elo, Past seating, Victo
 
 **2. Player Rankings (/rankplayers)**
 
-Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played. Players part of the hall you selected will be highlighted! Also supports an All Years roster mode, ranking every player who has ever been active using their cross-year cumulative rating.
+Display player rankings sorted by trueElo. Easily view player's Capped status, Hall affiliation, Elo and Last Round played, plus ExpElo - the AI model's distilled rating - shown alongside once a champion model has been trained. Players part of the hall you selected will be highlighted! Also supports an All Years roster mode, ranking every player who has ever been active using their cross-year cumulative rating.
 
 <div align = "center">
 <img src="Github%20Images/SAMPLE_RankPlayers.png">
@@ -624,7 +624,7 @@ ihrgstats/
 │   │   │   ├── calculations/
 │   │   │   │   ├── EloCalculator.java             # Batch Glicko-2 rating math
 │   │   │   │   └── RatingRecalculator.java        # Whole-history multi-pass recalculation
-│   │   │   ├── ml/                                # AI/ML matchup models (FeatureExtractor, GlickoBaseline, LogisticModel, GbmTree/GbmModel, BacktestHarness, ModelTrainer, PredictionService, RollingCacheUpdater, ReliabilityScore)
+│   │   │   ├── ml/                                # AI/ML matchup models (FeatureExtractor, GlickoBaseline, LogisticModel, GbmTree/GbmModel, BacktestHarness, ModelTrainer, PredictionService, RollingCacheUpdater, ReliabilityScore, ExpEloDistiller)
 │   │   │   │   ├── embed/                         # Hand-built player/hall embedding neural net (EmbeddingNet) feeding the GBM_EMB family
 │   │   │   │   └── lineup/                        # Opponent-captain model + exact lineup optimizer (OpponentModel, LineupOptimizer, LineupExplainer)
 │   │   │   ├── databasemanager/                   # DAOs for every table (DatabaseSchema.java + A/B/C/D/E/F-prefixed managers, incl. F16_Admins.java, E17_MlModels.java)

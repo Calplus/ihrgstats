@@ -32,19 +32,21 @@ public class CommandRankPlayers {
         this.logHelper = new LogHelper();
     }
 
-    /** Represents a player's ranking data */
+    /** Represents a player's ranking data. expElo is null until a champion model has ever been trained. */
     private static class PlayerRankData {
         String name;
         String hall;
         String lastRound;
         double trueElo;
+        Double expElo;
         boolean isCapped;
 
-        PlayerRankData(String name, String hall, String lastRound, double trueElo, boolean isCapped) {
+        PlayerRankData(String name, String hall, String lastRound, double trueElo, Double expElo, boolean isCapped) {
             this.name = name;
             this.hall = hall;
             this.lastRound = lastRound;
             this.trueElo = trueElo;
+            this.expElo = expElo;
             this.isCapped = isCapped;
         }
     }
@@ -124,7 +126,7 @@ public class CommandRankPlayers {
         String roundDisplay = allYears ? "All Years" : (selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound);
         String yearDisplay = allYears ? "" : (", " + year);
         String message = "🏆 **Player Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
-                "Players ranked by TrueElo rating\n\n" + table;
+                "Players ranked by TrueElo rating - ExpElo (the AI model's distilled rating) shown alongside where a champion has been trained\n\n" + table;
 
         Path imagePath = null;
         try {
@@ -168,6 +170,7 @@ public class CommandRankPlayers {
         roundsDescending.sort((a, b) -> Integer.compare(b.roundOrder, a.roundOrder));
 
         Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsUpToRound(year, roundOrderLimit, trueEloTypeId);
+        Map<String, D11_PlayerRatings.Rating> expEloByPlayer = fetchExpEloRatings(h -> rankingQueryHelper.getLatestRatingsUpToRound(year, roundOrderLimit, h));
 
         List<PlayerRankData> players = new ArrayList<>();
         for (Map.Entry<String, D11_PlayerRatings.Rating> entry : ratingsByPlayer.entrySet()) {
@@ -180,16 +183,34 @@ public class CommandRankPlayers {
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
             String lastPlayedLabel = findLastRoundLabelActuallyPlayed(playerId, roundsDescending);
             String name = playerNames.getNameForYear(playerId, year);
+            D11_PlayerRatings.Rating expElo = expEloByPlayer.get(playerId);
 
             players.add(new PlayerRankData(
                 name != null ? name : playerId,
                 hall != null ? hall.hallName : "?",
                 lastPlayedLabel != null ? lastPlayedLabel : "-",
                 rating.ratingValue,
+                expElo != null ? expElo.ratingValue : null,
                 status.capped));
         }
 
         return players;
+    }
+
+    /**
+     * ExpElo alongside TrueElo, best-effort: the rating type may not be
+     * seeded yet on an old un-migrated database, and no player will have a
+     * row until a champion model has ever been trained - both are normal,
+     * not errors, so the whole rankings view degrades to an ExpElo-less
+     * "-" column rather than failing.
+     */
+    private interface RatingFetcher {
+        Map<String, D11_PlayerRatings.Rating> fetch(int expEloTypeId) throws SQLException;
+    }
+
+    private Map<String, D11_PlayerRatings.Rating> fetchExpEloRatings(RatingFetcher fetcher) throws SQLException {
+        Integer expEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.EXP_ELO);
+        return expEloTypeId != null ? fetcher.fetch(expEloTypeId) : Map.of();
     }
 
     /**
@@ -210,6 +231,7 @@ public class CommandRankPlayers {
         Collections.reverse(roundsDescending);
 
         Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsAllYears(trueEloTypeId);
+        Map<String, D11_PlayerRatings.Rating> expEloByPlayer = fetchExpEloRatings(rankingQueryHelper::getLatestRatingsAllYears);
 
         List<PlayerRankData> players = new ArrayList<>();
         for (B6_PlayerYearStatus.Status status : playerYearStatus.getMostRecentStatusForEachPlayer()) {
@@ -219,12 +241,14 @@ public class CommandRankPlayers {
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
             String lastPlayedLabel = findLastRoundLabelActuallyPlayed(status.playerId, roundsDescending);
             String name = playerNames.getNameForYear(status.playerId, status.year);
+            D11_PlayerRatings.Rating expElo = expEloByPlayer.get(status.playerId);
 
             players.add(new PlayerRankData(
                 name != null ? name : status.playerId,
                 hall != null ? hall.hallName : "?",
                 lastPlayedLabel != null ? lastPlayedLabel : "-",
                 rating.ratingValue,
+                expElo != null ? expElo.ratingValue : null,
                 status.capped));
         }
 
@@ -254,25 +278,7 @@ public class CommandRankPlayers {
     }
 
     private String formatPlayersTable(List<PlayerRankData> players, String homeHall) {
-        String[] headers = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
-        Alignment[] alignments = {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
-        int[] columnWidths = {4, 4, 4, 3, 3, 20};
-
-        List<String[]> rows = new ArrayList<>();
-        int rank = 1;
-        for (PlayerRankData player : players) {
-            rows.add(new String[]{
-                String.valueOf(rank),
-                String.format("%.0f", player.trueElo),
-                TableFormatter.shortenHallName(player.hall),
-                TableFormatter.shortenRoundName(player.lastRound),
-                player.isCapped ? "*" : "",
-                TableFormatter.shortenPlayerName(player.name, 20)
-            });
-            rank++;
-        }
-
-        String table = TableFormatter.formatTable(headers, rows, alignments, columnWidths);
+        String table = TableFormatter.formatTable(RANK_TABLE_HEADERS, buildRankRows(players), RANK_TABLE_ALIGNMENTS, RANK_TABLE_COLUMN_WIDTHS);
 
         if (!homeHall.isEmpty()) {
             String[] lines = table.split("\n");
@@ -301,10 +307,10 @@ public class CommandRankPlayers {
         return table;
     }
 
-    private static final String[] RANK_TABLE_HEADERS = {"Rank", "Elo", "Hall", "LR", "Cap", "Name"};
+    private static final String[] RANK_TABLE_HEADERS = {"Rank", "Elo", "ExpElo", "Hall", "LR", "Cap", "Name"};
     private static final Alignment[] RANK_TABLE_ALIGNMENTS =
-        {Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
-    private static final int[] RANK_TABLE_COLUMN_WIDTHS = {4, 4, 4, 3, 3, 20};
+        {Alignment.RIGHT, Alignment.RIGHT, Alignment.RIGHT, Alignment.CENTER, Alignment.CENTER, Alignment.CENTER, Alignment.LEFT};
+    private static final int[] RANK_TABLE_COLUMN_WIDTHS = {4, 4, 6, 4, 3, 3, 20};
 
     private static List<String[]> buildRankRows(List<PlayerRankData> players) {
         List<String[]> rows = new ArrayList<>();
@@ -313,6 +319,7 @@ public class CommandRankPlayers {
             rows.add(new String[]{
                 String.valueOf(rank),
                 String.format("%.0f", player.trueElo),
+                player.expElo != null ? String.format("%.0f", player.expElo) : "-",
                 TableFormatter.shortenHallName(player.hall),
                 TableFormatter.shortenRoundName(player.lastRound),
                 player.isCapped ? "*" : "",

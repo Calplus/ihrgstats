@@ -3,6 +3,7 @@ package com.calplus.ihrgstats.telegrambot.utils;
 import com.calplus.ihrgstats.calculations.EloCalculator;
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.ml.ExpEloDistiller;
 import com.calplus.ihrgstats.ml.FeatureExtractor;
 import com.calplus.ihrgstats.ml.MatchupPredictor;
 import com.calplus.ihrgstats.ml.ModelTrainer;
@@ -483,6 +484,22 @@ public class RoundCsvProcessor {
                 }
             } catch (Exception e) {
                 notify("🟠", "Round data was saved, but AI model retraining failed: " + e.getMessage()
+                        + " - run /recalculate to retry.");
+            }
+
+            // ExpElo distillation: rewrites the reserved ExpElo rating slot from
+            // the (possibly just-recrowned) champion's win probabilities, for
+            // every round in TrueElo's rated set. A no-op until a champion
+            // exists; never fails the upload.
+            try {
+                MatchupPredictor freshChampion = new PredictionService().loadChampion();
+                ExpEloDistiller.DistillResult distilled = new ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
+                if (distilled.rowsWritten > 0) {
+                    notify("🟢", String.format("ExpElo distillation complete: %d rounds, %d rating rows updated.",
+                            distilled.roundsProcessed, distilled.rowsWritten));
+                }
+            } catch (Exception e) {
+                notify("🟠", "Round data was saved, but ExpElo distillation failed: " + e.getMessage()
                         + " - run /recalculate to retry.");
             }
 

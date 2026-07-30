@@ -307,6 +307,7 @@ public class CommandHelp {
                 message.append("<b>Output Table Columns:</b>\n");
                 message.append("• <b>Rank</b> - Player's position in rankings (1 = highest Elo)\n");
                 message.append("• <b>Elo</b> - Player's TrueElo rating at the selected round\n");
+                message.append("• <b>ExpElo</b> - The AI model's distilled rating (\"-\" until a champion model has been trained); TrueElo remains the authoritative rating used for sorting\n");
                 message.append("• <b>Hall</b> - Player's affiliated hall (shortened, e.g., \"H4\" for \"Hall 4\")\n");
                 message.append("• <b>LR</b> - Last Round where the player actually competed\n");
                 message.append("• <b>Cap</b> - Asterisk (*) indicates player is capped\n");
