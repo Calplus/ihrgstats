@@ -2,6 +2,30 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 22] - 2026-07-30
+
+Performance pass over the write and read hot paths, measured with a new reproducible benchmark (synthetic 12-round, 3-hall, 24-player season through the real ingest pipeline). Results are bit-identical before and after - pinned by the existing determinism tests plus a new database-level regression test.
+
+### Changed
+
+- **Whole-history rating rewrite batched**: the recalculation previously opened a fresh SQLite connection (with per-connection PRAGMA setup) for every single delete and insert - 600+ connections per recalc. It now writes through one connection with one transaction per round (`D11_PlayerRatings.replaceRatingsForRounds`), preserving the old round-granularity failure isolation exactly. **Recalc: 1190 ms → 88 ms (−93%)** on the benchmark; the ExpElo distillation write path uses the same batched API.
+- **One feature extraction per retrain cycle**: the trainer's `TrainOutcome` now carries its extracted boards and the ExpElo distillation reuses them (nothing writes boards in between) instead of re-running the whole-database extraction; only a training failure falls back to extracting afresh. `/predict`'s hypothetical-board builder also no longer extracts twice per call. **Retrain+distill+cache cycle: 2642 ms → 1664 ms (−37%).**
+- **Champion model decoded once, not per call**: `PredictionService.loadChampion()` now caches the decoded predictor, keyed by database path + the champion row's content-hashed `model_version` - so a retrain invalidates it naturally on the next load. `/predict`, `/lineup` and the upload's prediction hook all benefit.
+- **Rolling cache upserts batched**: one connection/transaction for the whole roster instead of one connection per player.
+- **`/infohall` report body bulk-loads its per-round context** (point-in-time ratings, rank maps, participants, opponents, halls) once per round instead of once per player per round - previously hundreds of queries per rendered view, including a full rank-map rebuild per player. **View render: 2842 ms → 739 ms (−74%).** Backed by a new `RankingQueryHelper.getPointInTimeRatingsForRound` (two queries per round, player-for-player identical to the per-player probe).
+- **`/rankplayers` last-played-round column** now builds one player→label map in a single newest-first pass instead of probing one query per round per player (quadratic for players who sat out recent rounds).
+- Full ingest of the benchmark season (12 rounds incl. per-round recalc + ML hooks): **28.9 s → 19.1 s (−34%)**; the test suite drops 1:17 → 1:02 as a side effect.
+
+### Added
+
+- `PerfBenchmarkHarness` - the reproducible benchmark behind the numbers above; excluded from the normal suite, run manually with `mvn test -Dtest=PerfBenchmarkHarness -Dperf.benchmark=true`.
+- `RatingRecalculatorBatchWriteTest` - pins the batched rewrite at the database level: rerunning the recalculation is row-for-row deterministic, and stale rows for players outside the rated set are still swept per round.
+
+### Notes
+
+- Deliberately untouched: the rolling-cache read loop (its most-recent-first ordering assumptions are load-bearing) and the per-player status/hall lookups in `/rankplayers` (linear, small constant). Still open from the previous update: direct `CommandRecalculate`/DAO-edge tests.
+- 271 tests, 0 failures.
+
 ## [Beta 3 Update 21] - 2026-07-30
 
 Structural deduplication pass - the large extractions deliberately deferred from the previous update's sweep, each locked in behind new or existing tests first. Behavior-preserving throughout; ~1,200 lines of main code removed net while test count grows 241 → 270.

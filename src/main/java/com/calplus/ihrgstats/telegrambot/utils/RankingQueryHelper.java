@@ -89,6 +89,25 @@ public class RankingQueryHelper {
         return rating;
     }
 
+    /**
+     * Every player's point-in-time rating for ONE round in two queries: the
+     * round's snapshot rows, overlaying the round's current player_ratings
+     * rows (the fallback for players with no snapshot). Player-for-player
+     * identical to calling {@link #getPointInTimeRating} in a loop, without
+     * that loop's two queries per player - the info/compare report bodies
+     * need this for every player of every displayed round.
+     */
+    public Map<String, D11_PlayerRatings.Rating> getPointInTimeRatingsForRound(int roundId, int ratingTypeId) throws SQLException {
+        Map<String, D11_PlayerRatings.Rating> result = new HashMap<>();
+        for (D11_PlayerRatings.Rating rating : playerRatings.getRatingsForRound(roundId, ratingTypeId)) {
+            result.put(rating.playerId, rating);
+        }
+        for (D15_PlayerRatingSnapshots.Snapshot snapshot : ratingSnapshots.getSnapshotsForRound(roundId, ratingTypeId)) {
+            result.put(snapshot.playerId, toRating(snapshot));
+        }
+        return result;
+    }
+
     /** Adapts a snapshot row to the Rating carrier every command already consumes. */
     private static D11_PlayerRatings.Rating toRating(D15_PlayerRatingSnapshots.Snapshot snapshot) {
         if (snapshot == null) {

@@ -205,4 +205,67 @@ public class D11_PlayerRatings {
             ps.executeUpdate();
         }
     }
+
+    /** One round's freshly recalculated rows for {@link #replaceRatingsForRounds}. */
+    public static class RoundRatings {
+        public final int roundId;
+        public final List<Rating> rows;
+
+        public RoundRatings(int roundId, List<Rating> rows) {
+            this.roundId = roundId;
+            this.rows = rows;
+        }
+    }
+
+    /**
+     * Rewrites one rating type's rows for a list of rounds on a SINGLE
+     * connection, one transaction per round (delete + batched inserts).
+     * The whole-history rewrites previously opened a fresh connection per
+     * statement - 600+ per recalculation. Committing per round preserves
+     * the old failure granularity exactly: a failure leaves earlier rounds
+     * fully written and only the failing round rolled back.
+     * @return total rows written
+     */
+    public int replaceRatingsForRounds(List<RoundRatings> roundsToWrite, int ratingTypeId, String nowTimestamp) throws SQLException {
+        String deleteSql = "DELETE FROM player_ratings WHERE round_id = ? AND rating_type_id = ?";
+        String insertSql = "INSERT INTO player_ratings (player_id, round_id, rating_type_id, rating_value, rating_deviation, volatility, created_dttm, updated_dttm) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT(player_id, round_id, rating_type_id) DO UPDATE SET " +
+                "rating_value = excluded.rating_value, rating_deviation = excluded.rating_deviation, " +
+                "volatility = excluded.volatility, updated_dttm = excluded.updated_dttm";
+        int written = 0;
+        try (Connection conn = DatabaseHelper.getDefaultConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement del = conn.prepareStatement(deleteSql);
+                 PreparedStatement ins = conn.prepareStatement(insertSql)) {
+                for (RoundRatings roundWrite : roundsToWrite) {
+                    del.setInt(1, roundWrite.roundId);
+                    del.setInt(2, ratingTypeId);
+                    del.executeUpdate();
+                    for (Rating row : roundWrite.rows) {
+                        ins.setString(1, row.playerId);
+                        ins.setInt(2, roundWrite.roundId);
+                        ins.setInt(3, ratingTypeId);
+                        ins.setDouble(4, row.ratingValue);
+                        ins.setDouble(5, row.ratingDeviation);
+                        ins.setDouble(6, row.volatility);
+                        ins.setString(7, nowTimestamp);
+                        ins.setString(8, nowTimestamp);
+                        ins.addBatch();
+                    }
+                    ins.executeBatch();
+                    conn.commit();
+                    written += roundWrite.rows.size();
+                }
+            } catch (SQLException e) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ignored) {
+                    // rollback failure must not mask the original error
+                }
+                throw e;
+            }
+        }
+        return written;
+    }
 }

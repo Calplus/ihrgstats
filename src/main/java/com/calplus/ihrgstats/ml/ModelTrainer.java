@@ -56,13 +56,21 @@ public class ModelTrainer {
         public final String championFamily;
         public final int runsPersisted;
         public final String note;
+        /**
+         * The boards this cycle extracted - shared with the follow-up
+         * distillation step so a retrain cycle runs the (whole-database)
+         * extraction only once.
+         */
+        public final List<FeatureExtractor.RawBoard> extractedBoards;
 
-        TrainOutcome(boolean trained, String championVersion, String championFamily, int runsPersisted, String note) {
+        TrainOutcome(boolean trained, String championVersion, String championFamily, int runsPersisted, String note,
+                     List<FeatureExtractor.RawBoard> extractedBoards) {
             this.trained = trained;
             this.championVersion = championVersion;
             this.championFamily = championFamily;
             this.runsPersisted = runsPersisted;
             this.note = note;
+            this.extractedBoards = extractedBoards;
         }
     }
 
@@ -75,7 +83,7 @@ public class ModelTrainer {
         if (all.size() < MIN_BOARDS_TO_TRAIN) {
             return new TrainOutcome(false, null, null, 0,
                     String.format(Locale.ROOT, "Only %d rated boards (< %d) - training skipped.",
-                            all.size(), MIN_BOARDS_TO_TRAIN));
+                            all.size(), MIN_BOARDS_TO_TRAIN), all);
         }
 
         int burnIn = burnInOverride >= 0 ? burnInOverride : BacktestHarness.defaultBurnIn(all);
@@ -90,7 +98,7 @@ public class ModelTrainer {
             return new TrainOutcome(false, null, null, 0,
                     String.format(Locale.ROOT,
                             "%d rated boards but no rounds beyond the %d-round burn-in - no walk-forward evidence; training skipped.",
-                            all.size(), burnIn));
+                            all.size(), burnIn), all);
         }
 
         int championIdx = pickChampion(results, minPredictedBoards);
@@ -129,7 +137,7 @@ public class ModelTrainer {
                 "Trained on %d boards / %d rounds (burn-in %d). Champion: %s (walk-forward Brier %.5f vs baseline %.5f).",
                 all.size(), totalRounds, burnIn, results.get(championIdx).name,
                 results.get(championIdx).brier, results.get(0).brier);
-        return new TrainOutcome(true, championVersion, championFamily, results.size(), note);
+        return new TrainOutcome(true, championVersion, championFamily, results.size(), note, all);
     }
 
     /**

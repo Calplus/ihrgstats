@@ -491,8 +491,9 @@ public class RoundCsvProcessor {
             // the prediction logging above already ran against the OLD
             // champion, so this ordering never lets a round's own result leak
             // into its own logged prediction. Never fails the upload.
+            ModelTrainer.TrainOutcome outcome = null;
             try {
-                ModelTrainer.TrainOutcome outcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
+                outcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
                 if (outcome.trained) {
                     notify("🟢", "AI model retraining complete: " + outcome.note);
                 }
@@ -504,10 +505,14 @@ public class RoundCsvProcessor {
             // ExpElo distillation: rewrites the reserved ExpElo rating slot from
             // the (possibly just-recrowned) champion's win probabilities, for
             // every round in TrueElo's rated set. A no-op until a champion
-            // exists; never fails the upload.
+            // exists; never fails the upload. Reuses the training step's board
+            // extraction (nothing writes boards in between); only a training
+            // FAILURE falls back to extracting afresh.
             try {
                 MatchupPredictor freshChampion = new PredictionService().loadChampion();
-                ExpEloDistiller.DistillResult distilled = new ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
+                ExpEloDistiller.DistillResult distilled = outcome != null
+                        ? new ExpEloDistiller().distillAndWrite(freshChampion, outcome.extractedBoards, nowTimestamp)
+                        : new ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
                 if (distilled.rowsWritten > 0) {
                     notify("🟢", String.format("ExpElo distillation complete: %d rounds, %d rating rows updated.",
                             distilled.roundsProcessed, distilled.rowsWritten));

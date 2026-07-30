@@ -79,8 +79,9 @@ public class CommandRecalculate {
             // without re-uploading anything. Isolated: a training failure
             // must not hide the (already-successful) rating recalculation.
             String trainingNote;
+            ModelTrainer.TrainOutcome trainOutcome = null;
             try {
-                ModelTrainer.TrainOutcome trainOutcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
+                trainOutcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
                 trainingNote = trainOutcome.trained
                         ? "<i>AI models retrained:</i> " + trainOutcome.note
                         : "<i>AI models not retrained:</i> " + trainOutcome.note;
@@ -91,11 +92,14 @@ public class CommandRecalculate {
             // ExpElo distillation, same isolation as training above - rewrites
             // the reserved ExpElo slot from the (possibly just-recrowned)
             // champion's win probabilities. A no-op until a champion exists.
+            // Reuses the training step's board extraction (nothing writes
+            // boards in between); only a training FAILURE extracts afresh.
             String expEloNote;
             try {
                 com.calplus.ihrgstats.ml.MatchupPredictor freshChampion = new com.calplus.ihrgstats.ml.PredictionService().loadChampion();
-                com.calplus.ihrgstats.ml.ExpEloDistiller.DistillResult distilled =
-                        new com.calplus.ihrgstats.ml.ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
+                com.calplus.ihrgstats.ml.ExpEloDistiller.DistillResult distilled = trainOutcome != null
+                        ? new com.calplus.ihrgstats.ml.ExpEloDistiller().distillAndWrite(freshChampion, trainOutcome.extractedBoards, nowTimestamp)
+                        : new com.calplus.ihrgstats.ml.ExpEloDistiller().distillAndWrite(freshChampion, nowTimestamp);
                 expEloNote = distilled.rowsWritten > 0
                         ? "<i>ExpElo distilled:</i> " + distilled.roundsProcessed + " rounds, " + distilled.rowsWritten + " rating rows updated."
                         : "<i>ExpElo not distilled:</i> no trained AI model yet.";

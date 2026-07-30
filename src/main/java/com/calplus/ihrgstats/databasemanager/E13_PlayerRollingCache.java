@@ -43,6 +43,60 @@ public class E13_PlayerRollingCache {
         }
     }
 
+    /** One player's freshly computed cache values for {@link #upsertCacheBatch}. */
+    public static class CacheRow {
+        public final String playerId;
+        public final int currentStreak;
+        public final double avgMarginLast5Matches;
+        public final int matchesPlayedToday;
+
+        public CacheRow(String playerId, int currentStreak, double avgMarginLast5Matches, int matchesPlayedToday) {
+            this.playerId = playerId;
+            this.currentStreak = currentStreak;
+            this.avgMarginLast5Matches = avgMarginLast5Matches;
+            this.matchesPlayedToday = matchesPlayedToday;
+        }
+    }
+
+    /**
+     * Upserts a whole roster's cache rows on one connection in one
+     * transaction (RollingCacheUpdater previously opened a fresh
+     * connection per player).
+     */
+    public void upsertCacheBatch(java.util.List<CacheRow> rows, String nowTimestamp) throws SQLException {
+        if (rows.isEmpty()) {
+            return;
+        }
+        String sql = "INSERT INTO player_rolling_cache (player_id, current_streak, avg_margin_last_5_matches, matches_played_today, created_dttm, updated_dttm) " +
+                "VALUES (?, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT(player_id) DO UPDATE SET current_streak = excluded.current_streak, " +
+                "avg_margin_last_5_matches = excluded.avg_margin_last_5_matches, " +
+                "matches_played_today = excluded.matches_played_today, updated_dttm = excluded.updated_dttm";
+        try (Connection conn = DatabaseHelper.getDefaultConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (CacheRow row : rows) {
+                    ps.setString(1, row.playerId);
+                    ps.setInt(2, row.currentStreak);
+                    ps.setDouble(3, row.avgMarginLast5Matches);
+                    ps.setInt(4, row.matchesPlayedToday);
+                    ps.setString(5, nowTimestamp);
+                    ps.setString(6, nowTimestamp);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                conn.commit();
+            } catch (SQLException e) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ignored) {
+                    // rollback failure must not mask the original error
+                }
+                throw e;
+            }
+        }
+    }
+
     public RollingCache getCache(String playerId) throws SQLException {
         String sql = "SELECT * FROM player_rolling_cache WHERE player_id = ?";
         try (Connection conn = DatabaseHelper.getDefaultConnection();

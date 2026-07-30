@@ -146,14 +146,15 @@ public class CommandRankPlayers {
 
         // Rounds at or before the selected limit, most recent first - used
         // below to find each player's actual last-PLAYED round (see
-        // findLastRoundLabelActuallyPlayed), rather than relying on the
-        // round their latest RATING row happens to belong to.
+        // lastPlayedLabelByPlayer), rather than relying on the round their
+        // latest RATING row happens to belong to.
         List<A1_Rounds.Round> roundsDescending = new ArrayList<>(rounds.getRoundsForYear(year));
         roundsDescending.removeIf(r -> r.roundOrder > roundOrderLimit);
         roundsDescending.sort((a, b) -> Integer.compare(b.roundOrder, a.roundOrder));
 
         Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsUpToRound(year, roundOrderLimit, trueEloTypeId);
         Map<String, D11_PlayerRatings.Rating> expEloByPlayer = fetchExpEloRatings(h -> rankingQueryHelper.getLatestRatingsUpToRound(year, roundOrderLimit, h));
+        Map<String, String> lastPlayedByPlayer = lastPlayedLabelByPlayer(roundsDescending);
 
         List<PlayerRankData> players = new ArrayList<>();
         for (Map.Entry<String, D11_PlayerRatings.Rating> entry : ratingsByPlayer.entrySet()) {
@@ -164,7 +165,7 @@ public class CommandRankPlayers {
             if (status == null) continue;
 
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
-            String lastPlayedLabel = findLastRoundLabelActuallyPlayed(playerId, roundsDescending);
+            String lastPlayedLabel = lastPlayedByPlayer.get(playerId);
             String name = playerNames.getNameForYear(playerId, year);
             D11_PlayerRatings.Rating expElo = expEloByPlayer.get(playerId);
 
@@ -215,6 +216,7 @@ public class CommandRankPlayers {
 
         Map<String, D11_PlayerRatings.Rating> ratingsByPlayer = rankingQueryHelper.getLatestRatingsAllYears(trueEloTypeId);
         Map<String, D11_PlayerRatings.Rating> expEloByPlayer = fetchExpEloRatings(rankingQueryHelper::getLatestRatingsAllYears);
+        Map<String, String> lastPlayedByPlayer = lastPlayedLabelByPlayer(roundsDescending);
 
         List<PlayerRankData> players = new ArrayList<>();
         for (B6_PlayerYearStatus.Status status : playerYearStatus.getMostRecentStatusForEachPlayer()) {
@@ -222,7 +224,7 @@ public class CommandRankPlayers {
             if (rating == null) continue;
 
             A3_Halls.Hall hall = halls.getHallById(status.hallId);
-            String lastPlayedLabel = findLastRoundLabelActuallyPlayed(status.playerId, roundsDescending);
+            String lastPlayedLabel = lastPlayedByPlayer.get(status.playerId);
             String name = playerNames.getNameForYear(status.playerId, status.year);
             D11_PlayerRatings.Rating expElo = expEloByPlayer.get(status.playerId);
 
@@ -251,13 +253,25 @@ public class CommandRankPlayers {
      * competed" description of this column. Returns null if the player
      * never played any round within roundsDescending.
      */
-    private String findLastRoundLabelActuallyPlayed(String playerId, List<A1_Rounds.Round> roundsDescending) throws SQLException {
+    /**
+     * Every player's last-actually-played round label - the most recent
+     * round with a match_participants row for them, NOT merely the round
+     * their latest rating row belongs to (a rating row is written even for
+     * rounds a player sat out, a real Glicko-2 RD-growth requirement) -
+     * built in ONE pass over {@code roundsDescending} (newest first, so the
+     * first row seen per player wins). Previously probed one query per
+     * round per player, quadratic over the roster for players who sat out
+     * recent rounds. A player absent from the map never played any round
+     * in the list (callers show "-").
+     */
+    private Map<String, String> lastPlayedLabelByPlayer(List<A1_Rounds.Round> roundsDescending) throws SQLException {
+        Map<String, String> lastPlayed = new HashMap<>();
         for (A1_Rounds.Round round : roundsDescending) {
-            if (participants.getParticipantForPlayerAndRound(playerId, round.id) != null) {
-                return round.roundLabel;
+            for (C9_MatchParticipants.Participant p : participants.getParticipantsForRound(round.id)) {
+                lastPlayed.putIfAbsent(p.playerId, round.roundLabel);
             }
         }
-        return null;
+        return lastPlayed;
     }
 
     private String formatPlayersTable(List<PlayerRankData> players, String homeHall) {

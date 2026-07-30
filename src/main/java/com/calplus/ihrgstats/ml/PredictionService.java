@@ -17,13 +17,43 @@ public class PredictionService {
 
     private final E17_MlModels mlModels = new E17_MlModels();
 
+    /**
+     * Decoded-champion cache. Decoding parses the (potentially large)
+     * params JSON on every load, and the upload's prediction hook plus
+     * /predict and /lineup all load the champion per call. The key embeds
+     * the database path (tests swap user.dir) and the champion row's
+     * model_version - which itself embeds a hash of the parameters (see
+     * ModelTrainer.buildVersion) - so a retrain that crowns or refits a
+     * champion invalidates naturally on the next load. Predictors are
+     * immutable after fitting, so sharing one decoded instance is safe.
+     */
+    private static volatile CachedChampion cachedChampion;
+
+    private static final class CachedChampion {
+        final String key;
+        final MatchupPredictor predictor;
+
+        CachedChampion(String key, MatchupPredictor predictor) {
+            this.key = key;
+            this.predictor = predictor;
+        }
+    }
+
     /** The current champion, or null if no training run has ever completed (empty/too-thin database). */
     public MatchupPredictor loadChampion() throws SQLException {
         E17_MlModels.MlModel champion = mlModels.getChampion();
         if (champion == null) {
             return null;
         }
-        return ModelCodec.decode(champion.family, champion.paramsJson);
+        String key = com.calplus.ihrgstats.utils.DatabaseHelper.getDefaultDatabasePathString()
+                + "|" + champion.id + "|" + champion.modelVersion;
+        CachedChampion cached = cachedChampion;
+        if (cached != null && cached.key.equals(key)) {
+            return cached.predictor;
+        }
+        MatchupPredictor decoded = ModelCodec.decode(champion.family, champion.paramsJson);
+        cachedChampion = new CachedChampion(key, decoded);
+        return decoded;
     }
 
     /** The champion's stored model_version, or null if there is no champion yet. */
@@ -78,10 +108,17 @@ public class PredictionService {
      * never reads them.
      */
     public FeatureExtractor.RawBoard buildHypotheticalBoard(String playerAId, String playerBId, int fallbackYear) throws SQLException {
-        Map<String, FeatureExtractor.Side> latest = latestSides();
+        // One extraction serves both the per-player latest sides and the
+        // next-round context (this method previously ran extractAll twice).
+        List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
+        Map<String, FeatureExtractor.Side> latest = new HashMap<>();
+        Map<String, Integer> latestSeq = new HashMap<>();
+        for (FeatureExtractor.RawBoard rb : all) {
+            considerLatest(latest, latestSeq, rb.a, rb.roundSeq);
+            considerLatest(latest, latestSeq, rb.b, rb.roundSeq);
+        }
         FeatureExtractor.Side sideA = latestSideOrDefault(latest, playerAId);
         FeatureExtractor.Side sideB = latestSideOrDefault(latest, playerBId);
-        List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
         int roundOrder = all.isEmpty() ? 1 : all.get(all.size() - 1).roundOrder + 1;
         int year = all.isEmpty() ? fallbackYear : all.get(all.size() - 1).year;
         return new FeatureExtractor.RawBoard(-1, Integer.MAX_VALUE, -1, year, roundOrder, sideA, sideB, 0.0, false, false, 0.0);

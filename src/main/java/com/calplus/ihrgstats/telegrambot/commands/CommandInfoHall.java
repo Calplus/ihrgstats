@@ -392,6 +392,31 @@ public class CommandInfoHall {
         hallData.hallId = hallId;
         hallData.hallName = hallName;
 
+        // Per-round context, bulk-loaded ONCE per round - previously the
+        // point-in-time rating, the full rank map, the player's participant
+        // row, the opponent row and the opponent's hall were each fetched
+        // per player per round (hundreds of queries per rendered view).
+        Map<Integer, Map<String, D11_PlayerRatings.Rating>> pointInTimeByRound = new HashMap<>();
+        Map<Integer, Map<String, D11_PlayerRatings.Rating>> rankMapByRound = new HashMap<>();
+        Map<Integer, Map<String, C9_MatchParticipants.Participant>> participantByPlayerByRound = new HashMap<>();
+        Map<Integer, Map<Integer, List<C9_MatchParticipants.Participant>>> participantsByMatchByRound = new HashMap<>();
+        for (A1_Rounds.Round round : roundsToInclude) {
+            pointInTimeByRound.put(round.roundOrder, rankingQueryHelper.getPointInTimeRatingsForRound(round.id, trueEloTypeId));
+            rankMapByRound.put(round.roundOrder, rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId));
+            Map<String, C9_MatchParticipants.Participant> byPlayer = new HashMap<>();
+            Map<Integer, List<C9_MatchParticipants.Participant>> byMatch = new HashMap<>();
+            for (C9_MatchParticipants.Participant p : participants.getParticipantsForRound(round.id)) {
+                byPlayer.put(p.playerId, p); // a real player has at most one board per round (enforced at ingestion)
+                byMatch.computeIfAbsent(p.matchId, k -> new ArrayList<>()).add(p);
+            }
+            participantByPlayerByRound.put(round.roundOrder, byPlayer);
+            participantsByMatchByRound.put(round.roundOrder, byMatch);
+        }
+        Map<Integer, A3_Halls.Hall> hallById = new HashMap<>();
+        for (A3_Halls.Hall hall : halls.getAllHalls()) {
+            hallById.put(hall.id, hall);
+        }
+
         List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(hallId, year);
         for (B6_PlayerYearStatus.Status status : statuses) {
             PlayerData player = new PlayerData();
@@ -401,7 +426,7 @@ public class CommandInfoHall {
             player.capped = status.capped;
 
             for (A1_Rounds.Round round : roundsToInclude) {
-                D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
+                D11_PlayerRatings.Rating rating = pointInTimeByRound.get(round.roundOrder).get(status.playerId);
                 if (rating == null) continue;
 
                 int elo = (int) Math.round(rating.ratingValue);
@@ -410,15 +435,21 @@ public class CommandInfoHall {
                 player.lastRoundOrder = round.roundOrder;
                 player.elo = elo;
 
-                Map<String, D11_PlayerRatings.Rating> allRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId);
+                Map<String, D11_PlayerRatings.Rating> allRatings = rankMapByRound.get(round.roundOrder);
                 player.globalRank = rankingQueryHelper.calculateRank(allRatings, rating.ratingValue);
 
-                C9_MatchParticipants.Participant me = participants.getParticipantForPlayerAndRound(status.playerId, round.id);
+                C9_MatchParticipants.Participant me = participantByPlayerByRound.get(round.roundOrder).get(status.playerId);
                 if (me != null) {
                     if (me.hallSeatNumber != null) player.seatByRound.put(round.roundOrder, me.hallSeatNumber);
                     player.outcomeByRound.put(round.roundOrder, VictoryRecordCalculator.toLegacyOutcome(me.outcome));
 
-                    C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(me.matchId, status.playerId);
+                    C9_MatchParticipants.Participant opp = null;
+                    for (C9_MatchParticipants.Participant candidate : participantsByMatchByRound.get(round.roundOrder).getOrDefault(me.matchId, List.of())) {
+                        if (!candidate.playerId.equals(status.playerId)) {
+                            opp = candidate;
+                            break;
+                        }
+                    }
                     if (opp != null) {
                         if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
                             player.oppNameByRound.put(round.roundOrder, "WALKOVER");
@@ -426,7 +457,7 @@ public class CommandInfoHall {
                             String oppName = playerNames.getNameForYear(opp.playerId, year);
                             player.oppNameByRound.put(round.roundOrder, oppName != null ? oppName : opp.playerId);
                         }
-                        A3_Halls.Hall oppHall = halls.getHallById(opp.hallId);
+                        A3_Halls.Hall oppHall = hallById.get(opp.hallId);
                         if (oppHall != null && !oppHall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) {
                             player.oppHallByRound.put(round.roundOrder, oppHall.hallName);
                         }
@@ -451,7 +482,7 @@ public class CommandInfoHall {
             hallData.players.get(i).hallRank = i + 1;
         }
 
-        Map<Integer, Map<Integer, Double>> top5AvgByRoundThenHall = computeTop5AvgByHallPerRound(year, roundsToInclude, trueEloTypeId);
+        Map<Integer, Map<Integer, Double>> top5AvgByRoundThenHall = computeTop5AvgByHallPerRound(year, roundsToInclude, pointInTimeByRound);
         calculateHallEloAndRank(hallData, top5AvgByRoundThenHall);
         calculateHallVictoryRecords(hallData, roundsToInclude, top5AvgByRoundThenHall);
 
@@ -468,14 +499,15 @@ public class CommandInfoHall {
     }
 
     /** Computes each hall's average TrueElo of its top 5 players, per round, across ALL halls (needed for ranking). */
-    private Map<Integer, Map<Integer, Double>> computeTop5AvgByHallPerRound(int year, List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
+    private Map<Integer, Map<Integer, Double>> computeTop5AvgByHallPerRound(int year, List<A1_Rounds.Round> roundsToInclude,
+            Map<Integer, Map<String, D11_PlayerRatings.Rating>> pointInTimeByRound) throws SQLException {
         List<B6_PlayerYearStatus.Status> allStatuses = playerYearStatus.getActiveStatusesForYear(year);
         Map<Integer, Map<Integer, Double>> result = new HashMap<>();
 
         for (A1_Rounds.Round round : roundsToInclude) {
             Map<Integer, List<Double>> elosByHall = new HashMap<>();
             for (B6_PlayerYearStatus.Status status : allStatuses) {
-                D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, round.id, trueEloTypeId);
+                D11_PlayerRatings.Rating rating = pointInTimeByRound.get(round.roundOrder).get(status.playerId);
                 if (rating == null) continue;
                 elosByHall.computeIfAbsent(status.hallId, k -> new ArrayList<>()).add(rating.ratingValue);
             }

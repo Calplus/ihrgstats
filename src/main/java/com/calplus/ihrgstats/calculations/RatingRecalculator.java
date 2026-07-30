@@ -162,22 +162,25 @@ public class RatingRecalculator {
         EloCalculator.Glicko2Result result = EloCalculator.calculateWholeHistory(
                 games, allPlayerIds, Map.of(), sequence, PASSES);
 
-        // 5. Rewrite player_ratings so each round's rows exactly mirror its rated set.
-        int rowsWritten = 0;
+        // 5. Rewrite player_ratings so each round's rows exactly mirror its
+        //    rated set - one connection, one transaction per round (was one
+        //    fresh connection per delete/insert statement, 600+ per recalc).
+        List<D11_PlayerRatings.RoundRatings> writes = new ArrayList<>();
         for (RoundRef ref : roundRefs) {
             Map<String, EloCalculator.Glicko2Rating> roundRatings =
                     result.ratingsByRound.getOrDefault(ref.seqIndex, Map.of());
-            playerRatings.deleteRatingsForRoundAndType(ref.round.id, trueEloTypeId);
+            List<D11_PlayerRatings.Rating> rows = new ArrayList<>();
             for (String playerId : ref.ratedSet) {
                 EloCalculator.Glicko2Rating rating = roundRatings.get(playerId);
                 if (rating == null) {
                     continue;
                 }
-                playerRatings.insertRating(playerId, ref.round.id, trueEloTypeId,
-                        rating.rating, rating.rd, rating.volatility, nowTimestamp);
-                rowsWritten++;
+                rows.add(new D11_PlayerRatings.Rating(playerId, ref.round.id, trueEloTypeId,
+                        rating.rating, rating.rd, rating.volatility));
             }
+            writes.add(new D11_PlayerRatings.RoundRatings(ref.round.id, rows));
         }
+        int rowsWritten = playerRatings.replaceRatingsForRounds(writes, trueEloTypeId, nowTimestamp);
 
         return new RecalcResult(roundRefs.size(), allPlayerIds.size(), rowsWritten, PASSES);
     }

@@ -87,6 +87,19 @@ public class ExpEloDistiller {
         if (champion == null) {
             return new DistillResult(0, 0);
         }
+        return distillAndWrite(champion, new FeatureExtractor().extractAll(), nowTimestamp);
+    }
+
+    /**
+     * Same distillation over already-extracted boards - the retrain cycle
+     * runs {@link FeatureExtractor#extractAll} once and shares the result
+     * between the trainer and this distiller instead of extracting twice.
+     */
+    public DistillResult distillAndWrite(MatchupPredictor champion, List<FeatureExtractor.RawBoard> allBoards,
+                                         String nowTimestamp) throws SQLException {
+        if (champion == null) {
+            return new DistillResult(0, 0);
+        }
 
         Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
         Integer expEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.EXP_ELO);
@@ -94,7 +107,6 @@ public class ExpEloDistiller {
             throw new SQLException("Rating types must be seeded before distillation.");
         }
 
-        List<FeatureExtractor.RawBoard> allBoards = new FeatureExtractor().extractAll();
         Map<Integer, List<FeatureExtractor.RawBoard>> boardsByRound = new LinkedHashMap<>();
         for (FeatureExtractor.RawBoard rb : allBoards) {
             boardsByRound.computeIfAbsent(rb.roundId, k -> new ArrayList<>()).add(rb);
@@ -107,8 +119,11 @@ public class ExpEloDistiller {
 
         Map<String, Double> currentExpElo = new HashMap<>();
         int roundsProcessed = 0;
-        int rowsWritten = 0;
 
+        // Collect every round's rows first, then write them all on one
+        // connection (one transaction per round) - was one fresh connection
+        // per delete/insert statement.
+        List<D11_PlayerRatings.RoundRatings> writes = new ArrayList<>();
         for (A1_Rounds.Round round : allRounds) {
             List<D11_PlayerRatings.Rating> trueEloRows = playerRatings.getRatingsForRound(round.id, trueEloTypeId);
             if (trueEloRows.isEmpty()) {
@@ -120,14 +135,15 @@ public class ExpEloDistiller {
                 applyProjection(champion, rb, currentExpElo);
             }
 
-            playerRatings.deleteRatingsForRoundAndType(round.id, expEloTypeId);
+            List<D11_PlayerRatings.Rating> rows = new ArrayList<>();
             for (D11_PlayerRatings.Rating trueRow : trueEloRows) {
                 double value = currentExpElo.computeIfAbsent(trueRow.playerId, k -> FeatureExtractor.DEFAULT_RATING);
-                playerRatings.insertRating(trueRow.playerId, round.id, expEloTypeId,
-                        value, trueRow.ratingDeviation, trueRow.volatility, nowTimestamp);
-                rowsWritten++;
+                rows.add(new D11_PlayerRatings.Rating(trueRow.playerId, round.id, expEloTypeId,
+                        value, trueRow.ratingDeviation, trueRow.volatility));
             }
+            writes.add(new D11_PlayerRatings.RoundRatings(round.id, rows));
         }
+        int rowsWritten = playerRatings.replaceRatingsForRounds(writes, expEloTypeId, nowTimestamp);
 
         return new DistillResult(roundsProcessed, rowsWritten);
     }

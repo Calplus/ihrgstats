@@ -31,7 +31,7 @@ public class RollingCacheUpdater {
 
     /** Recomputes and upserts every player's rolling cache row. Returns the number of players updated. */
     public int updateAll(String nowTimestamp) throws SQLException {
-        int updated = 0;
+        List<E13_PlayerRollingCache.CacheRow> rows = new ArrayList<>();
         for (String playerId : players.getAllPlayerIds()) {
             if (B4_Players.WALKOVER_PLAYER_ID.equals(playerId)) {
                 continue;
@@ -45,10 +45,10 @@ public class RollingCacheUpdater {
             double avgMargin = computeAvgMarginLast5(playerId, rated);
             int matchesToday = computeMatchesInMostRecentRound(rated);
 
-            cache.upsertCache(playerId, streak, avgMargin, matchesToday, nowTimestamp);
-            updated++;
+            rows.add(new E13_PlayerRollingCache.CacheRow(playerId, streak, avgMargin, matchesToday));
         }
-        return updated;
+        cache.upsertCacheBatch(rows, nowTimestamp);
+        return rows.size();
     }
 
     /** Walkover boards excluded, most-recent-first (matches getParticipantsForPlayer's own ordering). */
