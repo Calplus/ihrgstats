@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Gale Boetticher,1,142.75,Princess Bubblegum,2,158.5
+Walter White,1,189.25,Jake the Dog,2,162.5
+Jesse Pinkman,1,176.5,Finn the Human,2,207.5
+Saul Goodman,1,143.75,Joyce Byers,2,133.75
+Lydia Rodarte-Quayle,1,112.5,BMO,2,130.5
+Sansa Stark,3,189.5,Hermione Granger,4,157.75
+Brienne of Tarth,3,232,Severus Snape,4,174.75
+Margaery Tyrell,3,107.25,Albus Dumbledore,4,79.5
+Jaime Lannister,3,144.5,Harry Potter,4,146.5
+Theon Greyjoy,3,213.5,Luna Lovegood,4,136.25
+Eleven,5,169.5,Loid Forger,6,93.25
+Max Mayfield,5,210.5,Yor Forger,6,188.5
+Mike Wheeler,5,139.5,Fiona Frost,6,149
+Steve Harrington,5,258,Damian Desmond,6,159
+Lucas Sinclair,5,135,Yuri Briar,6,137
+Elliot Alderson,7,210,Barracuda,8,112.25
+Darlene Alderson,7,50,Marlin Swordtail,8,184.75
+Tyrell Wellick,7,79,Finn Herring,8,89.5
+Leon,7,155.5,Koi Carpenter,8,96
+Phillip Price,7,116,"Sole, Dover",8,210
+Wolfgang Amadeus Mozart,HallA,115.25,Paul Morphy,HallB,233.75
+Marie Curie,HallA,120.25,Mikhail Tal,HallB,192.5
+Jim Hopper,HallA,109.25,Judit Polgar,HallB,241.25
+Teddy Roosevelt,HallA,205.75,Emanuel Lasker,HallB,179.5
+George Raymond Richard Martin,HallA,113,Bobby Fischer,HallB,58.25
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,,WALKOVER,,
+Jean-Claude Van Damme III,HallC,,WALKOVER,,
+Coral Reeves,HallC,,WALKOVER,,
+Zzyzx Quibble,HallC,,WALKOVER,,
+"O'Connell-Smythe, Padraig Seamus",HallC,,WALKOVER,,

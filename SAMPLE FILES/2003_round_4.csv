@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Barracuda,8,123,Hermione Granger,4,144.25
+Marlin Swordtail,8,107.25,Severus Snape,4,216.5
+Finn Herring,8,TIMEOUT,Albus Dumbledore,4,
+Dory Bluetang,8,130.5,Harry Potter,4,216.5
+Koi Carpenter,8,221.75,Luna Lovegood,4,221.75
+Sansa Stark,3,65.25,Elven,5,46.75
+Eddard Stark,3,114.5,Max Mayfield,5,47
+Margaery Tyrell,3,185.75,Steve Harrington,5,295
+Sandor Clegane,3,156,Lucas Sinclair,5,68.75
+Jaime Lannister,3,160.5,Will Byers,5,106
+Loid Forger,6,157.75,Princess Bubblegum,2,209.25
+Yor Forger,6,76.75,Jake the Dog,2,153.25
+Fiona Frost,6,165,Finn the Human,2,229
+Damian Desmond,6,183.5,Peppermint Butler,2,144.5
+Yuri Briar,6,177,Joyce Byers,2,63
+Gale Boetticher,1,52.5,Elliot Alderson,7,70.25
+Walter White,1,110.75,Darlene Alderson,7,154.25
+Jesse Pinkman,1,106.25,Tyrell Wellick,7,132.75
+Skyler White,1,105.75,Leon,7,163.75
+Saul Goodman,1,158.25,Phillip Price,7,113.5
+Wolfgang Amadeus Mozart,HallA,258,Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,167.75
+Marie Curie,HallA,123.25,Coral Reeves,HallC,169.5
+Jim Hopper,HallA,238.75,"van der Berg, Willem",HallC,168.5
+Teddy Roosevelt,HallA,217.75,"O'Connell-Smythe, Padraig Seamus",HallC,219.75
+Georgia O'Keeffe,HallA,5,Bob,HallC,63
+Paul Morphy,HallB,,WALKOVER,,
+Mikhail Tal,HallB,,WALKOVER,,
+Boris Spassky,HallB,,WALKOVER,,
+Bobby Fischer,HallB,,WALKOVER,,
+Emanuel Lasker,HallB,,WALKOVER,,

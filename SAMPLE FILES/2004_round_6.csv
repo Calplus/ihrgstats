@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Hermoine Granger,4,123,Eleven,5,55.75
+Lord Voldemort,4,184.25,Dustin Henderson,5,76
+Harry Potter,4,TIMEOUT,Steve Harrington,5,
+Minerva McGonagall,4,5,Nancy Wheeler,5,54.5
+Luna Lovegood,4,233.25,Will Byers,5,136.5
+Brienne of Tarth,3,167.25,Elliot Alderson,7,165.25
+Margaery Tyrell,3,200.25,Angela Moss,7,79.5
+Sandor Clegane,3,162.5,Darlene Alderson,7,60.75
+Jaime Lannister,3,168,Leon,7,80.25
+Theon Greyjoy,3,226.75,Phillip Price,7,143
+Anya Forger,6,5,Barracuda,8,19.75
+Loid Forger,6,128.25,Marlin Swordtail,8,156.5
+Damian Desmond,6,46.5,Finn Herring,8,39.75
+Yuri Briar,6,124,Gar Pike,8,122
+Henry Henderson,6,131.25,"Sole, Dover",8,157
+Marie Curie,HallA,152.75,Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,226.5
+Jim Hopper,HallA,137.5,Coral Reeves,HallC,79.25
+Georgia O'Keeffe,HallA,233.5,"van der Berg, Willem",HallC,156.25
+Paul Murphy,HallA,198.25,"O'Connell-Smythe, Padraig Seamus",HallC,200.25
+Bob,HallC,,WALKOVER,HallA,
+Bobby Fischer,HallB,278.25,Marceline,2,153.25
+Paul Morphy,HallB,168.25,Jake the Dog,2,221
+Mikhail Tal,HallB,119.75,Finn the Human,2,201.25
+Judit Polgar,HallB,94.75,Peppermint Butler,2,143.25
+Tigran Petrosyan,HallB,137.25,Tree Trunks,2,130.75
+Walter White,1,,WALKOVER,,
+Jesse Pinkman,1,,WALKOVER,,
+Mike Ehrmantraut,1,,WALKOVER,,
+Lydia Rodarte-Quayle,1,,WALKOVER,,
+Skyler White,1,,WALKOVER,,

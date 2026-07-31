@@ -7,8 +7,8 @@ import java.util.List;
  * Shared, quote-aware CSV line parser - extracted from RoundCsvProcessor so
  * fixing this logic once fixes it everywhere. Previously CappedListProcessor
  * had its own naive {@code line.split(",", -1)}, which breaks on a quoted,
- * comma-containing name (e.g. "Nightingale, Florence", present in real AY24
- * data) - the exact class of bug this class exists to prevent recurring.
+ * comma-containing name (e.g. the sample corpus's "Nightingale, Florence")
+ * - the exact class of bug this class exists to prevent recurring.
  */
 public final class CsvLineParser {
 

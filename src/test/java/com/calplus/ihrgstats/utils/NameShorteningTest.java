@@ -47,9 +47,9 @@ public class NameShorteningTest {
     }
 
     @Test
-    void infoImage_commaContainingRealName_neverOverflowsATightBudget() {
-        // A real AY24 name known to contain a comma - the exact case the
-        // owner asked to be checked visually as well as mathematically.
+    void infoImage_commaContainingName_neverOverflowsATightBudget() {
+        // A comma-containing name, the exact shape the sample corpus
+        // carries - checked mathematically here and visually in the audit.
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 120;
         String result = InfoImageGenerator.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);
@@ -109,7 +109,7 @@ public class NameShorteningTest {
     }
 
     @Test
-    void comparisonImage_commaContainingRealName_neverOverflowsATightBudget() {
+    void comparisonImage_commaContainingName_neverOverflowsATightBudget() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 120;
         String result = ComparisonImageGenerator.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);

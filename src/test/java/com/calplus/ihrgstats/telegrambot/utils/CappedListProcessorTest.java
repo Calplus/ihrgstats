@@ -48,7 +48,7 @@ public class CappedListProcessorTest {
     void processCappedList_handlesQuotedCommaContainingName(@TempDir Path csvDir) throws Exception {
         // Regression test for A4: the parser used to be a naive line.split(",", -1),
         // which breaks a quoted, comma-containing name into 3 fields instead of 2.
-        // Real AY24 data contains exactly this shape of name.
+        // The sample corpus contains exactly this shape of name.
         Path csv = writeCsv(csvDir, "cappedlist.csv", "\"Nightingale, Florence\",4\n");
         CappedListProcessor processor = new CappedListProcessor();
 

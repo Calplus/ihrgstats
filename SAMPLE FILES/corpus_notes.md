@@ -1,0 +1,145 @@
+# Sample corpus notes (fictional data - structural facts only)
+
+4 years (2001-2004), 11 halls. Day 1 = Swiss rounds (6; 5 in 2003), 11 teams -> 5 matchups + bye (team walkover block). Day 2 = brackets T16/T8/T4/T2 seeded by cumulative board wins, top vs weakest; odd count -> top-seed walkover; eliminated halls have no rows. Match scores 0-370 (max_score 370).
+
+## 2001
+- Hall 1 (7): Walter White, Jesse Pinkman, Saul Goodman, Hank Schrader [CAPPED], Kim Wexler [CAPPED], Gus Fring, Mike Ehrmantraut
+- Hall 2 (7): Finn the Human, Jake the Dog, Princess Bubblegum, Flame Princess, Ice King, BMO, Marceline
+- Hall 3 (7): Jaime Lannister, Sansa Stark, Cersei Lannister, Daenerys Targaryen [CAPPED], Jon Snow [CAPPED], Tyrion Lannister [CAPPED], Arya Stark
+- Hall 4 (7): Hermione Granger, Harry Potter, Draco Malfoy, Ron Weasley [CAPPED], Severus Snape, Albus Dumbledore, Lord Voldemort
+- Hall 5 (7): Joyce Byers, Eleven, Will Byers, Dustin Henderson, Lucas Sinclair, Mike Wheeler, Jim Hopper
+- Hall 6 (7): Loid Forger, Anya Forger, Damian Desmond, Becky Blackbell, Yor Forger, Franky Franklin, Sylvia Sherwood
+- Hall 7 (7): Elliot Alderson, Darlene Alderson, Leon, Angela Moss, Tyrell Wellick, Gideon Goddard, Krista Gordon
+- Hall 8 (7): Finn Herring, Marlin Swordtail, Koi Carpenter, Barracuda, Dory Bluetang, Coral Reeves, Angel Shark
+- Hall HallA (5): Georgia O'Keeffe, Paul Murphy, Teddy Roosevelt, George Raymond Richard Martin, Bond, James Bond [CAPPED]
+- Hall HallB (7): Paul Morphy, Mikhail Tal, Bobby Fischer, Jose Raul Capablanca [CAPPED], Alexander Alekhine [CAPPED], Emanuel Lasker, Tigran Petrosian
+- Hall HallC (7): Maximilian Bartholomew Featherstonehaugh-Cholmondeley, O'Connell-Smythe, Padraig Seamus, van der Berg, Willem, Bob, X, Jean-Claude Van Damme III, Anne "Rock" Marble
+  - R1: bye/team walkover = Hall HallC
+  - R2: TIMEOUT loss for Marlin Swordtail (side 2; winner score null)
+  - R2: bye/team walkover = Hall HallB
+  - R3: DRAW 151.5-151.5
+  - R3: bye/team walkover = Hall 7
+  - R4: TIMEOUT loss for Princess Bubblegum (side 1; winner score null)
+  - R4: individual walkover for Jaime Lannister (short-handed opponent)
+  - R4: bye/team walkover = Hall 5
+  - R5: bye/team walkover = Hall 1
+  - R6: bye/team walkover = Hall 8
+  - R7: bye/team walkover = Hall HallC
+  - R8: TIMEOUT loss for Walter White (side 2; winner score null)
+  - R9: BOARD SWEEPOUT 370-0 by Daenerys Targaryen
+  - R9: bye/team walkover = Hall 4
+  - CHAMPION 2001: Hall 3
+  - CAPPED OVERFLOW: Finn the Human sits out 2002
+## 2002
+- Hall 1 (7): Walter White, Jesse Pinkman, Saul Goodman, Gus Fring [CAPPED], Mike Ehrmantraut, Skyler White, Gale Boetticher
+- Hall 2 (6): Jake the Dog [CAPPED], Princess Bubblegum [CAPPED], Ice King, BMO, Marceline [CAPPED], Joyce Byers
+- Hall 3 (7): Jaime Lannister, Sansa Stark [CAPPED], Cersei Lannister, Brienne of Tarth, Eddard Stark, Margaery Tyrell, Sandor Clegane
+- Hall 4 (7): Hermione Granger [CAPPED], Harry Potter, Draco Malfoy, Severus Snape [CAPPED], Albus Dumbledore, Lord Voldemort [CAPPED], Minerva McGonagall
+- Hall 5 (7): Eleven [CAPPED], Will Byers, Dustin Henderson, Lucas Sinclair, Mike Wheeler, Jim Hopper, Max Mayfield
+- Hall 6 (7): Loid Forger [CAPPED], Anya Forger, Damian Desmond, Becky Blackbell, Yor Forger, Franky Franklin, Fiona Frost
+- Hall 7 (7): Elliot Alderson, Darlene Alderson, Leon, Angela Moss, Tyrell Wellick, Gideon Goddard, Dominique DiPierro
+- Hall 8 (7): Finn Herring, Marlin Swordtail, Koi Carpenter, Barracuda, Dory Bluetang, Coral Reeves [CAPPED], Betta Splendens
+- Hall HallA (5): Georgia O'Keeffe, Paul Murphy, Teddy Roosevelt, George Raymond Richard Martin [CAPPED], Marie Curie
+- Hall HallB (7): Paul Morphy, Mikhail Tal [CAPPED], Bobby Fischer, Emanuel Lasker, Tigran Petrosian, Judit Polgar, Max Euwe
+- Hall HallC (7): Maximilian Bartholomew Featherstonehaugh-Cholmondeley, O'Connell-Smythe, Padraig Seamus, van der Berg, Willem, Bob, X, Jean-Claude Van Damme III, Anne "Rock" Marble
+  - R1: TIMEOUT loss for Mike Ehrmantraut (side 1; winner score null)
+  - R1: bye/team walkover = Hall HallC
+  - R2: bye/team walkover = Hall 1
+  - R3: DRAW 0-0 (the 0-0 standard draw)
+  - R3: bye/team walkover = Hall HallB
+  - R4: bye/team walkover = Hall 6
+  - R5: TIMEOUT loss for Finn Herring (side 2; winner score null)
+  - R5: bye/team walkover = Hall 5
+  - R6: BOARD SWEEPOUT 370-0 by Hermione Granger
+  - R6: bye/team walkover = Hall HallA
+  - R7: bye/team walkover = Hall 2
+  - R8: TIMEOUT loss for Dustin Henderson (side 2; winner score null)
+  - R9: bye/team walkover = Hall HallA
+  - CHAMPION 2002: Hall HallA
+## 2003
+- Hall 1 (7): Walter White, Jesse Pinkman, Saul Goodman, Skyler White, Gale Boetticher, Lydia Rodarte-Quayle, Huell Babineaux (rostered, never fielded)
+- Hall 2 (7): Finn the Human, Jake the Dog, Princess Bubblegum [CAPPED], BMO, Joyce Byers [CAPPED], Lumpy Space Princess, Peppermint Butler
+- Hall 3 (7): Jaime Lannister, Sansa Stark, Brienne of Tarth, Eddard Stark, Margaery Tyrell [CAPPED], Sandor Clegane, Theon Greyjoy
+- Hall 4 (7): Hermione Granger [CAPPED], Harry Potter, Draco Malfoy, Severus Snape, Albus Dumbledore [CAPPED], Minerva McGonagall, Luna Lovegood
+- Hall 5 (7): Eleven [CAPPED], Will Byers, Dustin Henderson, Lucas Sinclair, Mike Wheeler, Max Mayfield, Steve Harrington
+- Hall 6 (7): Loid Forger [CAPPED], Anya Forger, Damian Desmond, Becky Blackbell, Yor Forger, Fiona Frost, Yuri Briar
+- Hall 7 (6): Elliot Alderson [CAPPED], Darlene Alderson, Leon, Tyrell Wellick, Dominique DiPierro, Phillip Price
+- Hall 8 (7): Finn Herring, Marlin Swordtail, Koi Carpenter, Barracuda [CAPPED], Dory Bluetang, Betta Splendens, Sole, Dover
+- Hall HallA (7): Jim Hopper, Georgia O'Keeffe, Paul Murphy [CAPPED] (rostered, never fielded), Teddy Roosevelt [CAPPED], George Raymond Richard Martin, Marie Curie [CAPPED], Wolfgang Amadeus Mozart
+- Hall HallB (6): Paul Morphy, Mikhail Tal [CAPPED], Bobby Fischer, Emanuel Lasker, Judit Polgar, Boris Spassky
+- Hall HallC (7): Maximilian Bartholomew Featherstonehaugh-Cholmondeley [CAPPED], O'Connell-Smythe, Padraig Seamus, van der Berg, Willem, Bob, Jean-Claude Van Damme III, Zzyzx Quibble, Coral Reeves
+  - R1: bye/team walkover = Hall HallC
+  - R2: TIMEOUT loss for Brienne of Tarth (side 1; winner score null)
+  - R2: individual walkover for George Raymond Richard Martin (short-handed opponent)
+  - R2: bye/team walkover = Hall 4
+  - R3: bye/team walkover = Hall 7
+  - R4: TIMEOUT loss for Finn Herring (side 1; winner score null)
+  - R4: bye/team walkover = Hall HallB
+  - R5: bye/team walkover = Hall 1
+  - R6: DRAW 156.75-156.75
+  - R6: bye/team walkover = Hall HallC
+  - R7: TIMEOUT loss for Tyrell Wellick (side 2; winner score null)
+  - R8: bye/team walkover = Hall 6
+  - R9: BOARD SWEEPOUT 370-0 by Sansa Stark
+  - CHAMPION 2003: Hall 3
+## 2004
+- Hall 1 (7): Walter White, Jesse Pinkman, Saul Goodman, Mike Ehrmantraut, Skyler White, Lydia Rodarte-Quayle, Jane Margolis
+- Hall 2 (7): Finn the Human [CAPPED], Jake the Dog [CAPPED], Princess Bubblegum [CAPPED], Marceline, Lumpy Space Princess, Peppermint Butler, Tree Trunks
+- Hall 3 (6): Jaime Lannister, Brienne of Tarth [CAPPED], Margaery Tyrell, Sandor Clegane, Theon Greyjoy, Olenna Tyrell
+- Hall 4 (7): Hermione Granger, Harry Potter, Draco Malfoy (rostered, never fielded), Lord Voldemort, Minerva McGonagall, Luna Lovegood, Neville Longbottom
+- Hall 5 (7): Eleven [CAPPED], Will Byers, Dustin Henderson, Lucas Sinclair, Max Mayfield, Steve Harrington, Nancy Wheeler
+- Hall 6 (7): Loid Forger, Anya Forger, Damian Desmond, Becky Blackbell, Fiona Frost, Yuri Briar [CAPPED], Henry Henderson
+- Hall 7 (7): Elliot Alderson [CAPPED], Darlene Alderson, Leon, Angela Moss, Dominique DiPierro, Phillip Price, Whiterose
+- Hall 8 (7): Finn Herring, Marlin Swordtail [CAPPED], Koi Carpenter, Barracuda, Betta Splendens, Sole, Dover, Gar Pike
+- Hall HallA (4): Jim Hopper, Georgia O'Keeffe, Paul Murphy, Marie Curie
+- Hall HallB (7): Paul Morphy, Mikhail Tal, Bobby Fischer, Tigran Petrosian, Judit Polgar, Boris Spassky, Alberic O'Kelly de Galway
+- Hall HallC (6): Maximilian Bartholomew Featherstonehaugh-Cholmondeley, O'Connell-Smythe, Padraig Seamus, van der Berg, Willem, Bob, Zzyzx Quibble, Coral Reeves
+  - R1: TIMEOUT loss for Jake the Dog (side 2; winner score null)
+  - R1: individual walkover for Alberic O'Kelly de Galway (short-handed opponent)
+  - R1: bye/team walkover = Hall HallC
+  - R2: bye/team walkover = Hall HallA
+  - R3: TIMEOUT loss for Darlene Alderson (side 1; winner score null)
+  - R3: individual walkover for Becky Blackbell (short-handed opponent)
+  - R3: bye/team walkover = Hall 5
+  - R4: DRAW 234-234
+  - R4: individual walkover for Betta Splendens (short-handed opponent)
+  - R4: bye/team walkover = Hall 2
+  - R5: BOARD SWEEPOUT 370-0 by Hermione Granger
+  - R5: individual walkover for Lumpy Space Princess (short-handed opponent)
+  - R5: bye/team walkover = Hall HallB
+  - R6: TIMEOUT loss for Harry Potter (side 1; winner score null)
+  - R6: individual walkover for Bob (short-handed opponent)
+  - R6: bye/team walkover = Hall 1
+  - R7: DRAW 165.75-165.75
+  - R7: individual walkover for Lucas Sinclair (short-handed opponent)
+  - R7: bye/team walkover = Hall 2
+  - R8: TIMEOUT loss for van der Berg, Willem (side 2; winner score null)
+  - R9: bye/team walkover = Hall 5
+  - CHAMPION 2004: Hall 2
+## Capped lists (files: {year}_cappedlist.csv; hall column = hall at list-compile time, so movers appear under their OLD hall)
+- 2001 (10): Hank Schrader (1); Kim Wexler (1); Jon Snow (3); Daenerys Targaryen (3); Tyrion Lannister (3); Ron Weasley (4); Bond, James Bond (HallA); Jose Raul Capablanca (HallB); Alexander Alekhine (HallB); Dave Burger (HallB)
+- 2002 (13): Jake the Dog (2); Marceline (2); Princess Bubblegum (2); Hermione Granger (4); Severus Snape (4); Lord Voldemort (4); Sansa Stark (3); Loid Forger (6); Eleven (5); Gus Fring (1); Mikhail Tal (HallB); Coral Reeves (8); George Raymond Richard Martin (HallA)
+- 2003 (14): Loid Forger (6); Eleven (5); Barracuda (8); Teddy Roosevelt (HallA); Paul Murphy (HallA); Marie Curie (HallA); Elliot Alderson (7); Hermione Granger (4); Albus Dumbledore (4); Mikhail Tal (HallB); Margaery Tyrell (3); Maximilian Bartholomew Featherstonehaugh-Cholmondeley (HallC); Joyce Byers (2); Princess Bubblegum (2)
+- 2004 (8): Eleven (5); Finn the Human (2); Jake the Dog (2); Princess Bubblegum (2); Yuri Briar (6); Marlin Swordtail (8); Brienne of Tarth (3); Elliot Alderson (7)
+
+## Name variants / misspellings (never new characters; each fires one scripted dialog at first appearance -> answer 'same person')
+- 2001 round 3: 'Teddy Rosevelt' = Teddy Roosevelt
+- 2002 round 3: 'Jessie Pinkman' = Jesse Pinkman
+- 2002 round 5: 'Margarey Tyrell' = Margaery Tyrell
+- 2004 ALL ROUNDS: 'Hermoine Granger' = Hermione Granger
+- 2003 round 6: 'Aniya Forger' = Anya Forger
+- 2003 round 4: 'Elven' = Eleven
+- 2003 round 5: 'Dominique' = Dominique DiPierro
+- 2004 round 2: 'Baracuda' = Barracuda
+- 2004 ALL ROUNDS: 'Tigran Petrosyan' = Tigran Petrosian
+
+## Other scripted identity dialogs
+- 2001: 'Bob' (HallC) vs 'Bobby Fischer' (HallB) - substring partial at the later debut -> different people
+- 2001: 'Paul Murphy' (HallA) vs 'Paul Morphy' (HallB) - spelling distance 1 at the later debut -> different people
+- 2001: 'X' (HallC) debuts as the last row of R1 - the single-letter name substring-matches the earliest already-recorded name containing an 'x' ('Kim Wexler') -> different people
+- 2002: debuts of 'Max Mayfield' and 'Max Euwe' fire substring partials vs single-letter 'X' -> different people
+- 2003: debut of 'Zzyzx Quibble' fires substring partial vs 'X' (name record persists) -> different people
+- 2002: 'Joyce Byers' moved hall 5 -> 2 (hall-mismatch dialog -> use new hall, same player)
+- 2003: 'Jim Hopper' moved hall 5 -> HallA (hall-mismatch dialog -> use new hall, same player)
+- 2003: NEW person 'Coral Reeves' joins HallC while the hall-8 Coral Reeves (2001-02) is dormant -> prior-year hall-mismatch dialog -> DIFFERENT player
+- every round containing a WALKOVER row fires the match-type selection dialog

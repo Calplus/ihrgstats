@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Pins down the shared quote-aware CSV parser - both the round upload and
  * the capped-list upload parse every data row through this one method, and
- * real corpus data contains quoted comma-names (e.g. "Nightingale, Florence").
+ * the sample corpus contains quoted comma-names (e.g. "Nightingale, Florence").
  */
 public class CsvLineParserTest {
 

@@ -2,6 +2,33 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 23] - 2026-07-31
+
+Corpus validation pass: the sample data was regenerated from scratch as a four-season fictional dataset (2001-2004, 11 halls, 39 round files plus a capped list per year) with a realistic tournament structure, and is proven ingestible end to end - a fresh v2-schema database is built through the real ingestion pipeline and held against an extended integrity battery, an independent recount of every board, and determinism checks. All validation runs exclusively on the fictional sample corpus.
+
+### Changed
+
+- **Sample corpus regenerated: four fictional seasons, eleven halls** (`{year}_round_{n}.csv` + `{year}_cappedlist.csv`, matching the app's own naming conventions; the previous single-season files are replaced):
+  - **Season structure**: day 1 is Swiss rounds (six per year, five in the reduced 2003 season) - eleven teams pair into five matchups of exactly five boards each, with a rotating bye emitted as a team-walkover block; day 2 is a knockout bracket (last-16, quarter, semi, final) seeded by cumulative board wins, top seed vs weakest, the middle seed drawing the walkover on odd counts. Eliminated halls have no rows in later rounds.
+  - **Three more production halls join** (6, 7, 8) plus a third fictional hall (HallC) - a deliberate stress-test roster: a 51-character hyphenated name, a quoted comma+apostrophe+hyphen name, escaped quotes inside a quoted name, lowercase particles, a single-letter name, a three-letter name, and a name that sorts last everywhere.
+  - **A capped list per year**, entries claimed as players first appear that season; two entries deliberately never play their listed year and must stay unmapped staging rows. At most 3 capped players per hall per year and at most 2 fielded per hall per match hold throughout.
+  - **Outlier coverage across the four seasons**: 13 TIMEOUT boards (both side conventions, every winner score left blank - the legal convention - stored as rated 0-0 wins); 162 walkover sides (whole-hall team blocks including a WALKOVER-as-name1 row, plus eight individual short-handed walkovers with the opposing hall stated); four 370-0 board sweepouts; 19 draws including one 0-0 standard draw; nine scripted misspellings (single-round typos, a short-form partial name, and two year-long variants - one of them a returning player misspelled all season); two hall moves; a cross-hall near-duplicate name pair; a same-name-different-person pair in different halls and years; a mid-season debut; sit-out-and-return seasons; rostered-but-never-fielded players; and players who appear in exactly one round of a season alongside one who plays every round of all four.
+  - `SAMPLE FILES/corpus_notes.md` records the structural facts: per-year rosters (never-fielded players annotated), per-round outlier locations, champions, the capped lists, and the exact identity-dialog script the corpus fires on ingestion.
+
+### Added
+
+- `CorpusIntegrityChecks` gains two structural checks, run as part of the battery: no hall fields more than the expected maximum of 5 players in any round, and no hall uses more than 7 distinct players across a year.
+- `CorpusIngestionTest` rewritten for the four-season corpus: ingests all four years in order through the real `CappedListProcessor` + `RoundCsvProcessor` (capped list first each season, every interactive dialog answered exactly as an admin would; anything unexpected cancels and fails loudly), asserting the complete dialog script in order - 31 match-type dialogs (independently derived from the CSVs) and 18 identity dialogs. Then: identity outcomes (typos and both year-long variants merged onto their players, near-duplicates split, hall movers kept as one identity with the right hall per season, the same-name pair kept as two people with disjoint years); per-year capped mapping including the two permanently unmapped rows and the negative pins (variant-season and sat-out players not flagged); the ML burn-in boundary (a single ingested season trains no champion; the finished corpus must hold a champion with distilled ExpElo, whose per-round parity with TrueElo the battery asserts); an INDEPENDENT recount of every board of all 39 files (per-round multiset comparison of player/type/score/outcome signatures) plus per-season W/D/L per player; and whole-history recalculation determinism, which must also leave the distilled ExpElo rows untouched. The same-year cross-hall duplicate-name rejection test is unchanged.
+
+### Notes
+
+- The corpus keeps its deliberately FICTIONAL hall names (HallA/HallB/HallC) so nothing in the repo mirrors real hall data; they are not part of the production hall seed, so `CorpusIngestionTest` creates them up front (ingestion hard-fails on unknown halls, which the shipped samples would otherwise hit against a stock database).
+- The corpus clears the ML burn-in during its second season, so the fully ingested corpus database ends with a trained champion and populated ExpElo ratings - groundwork for the upcoming image-export audit.
+- The corpus test deliberately runs the full production after-steps on all 39 uploads (whole-history recalculation, model retraining, ExpElo distillation), so the suite now takes ~7.5 minutes - an accepted trade-off for running the full-depth corpus on every build.
+- Test-data hygiene: name literals quoted in a few older comments and tests were replaced with fictional sample-corpus names; all testing runs exclusively on the fictional sample data.
+- Still open: direct `CommandRecalculate`/DAO-edge tests.
+- 273 tests, 0 failures.
+
 ## [Beta 3 Update 22] - 2026-07-30
 
 Performance pass over the write and read hot paths, measured with a new reproducible benchmark (synthetic 12-round, 3-hall, 24-player season through the real ingest pipeline). Results are bit-identical before and after - pinned by the existing determinism tests plus a new database-level regression test.

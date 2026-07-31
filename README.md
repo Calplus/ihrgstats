@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%203%20Update%2022-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2030,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2023-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Jul%2031,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>

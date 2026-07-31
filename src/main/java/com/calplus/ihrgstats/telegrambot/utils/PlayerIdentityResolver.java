@@ -210,8 +210,8 @@ public class PlayerIdentityResolver {
         // matching only this year's names meant fuzzy detection was only
         // ever reachable for the very first resolved row of a season (the
         // one case where this year's list is still empty); from the second
-        // row onward, a typo'd RETURNING player (e.g. "Amara Whitloc" for last
-        // year's "Amara Whitlock" - a real case in this club's data) had no
+        // row onward, a typo'd RETURNING player (e.g. "Amara Whitloc" for
+        // last year's "Amara Whitlock" - a dropped trailing letter) had no
         // prior-year name to compare against and silently became a new
         // player with no dialog at all - exactly the case this check exists
         // to catch.

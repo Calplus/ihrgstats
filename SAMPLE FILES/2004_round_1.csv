@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Walter White,1,167.25,Princess Bubblegum,2,105.75
+Mike Ehrmantraut,1,182.75,Marceline,2,202.75
+Jesse Pinkman,1,,Jake the Dog,2,TIMEOUT
+Skyler White,1,153.75,Peppermint Butler,2,151.75
+Saul Goodman,1,199.75,Tree Trunks,2,118.75
+Brienne of Tarth,3,74,Hermoine Granger,4,76
+Margaery Tyrell,3,148,Lord Voldemort,4,150
+Sandor Clegane,3,119,Minerva McGonagall,4,140.25
+Olenna Tyrell,3,157.5,Luna Lovegood,4,150.25
+Theon Greyjoy,3,72.75,Neville Longbottom,4,57.75
+Eleven,5,219.25,Anya Forger,6,193.5
+Max Mayfield,5,128.75,Loid Forger,6,211.5
+Dustin Henderson,5,145.75,Fiona Frost,6,143.75
+Steve Harrington,5,67.75,Damian Desmond,6,112
+Nancy Wheeler,5,88.25,Yuri Briar,6,90.25
+Whiterose,7,136.75,Barracuda,8,125
+Elliot Alderson,7,244.75,Marlin Swordtail,8,150.25
+Angela Moss,7,157,Finn Herring,8,174
+Darlene Alderson,7,241.5,Gar Pike,8,292.25
+Phillip Price,7,157.75,Betta Splendens,8,66
+Marie Curie,HallA,65.5,Bobby Fischer,HallB,111.75
+Jim Hopper,HallA,69,Paul Morphy,HallB,71
+Georgia O'Keeffe,HallA,134.25,Mikhail Tal,HallB,216.75
+Paul Murphy,HallA,168.25,Judit Polgar,HallB,131.75
+Alberic O'Kelly de Galway,HallB,,WALKOVER,HallA,
+Coral Reeves,HallC,,WALKOVER,,
+"O'Connell-Smythe, Padraig Seamus",HallC,,WALKOVER,,
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,,WALKOVER,,
+"van der Berg, Willem",HallC,,WALKOVER,,
+Zzyzx Quibble,HallC,,WALKOVER,,

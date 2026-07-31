@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Hermoine Granger,4,370,Walter White,1,0
+Lord Voldemort,4,78.75,Mike Ehrmantraut,1,5
+Harry Potter,4,311.25,Jesse Pinkman,1,145.5
+Minerva McGonagall,4,207.25,Lydia Rodarte-Quayle,1,101.25
+Luna Lovegood,4,88.75,Jane Margolis,1,5
+Brienne of Tarth,3,228.25,Anya Forger,6,120.25
+Margaery Tyrell,3,215.5,Loid Forger,6,124
+Sandor Clegane,3,159,Fiona Frost,6,75.75
+Olenna Tyrell,3,85.75,Yuri Briar,6,26
+Theon Greyjoy,3,245.75,Becky Blackbell,6,150.25
+Whiterose,7,136.25,Eleven,5,138.25
+Elliot Alderson,7,213.25,Max Mayfield,5,147
+Angela Moss,7,70,Dustin Henderson,5,139.5
+Dominique DiPierro,7,84.75,Steve Harrington,5,93.5
+Leon,7,5,Lucas Sinclair,5,7
+Marie Curie,HallA,272.5,Princess Bubblegum,2,236.25
+Jim Hopper,HallA,229,Marceline,2,226.25
+Georgia O'Keeffe,HallA,106.75,Jake the Dog,2,117.75
+Paul Murphy,HallA,124.25,Peppermint Butler,2,196.75
+Lumpy Space Princess,2,,WALKOVER,HallA,
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,235.75,Barracuda,8,235.75
+Zzyzx Quibble,HallC,177,Marlin Swordtail,8,211.75
+Coral Reeves,HallC,106.75,Finn Herring,8,84.25
+"van der Berg, Willem",HallC,141,Betta Splendens,8,161
+"O'Connell-Smythe, Padraig Seamus",HallC,74.25,Koi Carpenter,8,76.25
+Bobby Fischer,HallB,,WALKOVER,,
+Mikhail Tal,HallB,,WALKOVER,,
+Paul Morphy,HallB,,WALKOVER,,
+Boris Spassky,HallB,,WALKOVER,,
+Judit Polgar,HallB,,WALKOVER,,

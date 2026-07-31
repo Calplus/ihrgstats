@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Whiterose,7,226,Hermoine Granger,4,226
+Elliot Alderson,7,186,Lord Voldemort,4,125
+Angela Moss,7,117.5,Harry Potter,4,157.75
+Darlene Alderson,7,136.5,Minerva McGonagall,4,275.75
+Dominique DiPierro,7,84.75,Neville Longbottom,4,109
+Margaery Tyrell,3,112.25,Walter White,1,195.5
+Sandor Clegane,3,234,Mike Ehrmantraut,1,234
+Olenna Tyrell,3,184.5,Jesse Pinkman,1,182.5
+Jaime Lannister,3,56.25,Saul Goodman,1,22.25
+Theon Greyjoy,3,192.5,Lydia Rodarte-Quayle,1,78.75
+Anya Forger,6,103.75,Bobby Fischer,HallB,18
+Loid Forger,6,190.25,Paul Morphy,HallB,115.5
+Fiona Frost,6,233.5,Mikhail Tal,HallB,269.5
+Damian Desmond,6,218.25,Judit Polgar,HallB,203.5
+Becky Blackbell,6,202.75,Boris Spassky,HallB,143.5
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,179.5,Eleven,5,181.5
+Zzyzx Quibble,HallC,190.25,Dustin Henderson,5,175.75
+Coral Reeves,HallC,139.5,Steve Harrington,5,163.25
+"van der Berg, Willem",HallC,87.25,Nancy Wheeler,5,118
+"O'Connell-Smythe, Padraig Seamus",HallC,224.25,Lucas Sinclair,5,151.75
+Barracuda,8,180.25,Marie Curie,HallA,182.25
+Marlin Swordtail,8,5,Jim Hopper,HallA,59
+Finn Herring,8,126,Georgia O'Keeffe,HallA,124
+Gar Pike,8,154.25,Paul Murphy,HallA,203.25
+Betta Splendens,8,,WALKOVER,HallA,
+Princess Bubblegum,2,,WALKOVER,,
+Jake the Dog,2,,WALKOVER,,
+Marceline,2,,WALKOVER,,
+Lumpy Space Princess,2,,WALKOVER,,
+Peppermint Butler,2,,WALKOVER,,

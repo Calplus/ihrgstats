@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Gus Fring,1,110.5,Princess Bubblegum,2,214.5
+Walter White,1,73.5,Jake the Dog,2,75.5
+Mike Ehrmantraut,1,TIMEOUT,Joyce Byers,2,
+Skyler White,1,135.75,Ice King,2,233.75
+Saul Goodman,1,108,BMO,2,110
+Eddard Stark,3,115.5,Hermione Granger,4,164.75
+Brienne of Tarth,3,58.75,Severus Snape,4,27.25
+Margaery Tyrell,3,72,Albus Dumbledore,4,67
+Cersei Lannister,3,145.25,Minerva McGonagall,4,184.5
+Jaime Lannister,3,148,Draco Malfoy,4,88.5
+Eleven,5,75.5,Loid Forger,6,73.5
+Jim Hopper,5,104.25,Yor Forger,6,102.25
+Dustin Henderson,5,226.75,Fiona Frost,6,281.75
+Mike Wheeler,5,66.75,Damian Desmond,6,85.75
+Will Byers,5,123.5,Franky Franklin,6,121.5
+Elliot Alderson,7,236.25,Barracuda,8,238.25
+Angela Moss,7,24.5,Coral Reeves,8,22.5
+Darlene Alderson,7,241,Marlin Swordtail,8,277.25
+Tyrell Wellick,7,161.5,Finn Herring,8,163.5
+Dominique DiPierro,7,180.75,Koi Carpenter,8,214.5
+Marie Curie,HallA,63.25,Paul Morphy,HallB,89.75
+Teddy Roosevelt,HallA,111.25,Mikhail Tal,HallB,5
+Georgia O'Keeffe,HallA,136.75,Judit Polgar,HallB,27
+George Raymond Richard Martin,HallA,146.75,Bobby Fischer,HallB,104.5
+Paul Murphy,HallA,76,Max Euwe,HallB,5
+Jean-Claude Van Damme III,HallC,,WALKOVER,,
+X,HallC,,WALKOVER,,
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,,WALKOVER,,
+"O'Connell-Smythe, Padraig Seamus",HallC,,WALKOVER,,
+"Anne ""Rock"" Marble",HallC,,WALKOVER,,

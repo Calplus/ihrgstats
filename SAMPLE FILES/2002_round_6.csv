@@ -1,0 +1,31 @@
+name1,hall1,score1,name2,hall2,score2
+Hermione Granger,4,370,Elliot Alderson,7,0
+Lord Voldemort,4,207,Angela Moss,7,146.5
+Albus Dumbledore,4,54.25,Darlene Alderson,7,38
+Harry Potter,4,137.25,Dominique DiPierro,7,45.25
+Minerva McGonagall,4,194.5,Gideon Goddard,7,99.75
+Sansa Stark,3,147,Loid Forger,6,80.75
+Eddard Stark,3,156.75,Yor Forger,6,64.25
+Brienne of Tarth,3,251.75,Damian Desmond,6,131
+Margaery Tyrell,3,246.75,Franky Franklin,6,153.75
+Cersei Lannister,3,33,Becky Blackbell,6,180.75
+Marceline,2,124.5,Eleven,5,35.75
+Princess Bubblegum,2,239.75,Jim Hopper,5,219.75
+Joyce Byers,2,235.75,Max Mayfield,5,235.75
+Ice King,2,70.75,Dustin Henderson,5,100.75
+BMO,2,166.5,Mike Wheeler,5,198.5
+Barracuda,8,87.25,Gus Fring,1,85.25
+Coral Reeves,8,88.25,Walter White,1,112.25
+Marlin Swordtail,8,37.5,Mike Ehrmantraut,1,130.75
+Betta Splendens,8,95.5,Jesse Pinkman,1,130
+Koi Carpenter,8,137.5,Skyler White,1,237.75
+Maximilian Bartholomew Featherstonehaugh-Cholmondeley,HallC,105.75,Paul Morphy,HallB,103.75
+Jean-Claude Van Damme III,HallC,183.25,Mikhail Tal,HallB,153.25
+"O'Connell-Smythe, Padraig Seamus",HallC,33,Judit Polgar,HallB,73.75
+X,HallC,116.75,Emanuel Lasker,HallB,165.5
+Bob,HallC,180.25,Tigran Petrosian,HallB,125.75
+Georgia O'Keeffe,HallA,,WALKOVER,,
+Paul Murphy,HallA,,WALKOVER,,
+Marie Curie,HallA,,WALKOVER,,
+Teddy Roosevelt,HallA,,WALKOVER,,
+George Raymond Richard Martin,HallA,,WALKOVER,,
