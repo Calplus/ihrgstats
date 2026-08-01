@@ -2,6 +2,28 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 24] - 2026-08-01
+
+Visual audit pass: every image-producing command rendered and manually inspected across a parameterized variant matrix (30 variants over two fictional datasets), two long-standing bugs fixed - one of them breaking the .xlsx export outright on any database with a trained model - and the database export round-trip is now verified end to end.
+
+### Fixed
+
+- **`/exportdatabase` .xlsx export failed on any database with a trained AI model**: Excel hard-caps cell text at 32,767 characters and POI throws past it, so the champion model's serialized parameters (`ml_models.params_json`) killed the whole workbook write. Oversized values are now truncated with an explicit `...[truncated]` marker - the .xlsx dump is the human-readable reference, the .db file remains the lossless recovery path. Found by the new export round-trip verification below.
+- **`/rankplayers` round-scoped image label**: a single-round ranking now labels itself with the round's real label ("Last Round: Round 6") instead of the raw selection value, which could surface an internal round number on multi-year databases. Uses the same round resolution the halls ranking already had; present since at least v1.1.5.
+- **commons-io version conflict pinned**: the Telegram library drags in commons-io 2.15.1, which (by Maven nearest-wins) shadowed POI 5.3.0's required 2.16.1 and broke POI's entire workbook READ path with a `NoSuchMethodError` - invisible until now because the app only ever wrote workbooks. An explicit commons-io 2.16.1 dependency restores the version POI declares. Also found by the export round-trip verification.
+
+### Added
+
+- **`VisualAuditHarness` rebuilt as a property-gated variant matrix** (run manually: `mvn test -Dtest=VisualAuditHarness -Dvisual.audit=true -Dsurefire.failIfNoSpecifiedTests=false`; no longer an `@Disabled` annotation to edit). All 8 image commands render 3+ parameter variants each into flat `temp/visual-audit/exports/<nn>_<command>_<variant>.png` files with a written per-image outlier-coverage map, from two datasets:
+  - the synthetic season, extended to cover both TIMEOUT side conventions (including the blank-winner-score 0-0 form), stated-hall AND blank-hall walkovers (including a WALKOVER-as-name1 row exercising the unknown-hall fallback), a full-win-vs-0 board, a quoted comma-name with a mid-season debut, a near-duplicate name pair, capped and dormant players, a bye round and a multi-opponent round;
+  - the committed 4-year sample corpus, ingested through the real pipeline - its trained champion supplies the ExpElo-populated ranking/player/comparison variants.
+- **`/exportdatabase` round-trip verification** appended to the corpus ingestion test: the exported `.db` snapshot is reopened as its own database home and held against the full integrity battery, and the `.xlsx` dump is opened through POI and checked sheet-by-sheet against live row counts, real column headers and expected content.
+
+### Notes
+
+- Audit observations recorded as established, unchanged behavior: the round-wide match view uses the neutral "??" watermark; unknown-hall walkover sides render as "??"/"WALKOVER"; the rankings hall column shows short codes for long hall names; ranking tables switch their row-color scheme every 10 rows; the hall info view shows a multi-opponent round against its primary opponent (per-board detail lives in the hall match view); the player info view carries no capped marker (the rankings and hall info views do); a hall's bye round in the hall match view is a text-only response by design.
+- 273 tests, 0 failures.
+
 ## [Beta 3 Update 23] - 2026-07-31
 
 Corpus validation pass: the sample data was regenerated from scratch as a four-season fictional dataset (2001-2004, 11 halls, 39 round files plus a capped list per year) with a realistic tournament structure, and is proven ingestible end to end - a fresh v2-schema database is built through the real ingestion pipeline and held against an extended integrity battery, an independent recount of every board, and determinism checks. All validation runs exclusively on the fictional sample corpus.

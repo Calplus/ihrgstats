@@ -242,7 +242,7 @@ public class CommandExportDatabase {
                 Row row = sheet.createRow(rowNum++);
                 for (int c = 1; c <= columnCount; c++) {
                     Object value = rs.getObject(c);
-                    row.createCell(c - 1).setCellValue(value != null ? value.toString() : "");
+                    row.createCell(c - 1).setCellValue(truncateForCell(value != null ? value.toString() : ""));
                 }
             }
             if (sheet == null) {
@@ -253,6 +253,23 @@ public class CommandExportDatabase {
             }
             return true;
         }
+    }
+
+    /**
+     * Excel hard-caps cell text at 32,767 characters and POI throws past it,
+     * which killed the whole .xlsx export on any database with a trained
+     * model (ml_models.params_json holds the champion's serialized
+     * parameters, far beyond the cap). The .xlsx dump is the human-readable
+     * reference - the .db file is the recovery path - so oversized values
+     * are truncated with an explicit marker instead of failing the export.
+     */
+    private static String truncateForCell(String value) {
+        int max = org.apache.poi.ss.SpreadsheetVersion.EXCEL2007.getMaxTextLength();
+        if (value.length() <= max) {
+            return value;
+        }
+        String marker = "...[truncated]";
+        return value.substring(0, max - marker.length()) + marker;
     }
 
     public String handleCancel(String userId) {

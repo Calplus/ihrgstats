@@ -309,9 +309,15 @@ public class CommandRankPlayers {
     }
 
     private Path generatePlayersImage(List<PlayerRankData> players, Set<Integer> highlightRows, String selectedRound, int year) throws Exception {
-        String lastRoundForMetadata = selectedRound.equalsIgnoreCase("all")
-            ? MatchScoreUtils.latestRoundLabel(rounds, year)
-            : selectedRound;
+        // Same resolution as the halls ranking: a round-scoped image labels
+        // itself with the round's real label, not the raw selection value.
+        String lastRoundForMetadata;
+        if (selectedRound.equalsIgnoreCase("all")) {
+            lastRoundForMetadata = MatchScoreUtils.latestRoundLabel(rounds, year);
+        } else {
+            A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
+            lastRoundForMetadata = round != null ? round.roundLabel : selectedRound;
+        }
 
         TableImageGenerator.ImageMetadata metadata = new TableImageGenerator.ImageMetadata(
             "Player Rankings", "Players ranked by TrueElo rating", lastRoundForMetadata);

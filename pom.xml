@@ -6,7 +6,7 @@
 
     <groupId>com.calplus.ihrgstats</groupId>
     <artifactId>ihrgstats</artifactId>
-    <version>Beta 3 Update 23</version>
+    <version>Beta 3 Update 24</version>
 
     <properties>
         <maven.compiler.source>24</maven.compiler.source>
@@ -67,6 +67,17 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>5.3.0</version>
+        </dependency>
+        <!-- Pinned explicitly: telegrambots drags in commons-io 2.15.1,
+             which (by Maven nearest-wins) shadowed POI 5.3.0's required
+             2.16.1 and broke POI's whole read path with a
+             NoSuchMethodError (BoundedInputStream.builder). The write
+             path never hit it, so exports "worked" until something read
+             a workbook back. -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.16.1</version>
         </dependency>
 
         <!-- JUnit for testing -->

@@ -2,11 +2,14 @@ package com.calplus.ihrgstats.corpus;
 
 import com.calplus.ihrgstats.calculations.RatingRecalculator;
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase;
 import com.calplus.ihrgstats.telegrambot.utils.CappedListProcessor;
 import com.calplus.ihrgstats.telegrambot.utils.CsvLineParser;
 import com.calplus.ihrgstats.telegrambot.utils.MatchScoreUtils;
 import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
 import com.calplus.ihrgstats.utils.DatabaseHelper;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class CorpusIngestionTest {
 
     private static final String NOW = "2026-01-01 00:00:00.000";
+    private static final String ADMIN_USER_ID = "corpus_admin";
     private static final double MAX_SCORE = 370.0;
     /** Season lengths: 2003 is the reduced year (5 Swiss + 4 bracket rounds). */
     private static final int[][] SEASONS = {{2001, 10}, {2002, 10}, {2003, 9}, {2004, 10}};
@@ -121,6 +125,8 @@ public class CorpusIngestionTest {
         originalUserDir = System.getProperty("user.dir");
         sampleDir = Paths.get(originalUserDir, "SAMPLE FILES");
         System.setProperty("user.dir", tempDir.toString());
+        // Seeds the admin row the export round-trip at the end needs.
+        System.setProperty("TELEGRAM_ADMIN_USERID", ADMIN_USER_ID);
         new DatabaseSchema().createDatabase("default.db");
         new A3_Halls().seedDefaults(NOW);
         new B4_Players().seedDefaults(NOW);
@@ -153,6 +159,7 @@ public class CorpusIngestionTest {
     void tearDown() {
         System.setProperty("user.dir", originalUserDir);
         System.clearProperty("SETTINGS_CURRENTYEAR");
+        System.clearProperty("TELEGRAM_ADMIN_USERID");
     }
 
     @Test
@@ -432,6 +439,70 @@ public class CorpusIngestionTest {
 
         for (int[] season : SEASONS) {
             CorpusIntegrityChecks.runAll(season[0]);
+        }
+
+        // --- /exportdatabase round-trip -----------------------------------------
+        // .db snapshot: reopen the exported COPY as its own database home and
+        // hold it against the same integrity battery as the original.
+        CommandExportDatabase exporter = new CommandExportDatabase();
+        CommandExportDatabase.ExportResponse dbExport = exporter.executeDbExport(ADMIN_USER_ID);
+        assertTrue(dbExport.success, ".db export must succeed: " + dbExport.message);
+        assertNotNull(dbExport.exportedFilePath);
+        assertTrue(Files.exists(dbExport.exportedFilePath), "the exported .db file must exist");
+
+        Path exportHome = Paths.get(System.getProperty("user.dir")).resolve("export-verify");
+        Files.createDirectories(exportHome.resolve("database/core"));
+        Files.copy(dbExport.exportedFilePath, exportHome.resolve("database/core/default.db"));
+        String mainHome = System.getProperty("user.dir");
+        System.setProperty("user.dir", exportHome.toAbsolutePath().toString());
+        try {
+            for (int[] season : SEASONS) {
+                CorpusIntegrityChecks.runAll(season[0]);
+            }
+        } finally {
+            System.setProperty("user.dir", mainHome);
+        }
+
+        // .xlsx dump: one sheet per populated table, verified through POI
+        // against live counts from the database it was dumped from.
+        CommandExportDatabase.ExportResponse xlsxExport = exporter.executeXlsxExport(ADMIN_USER_ID);
+        assertTrue(xlsxExport.success, ".xlsx export must succeed: " + xlsxExport.message);
+        try (XSSFWorkbook workbook = new XSSFWorkbook(Files.newInputStream(xlsxExport.exportedFilePath))) {
+            String[] expectedSheets = {"halls", "players", "player_names", "player_year_status",
+                    "rounds", "matches", "match_participants", "player_ratings", "capped_imports", "admins"};
+            for (String table : expectedSheets) {
+                assertNotNull(workbook.getSheet(table), "expected a sheet for populated table: " + table);
+            }
+            for (String table : new String[]{"players", "rounds", "match_participants"}) {
+                assertEquals(countRows(table), workbook.getSheet(table).getLastRowNum(),
+                        "sheet '" + table + "' must hold exactly one row per database row (plus the header)");
+            }
+            XSSFSheet rounds2 = workbook.getSheet("rounds");
+            List<String> headers = new ArrayList<>();
+            rounds2.getRow(0).forEach(cell -> headers.add(cell.getStringCellValue()));
+            assertTrue(headers.contains("year") && headers.contains("round_order"),
+                    "rounds sheet must carry the real column headers, got: " + headers);
+            boolean hallASeen = false;
+            for (org.apache.poi.ss.usermodel.Row row : workbook.getSheet("halls")) {
+                for (org.apache.poi.ss.usermodel.Cell cell : row) {
+                    if (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.STRING
+                            && "HallA".equals(cell.getStringCellValue())) {
+                        hallASeen = true;
+                    }
+                }
+            }
+            assertTrue(hallASeen, "the halls sheet must contain the fictional HallA row");
+        }
+    }
+
+    /** Live row count straight from the database, for export comparison. */
+    private static int countRows(String table) throws SQLException {
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM " + table)) {
+            try (var rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getInt(1);
+            }
         }
     }
 
