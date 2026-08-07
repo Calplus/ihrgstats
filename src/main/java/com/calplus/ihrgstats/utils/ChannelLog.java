@@ -52,7 +52,7 @@ public abstract class ChannelLog {
         this.characterLimit = characterLimit;
         this.messageQueue = new LinkedBlockingQueue<>();
         this.isProcessing = new AtomicBoolean(false);
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClientFactory.newClient();
         // loadConfig() is the subclass's - it assigns the subclass's own
         // token/channel fields (declared without initializers, so nothing
         // re-runs after this constructor to overwrite them).

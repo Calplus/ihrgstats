@@ -99,9 +99,14 @@ public class VictoryRecordCalculator {
     }
 
     /**
-     * Formats hall name: "Hall 4" for numeric, "Binjai Hall" for non-numeric, WALKOVER unchanged
+     * Formats hall name: "Hall 4" for numeric, "Binjai Hall" for non-numeric,
+     * WALKOVER unchanged, null hardened to "?" (nulls flow near these
+     * formatters from optional lookups - a placeholder beats an NPE).
      */
     public static String formatHallName(String hallName) {
+        if (hallName == null) {
+            return "?";
+        }
         if (hallName.equalsIgnoreCase("WALKOVER")) {
             return "WALKOVER";
         }

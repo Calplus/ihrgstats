@@ -6,6 +6,7 @@ import com.calplus.ihrgstats.telegrambot.commands.CommandSettings;
 import com.calplus.ihrgstats.telegrambot.utils.CappedListProcessor;
 import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.HttpClientFactory;
 import com.calplus.ihrgstats.utils.PropertyResolver;
 import com.calplus.ihrgstats.utils.TelegramFileDownloader;
 import com.calplus.ihrgstats.utils.TimezoneHelper;
@@ -49,9 +50,19 @@ public class TelegramListener {
     private int webhookTimeoutMs;
     
     private boolean useWebhook;
-    private boolean isRunning;
+    // volatile: read by the polling thread's while-loop, written by stop()
+    // from another thread - without it the JMM permits the polling loop to
+    // never observe the false write.
+    private volatile boolean isRunning;
     private long lastUpdateId = 0;
-    
+
+    // Millis timestamp of the last completed getUpdates round-trip. 0 means
+    // long polling is not active (webhook mode). Written by the polling
+    // thread, read by the heartbeat so it can report a stuck/dead polling
+    // loop instead of masking it with a green "online" message.
+    private volatile long lastPollCompletedAt = 0;
+    private static final long STALE_POLL_WARNING_MS = 2 * 60 * 1000; // 2 minutes
+
     private ScheduledExecutorService statusHeartbeatExecutor;
     private static final long STATUS_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -84,6 +95,19 @@ public class TelegramListener {
         }
         String yearGroup = m.group(1);
         return new ParsedCappedlistFilename(true, yearGroup != null ? Integer.parseInt(yearGroup) : null);
+    }
+
+    /**
+     * Destination phrase for wrong-channel error messages. Falls back to a
+     * generic label when the thread ID is not configured, instead of
+     * rendering "Thread ID  (...)" with a blank in the middle (reachable in
+     * half-configured setups where only one of the two thread IDs is set).
+     */
+    private static String describeThread(String threadId, String channelLabel) {
+        if (threadId == null || threadId.isEmpty()) {
+            return "the configured " + channelLabel;
+        }
+        return "Thread ID " + threadId + " (" + channelLabel + ")";
     }
 
 
@@ -131,7 +155,7 @@ public class TelegramListener {
         this.discordLog = new DiscordLog();
         this.telegramLog = new TelegramLog();
         this.logHelper = new com.calplus.ihrgstats.utils.LogHelper(discordLog, telegramLog);
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClientFactory.newClient();
         this.gson = new Gson();
         this.isRunning = false;
         
@@ -362,6 +386,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(setWebhookUrl))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -389,6 +414,10 @@ public class TelegramListener {
         // Start polling in background thread
         Thread pollingThread = new Thread(() -> {
             logHelper.logSuccess("Telegram long polling started successfully");
+
+            // Baseline for the heartbeat's staleness check - covers the case
+            // where the very first poll never completes.
+            lastPollCompletedAt = System.currentTimeMillis();
 
             while (isRunning) {
                 try {
@@ -422,6 +451,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(deleteWebhookUrl))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -440,6 +470,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(getUpdatesUrl))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .GET()
                 .build();
 
@@ -467,12 +498,22 @@ public class TelegramListener {
     private void pollForUpdates() throws IOException, InterruptedException {
         String getUpdatesUrl = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=" + (lastUpdateId + 1) + "&timeout=30";
         
+        // Request timeout must exceed the 30s long-poll hold requested in the
+        // URL - without it, a silently dropped connection blocks this thread
+        // forever and the bot goes permanently deaf (while the heartbeat,
+        // on its own executor, keeps reporting it online).
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(getUpdatesUrl))
+            .timeout(HttpClientFactory.LONG_POLL_TIMEOUT)
             .GET()
             .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        // A completed round-trip (any status code) proves the polling loop is
+        // alive - a hung or repeatedly-failing loop leaves this stale and the
+        // heartbeat reports it.
+        lastPollCompletedAt = System.currentTimeMillis();
 
         if (response.statusCode() == 200) {
             processUpdates(response.body());
@@ -575,9 +616,9 @@ public class TelegramListener {
                             // Determine specific error message based on what they're trying to do
                             String errorMsg;
                             if (message.has("document")) {
-                                errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
+                                errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to " + describeThread(publicChatIdFileupload, "file upload channel");
                             } else if (message.has("text") && message.get("text").getAsString().trim().startsWith("/")) {
-                                errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to Thread ID " + publicChatIdCommands + " (commands channel)";
+                                errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to " + describeThread(publicChatIdCommands, "commands channel");
                             } else {
                                 errorMsg = "❌ **Wrong Channel**\n\nPlease use:\n";
                                 if (!publicChatIdFileupload.isEmpty()) {
@@ -926,6 +967,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();
@@ -945,6 +987,16 @@ public class TelegramListener {
         // Check for commands
         if (text.startsWith("/")) {
             handleCommand(text.trim(), message);
+            return;
+        }
+
+        // A pending yes/no confirmation outranks wizard text input, but only
+        // for an exact yes/y/no/n answer - a user simultaneously mid-wizard
+        // (e.g. typing a year into /settings) AND awaiting an upload
+        // confirmation would otherwise have their "yes" swallowed by the
+        // wizard as invalid input while the confirmation timed out at 60s.
+        // Any other text keeps the normal wizard-first priority.
+        if (tryResolvePendingConfirmation(userId, text)) {
             return;
         }
 
@@ -980,29 +1032,40 @@ public class TelegramListener {
             }
         }
 
-        // Check for a pending confirmation FOR THIS SPECIFIC USER - keyed per-user
-        // (not a single global slot) so two different users' pending yes/no
-        // dialogs no longer clobber each other, and only the person who was
-        // actually asked can answer their own dialog.
-        ConfirmationRequest request = pendingConfirmations.get(userId);
-
-        if (request != null) {
-            System.out.println("Pending confirmation found. User text: '" + text + "'");
-            String lowerText = text.toLowerCase();
-            if (lowerText.equals("yes") || lowerText.equals("y")) {
-                System.out.println("User confirmed YES - completing future with true");
-                request.future.complete(true);
-                pendingConfirmations.remove(userId, request);
-            } else if (lowerText.equals("no") || lowerText.equals("n")) {
-                System.out.println("User confirmed NO - completing future with false");
-                request.future.complete(false);
-                pendingConfirmations.remove(userId, request);
-            } else {
-                System.out.println("Text does not match yes/no: '" + lowerText + "'");
-            }
+        // Exact yes/no answers with a pending confirmation were already
+        // consumed by tryResolvePendingConfirmation at the top of this
+        // method - anything reaching here is either non-answer text or has
+        // no pending dialog. Keep the diagnostics that used to live here.
+        if (pendingConfirmations.get(userId) != null) {
+            System.out.println("Text does not match yes/no: '" + text.toLowerCase() + "'");
         } else {
             System.out.println("No pending confirmation found for text: '" + text + "'");
         }
+    }
+
+    /**
+     * Resolves a pending yes/no confirmation for this user if the text is an
+     * exact yes/y/no/n answer. Pending confirmations are keyed per-user (not
+     * a single global slot) so two different users' dialogs can't clobber
+     * each other, and only the person who was actually asked can answer
+     * their own dialog. Returns true when a pending confirmation consumed
+     * the text.
+     */
+    private boolean tryResolvePendingConfirmation(String userId, String text) {
+        String lowerText = text.toLowerCase();
+        boolean yes = lowerText.equals("yes") || lowerText.equals("y");
+        boolean no = lowerText.equals("no") || lowerText.equals("n");
+        if (!yes && !no) {
+            return false;
+        }
+        ConfirmationRequest request = pendingConfirmations.get(userId);
+        if (request == null) {
+            return false;
+        }
+        System.out.println("Pending confirmation found. User text: '" + text + "' - completing future with " + yes);
+        request.future.complete(yes);
+        pendingConfirmations.remove(userId, request);
+        return true;
     }
     
     /**
@@ -1084,7 +1147,7 @@ public class TelegramListener {
                     }
 
                     if (!isValidChannel) {
-                        String errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to Thread ID " + publicChatIdFileupload + " (file upload channel)";
+                        String errorMsg = "❌ **Wrong Channel**\n\nPlease upload files to " + describeThread(publicChatIdFileupload, "file upload channel");
                         String msgThreadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
                         sendMessageToChat(chatId, errorMsg, msgThreadId);
 
@@ -1395,7 +1458,7 @@ public class TelegramListener {
             String chatId = chat.get("id").getAsString();
             String threadId = message.has("message_thread_id") ? message.get("message_thread_id").getAsString() : null;
             
-            String errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to Thread ID " + publicChatIdCommands + " (commands channel)";
+            String errorMsg = "❌ **Wrong Channel**\n\nPlease send commands to " + describeThread(publicChatIdCommands, "commands channel");
             sendMessageToChat(chatId, errorMsg, threadId);
             
             System.out.println("Command received but not in commands channel: " + command + " - Error sent to user");
@@ -1544,6 +1607,7 @@ public class TelegramListener {
             String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();
@@ -1554,10 +1618,37 @@ public class TelegramListener {
                 System.err.println(errorMsg);
                 logHelper.logError(errorMsg);
 
+                // 400 "message is too long": the text exceeded Telegram's
+                // 4096 limit on a path that never went through the chunker
+                // (e.g. an exception message interpolated into an error
+                // report). Stripping parse_mode can't fix that - re-send the
+                // same payload split into limit-sized chunks instead. The
+                // size()>1 guard means an already-limit-sized text can never
+                // re-enter this branch, so the recursion is bounded.
+                if (response.statusCode() == 400 && response.body() != null
+                        && response.body().contains("message is too long")
+                        && payload.has("text")) {
+                    List<String> chunks = com.calplus.ihrgstats.utils.MessageChunker.splitForTelegram(payload.get("text").getAsString());
+                    if (chunks.size() > 1) {
+                        logHelper.logWarning("Re-sending over-long " + context + " as " + chunks.size() + " chunks");
+                        for (int i = 0; i < chunks.size(); i++) {
+                            JsonObject chunkPayload = payload.deepCopy();
+                            chunkPayload.addProperty("text", chunks.get(i));
+                            if (i < chunks.size() - 1) {
+                                // Buttons (if any) ride on the last chunk only.
+                                chunkPayload.remove("reply_markup");
+                            }
+                            sendMessagePayloadWithFallback(chunkPayload, context + " (chunk " + (i + 1) + "/" + chunks.size() + ")");
+                        }
+                        return;
+                    }
+                }
+
                 if (payload.has("parse_mode")) {
                     payload.remove("parse_mode");
                     HttpRequest retryRequest = HttpRequest.newBuilder()
                         .uri(URI.create(url))
+                        .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                         .build();
@@ -1592,7 +1683,13 @@ public class TelegramListener {
                 
                 // Add thread ID if the original message was in a thread
                 if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                    // Telegram's API expects message_thread_id as a number -
+                    // same fix as the upload/status/button senders.
+                    try {
+                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             } else {
                 // Send to the configured commands channel using helper method
@@ -1606,7 +1703,11 @@ public class TelegramListener {
                 
                 // Add thread ID if specified
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                    try {
+                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             }
             
@@ -1645,7 +1746,21 @@ public class TelegramListener {
         statusHeartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
         statusHeartbeatExecutor.scheduleAtFixedRate(() -> {
             try {
-                String message = formatStatusMessage("🟢", "SUCCESS", "Bot is online and monitoring for file uploads");
+                // The heartbeat runs on its own executor, so "this message
+                // arrived" only proves the JVM is up - not that updates are
+                // being received. Check the polling loop's liveness stamp so
+                // a hung/dead polling thread is reported instead of masked
+                // by a green "online" message.
+                long lastPoll = lastPollCompletedAt;
+                String message;
+                if (lastPoll > 0 && System.currentTimeMillis() - lastPoll > STALE_POLL_WARNING_MS) {
+                    long staleSeconds = (System.currentTimeMillis() - lastPoll) / 1000;
+                    message = formatStatusMessage("🟡", "WARNING",
+                        "Bot process is alive but NO Telegram poll has completed for " + staleSeconds
+                            + "s - updates are not being received");
+                } else {
+                    message = formatStatusMessage("🟢", "SUCCESS", "Bot is online and monitoring for file uploads");
+                }
                 sendMessageToStatusChat(message);
             } catch (Exception e) {
                 System.err.println("Error sending status heartbeat: " + e.getMessage());
@@ -2780,24 +2895,32 @@ public class TelegramListener {
      * Handles /modelstats command (admin-only) - a single read-only report, no wizard.
      */
     private void handleModelStatsCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
+        // Runs on a background thread like the other report commands - the
+        // live scorecard re-extracts every board in the database, which
+        // would otherwise stall the polling loop (and every other user's
+        // updates) for the full duration.
+        Thread modelStatsThread = new Thread(() -> {
+            try {
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.get("id").getAsString();
 
-            com.calplus.ihrgstats.telegrambot.commands.CommandModelStats modelStatsCommand =
-                new com.calplus.ihrgstats.telegrambot.commands.CommandModelStats();
+                com.calplus.ihrgstats.telegrambot.commands.CommandModelStats modelStatsCommand =
+                    new com.calplus.ihrgstats.telegrambot.commands.CommandModelStats();
 
-            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                modelStatsCommand.handleCommand(userId);
+                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                    modelStatsCommand.handleCommand(userId);
 
-            sendLongMessageToCommandsChannel(response.message, message);
+                sendLongMessageToCommandsChannel(response.message, message);
 
-        } catch (Exception e) {
-            String errorMsg = "Error processing /modelstats command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+            } catch (Exception e) {
+                String errorMsg = "Error processing /modelstats command: " + e.getMessage();
+                logHelper.logError(errorMsg);
+                e.printStackTrace();
+                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+            }
+        });
+        modelStatsThread.setDaemon(true);
+        modelStatsThread.start();
     }
 
     /**
@@ -2950,6 +3073,15 @@ public class TelegramListener {
             if (data.equals("help_cancel")) {
                 response = helpCommand.handleCancel(userId);
                 sendMessageToCommandsChannel(response.message, message);
+            } else if (data.equals("help_back")) {
+                // Both help menus carry a "🔙 Back" button with this
+                // callback; it previously matched no branch here, so
+                // clicking it stripped the keyboard (the shared scaffold
+                // does that before routing) and then did nothing - the user
+                // was stranded with no menu. Re-send the main help menu,
+                // same as a fresh /help.
+                response = helpCommand.handleBack(userId);
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
             } else if (data.startsWith("help_category_")) {
                 String category = data.substring("help_category_".length());
                 response = helpCommand.handleCategorySelection(userId, category);
@@ -3159,6 +3291,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
                 .build();
@@ -3241,6 +3374,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
                 .build();
@@ -3282,7 +3416,13 @@ public class TelegramListener {
                 payload.addProperty("chat_id", chat.get("id").getAsString());
                 
                 if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                    // Telegram's API expects message_thread_id as a number -
+                    // same fix as the upload/status/button senders.
+                    try {
+                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
@@ -3290,7 +3430,11 @@ public class TelegramListener {
                 
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                    try {
+                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             }
             
@@ -3350,7 +3494,13 @@ public class TelegramListener {
                 payload.addProperty("chat_id", chat.get("id").getAsString());
 
                 if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                    // Telegram's API expects message_thread_id as a number -
+                    // same fix as the upload/status/button senders.
+                    try {
+                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
@@ -3358,7 +3508,11 @@ public class TelegramListener {
 
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                    try {
+                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             }
 
@@ -3455,7 +3609,13 @@ public class TelegramListener {
                 payload.addProperty("chat_id", chat.get("id").getAsString());
 
                 if (originalMessage.has("message_thread_id")) {
-                    payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsString());
+                    // Telegram's API expects message_thread_id as a number -
+                    // same fix as the upload/status/button senders.
+                    try {
+                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             } else {
                 String[] chatAndThread = getCommandsChatIdAndThread();
@@ -3463,7 +3623,11 @@ public class TelegramListener {
 
                 payload.addProperty("chat_id", chatAndThread[0]);
                 if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    payload.addProperty("message_thread_id", chatAndThread[1]);
+                    try {
+                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
+                    } catch (NumberFormatException e) {
+                        // Ignore if not a valid number
+                    }
                 }
             }
 
@@ -3577,6 +3741,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
                 .build();
@@ -3611,6 +3776,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();

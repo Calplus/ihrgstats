@@ -164,6 +164,7 @@ public class CommandCompareHalls {
      * Package-private (not private) so {@code calculateWinningProbability}
      * can be exercised directly with hand-built rosters in tests. */
     static class PlayerData {
+        String playerId; // stable business key - display names can change across years
         String name;
         boolean capped;
         int hallRank;
@@ -260,8 +261,12 @@ public class CommandCompareHalls {
                 summary.totalOppScore += record.oppScore;
             }
             for (PlayerData p : yearData.players) {
-                summary.avgSeatByPlayerId.put(p.name, p.avgSeat); // PlayerData here has no stable playerId field - name is unique enough for display purposes
-                summary.playerNameById.put(p.name, p.name);
+                // Keyed by playerId (not display name) - a player renamed
+                // across years is one row, and two different players who
+                // happen to share a name never merge. Same convention as
+                // InfoPlayer/InfoHall's All-Years views.
+                summary.avgSeatByPlayerId.put(p.playerId, p.avgSeat);
+                summary.playerNameById.put(p.playerId, p.name);
             }
             yearSummaries.add(summary);
             latestYearDataOut[0] = yearData; // getAllYears() is ascending, so the last iteration is the most recent
@@ -360,15 +365,17 @@ public class CommandCompareHalls {
         sections.add(new ComparisonImageGenerator.Section("Player Stats (Latest Yr)", statsLines));
 
         List<String> seatLines = new ArrayList<>();
-        List<String> allPlayerNames = collectAllPlayerNamesByRecency(yearSummaries);
+        Map<String, String> lastKnownName = new HashMap<>();
+        List<String> allPlayerIds = collectAllPlayerIdsByRecency(yearSummaries, lastKnownName);
         StringBuilder header = new StringBuilder(String.format("%-20s: ", "Name"));
         for (YearSummary s : yearSummaries) header.append(String.format("%-6s|", s.year));
         seatLines.add(header.toString());
-        for (String name : allPlayerNames) {
+        for (String playerId : allPlayerIds) {
+            String name = lastKnownName.get(playerId);
             String displayName = name.length() > 20 ? name.substring(0, 17) + "..." : name;
             StringBuilder line = new StringBuilder(String.format("%-20s: ", displayName));
             for (YearSummary s : yearSummaries) {
-                Double avgSeat = s.avgSeatByPlayerId.get(name);
+                Double avgSeat = s.avgSeatByPlayerId.get(playerId);
                 line.append(String.format("%-6s|", avgSeat != null && avgSeat < 999 ? String.format("%.1f", avgSeat) : "-"));
             }
             seatLines.add(line.toString());
@@ -386,17 +393,30 @@ public class CommandCompareHalls {
         return sections;
     }
 
-    /** Every player who appeared in any year's summary, ordered by their most recent year of appearance (newest first), then name. */
-    private static List<String> collectAllPlayerNamesByRecency(List<YearSummary> yearSummaries) {
+    /**
+     * Every playerId that appeared in any year's summary, ordered by most
+     * recent year of appearance (newest first), then last-known name, then
+     * id (fully deterministic). Fills {@code lastKnownNameOut} with each
+     * id's most recent display name - summaries are ascending by year, so
+     * the last write wins.
+     */
+    private static List<String> collectAllPlayerIdsByRecency(List<YearSummary> yearSummaries, Map<String, String> lastKnownNameOut) {
         Map<String, Integer> mostRecentYearByPlayer = new LinkedHashMap<>();
         for (YearSummary s : yearSummaries) {
-            for (String name : s.avgSeatByPlayerId.keySet()) {
-                mostRecentYearByPlayer.put(name, s.year);
+            for (Map.Entry<String, String> e : s.playerNameById.entrySet()) {
+                mostRecentYearByPlayer.put(e.getKey(), s.year);
+                lastKnownNameOut.put(e.getKey(), e.getValue());
             }
         }
-        List<String> names = new ArrayList<>(mostRecentYearByPlayer.keySet());
-        names.sort((a, b) -> Integer.compare(mostRecentYearByPlayer.get(b), mostRecentYearByPlayer.get(a)));
-        return names;
+        List<String> ids = new ArrayList<>(mostRecentYearByPlayer.keySet());
+        ids.sort((a, b) -> {
+            int byYear = Integer.compare(mostRecentYearByPlayer.get(b), mostRecentYearByPlayer.get(a));
+            if (byYear != 0) return byYear;
+            int byName = lastKnownNameOut.get(a).compareTo(lastKnownNameOut.get(b));
+            if (byName != 0) return byName;
+            return a.compareTo(b);
+        });
+        return ids;
     }
 
     private HallData fetchHallData(int hallId, String hallName, int year, List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId,
@@ -408,6 +428,7 @@ public class CommandCompareHalls {
         List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getStatusesForHallAndYear(hallId, year);
         for (B6_PlayerYearStatus.Status status : statuses) {
             PlayerData player = new PlayerData();
+            player.playerId = status.playerId;
             String name = playerNames.getNameForYear(status.playerId, year);
             player.name = name != null ? name : status.playerId;
             player.capped = status.capped;
@@ -463,8 +484,16 @@ public class CommandCompareHalls {
             }
         }
 
-        // Sort by last-known elo descending, assign hall-local rank
-        hallData.players.sort((a, b) -> Integer.compare(b.elo, a.elo));
+        // Sort by last-known elo descending, assign hall-local rank. Name
+        // then playerId tiebreak keeps equal-elo rows from swapping order
+        // between runs (input order comes from the status query).
+        hallData.players.sort((a, b) -> {
+            int byElo = Integer.compare(b.elo, a.elo);
+            if (byElo != 0) return byElo;
+            int byName = a.name.compareTo(b.name);
+            if (byName != 0) return byName;
+            return a.playerId.compareTo(b.playerId);
+        });
         for (int i = 0; i < hallData.players.size(); i++) {
             hallData.players.get(i).hallRank = i + 1;
         }
@@ -635,6 +664,16 @@ public class CommandCompareHalls {
         List<PlayerData> team2 = selectTeamWithCappedFilter(hall2.players);
 
         if (team1.isEmpty() || team2.isEmpty()) return 0.0;
+
+        // The capped-filter's >2-capped branch returns its team capped-first,
+        // not strongest-first. When the rosters differ in size only team1's
+        // FIRST comparedBoards entries play, so both teams are sorted
+        // elo-desc here to make that subset "the strongest available boards"
+        // (team order is otherwise irrelevant: equal sizes compare every
+        // board, and team2's orderings are exhaustively permuted anyway).
+        Comparator<PlayerData> eloDesc = Comparator.comparing((PlayerData p) -> p.elo).reversed();
+        team1.sort(eloDesc);
+        team2.sort(eloDesc);
 
         int totalPermutations = 0;
         int hall1Wins = 0;

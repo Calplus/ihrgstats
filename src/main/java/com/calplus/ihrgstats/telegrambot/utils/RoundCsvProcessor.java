@@ -744,6 +744,9 @@ public class RoundCsvProcessor {
                         if (!Double.isFinite(parsedWinnerScore)) {
                             throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be a finite number", lineNumber));
                         }
+                        if (parsedWinnerScore < 0) {
+                            throw new Exception(String.format("Invalid CSV format at line %d: scores cannot be negative", lineNumber));
+                        }
                     }
                 } else {
                     if (game.hall1.isEmpty() || game.hall2.isEmpty()) {
@@ -762,6 +765,11 @@ public class RoundCsvProcessor {
                     }
                     if (!Double.isFinite(parsedScore1) || !Double.isFinite(parsedScore2)) {
                         throw new Exception(String.format("Invalid CSV format at line %d: score1/score2 must be finite numbers", lineNumber));
+                    }
+                    // Real board scores are non-negative; a "-5" would be
+                    // silently ingested and decide outcomes by comparison.
+                    if (parsedScore1 < 0 || parsedScore2 < 0) {
+                        throw new Exception(String.format("Invalid CSV format at line %d: scores cannot be negative", lineNumber));
                     }
                 }
 

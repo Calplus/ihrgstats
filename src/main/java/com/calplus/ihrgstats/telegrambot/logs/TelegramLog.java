@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.logs;
 
 import com.calplus.ihrgstats.utils.ChannelLog;
+import com.calplus.ihrgstats.utils.HttpClientFactory;
 import com.calplus.ihrgstats.utils.TelegramHtml;
 
 import java.io.IOException;
@@ -121,6 +122,7 @@ public class TelegramLog extends ChannelLog {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(telegramApiUrl))
+                    .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();

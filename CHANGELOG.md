@@ -2,6 +2,42 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 25] - 2026-08-07
+
+Bug-fix batch from the full-codebase review (all 89 main files read end to end, findings reported first, fixes applied only after approval). Headline: every outbound HTTP call in the app could hang forever on a silently dropped connection - for the polling thread that meant a permanently deaf bot whose status heartbeat kept reporting "online".
+
+### Fixed
+
+- **HTTP timeouts everywhere**: `java.net.http` has no default connect or request timeout, and no call site set one - a silently dropped TCP connection (NAT/firewall drop, network flap) left `HttpClient.send` blocked forever. The Telegram long poll, every message/photo/document sender, both log senders, file downloads and `/about`'s getChat lookup now build their clients through a new `HttpClientFactory` (10s connect timeout) and set per-request timeouts: 45s on the long poll (comfortably above the 30s server-side hold), 30s on ordinary calls, 120s on file transfers.
+- **Heartbeat can no longer mask a dead polling loop**: the 5-minute status heartbeat runs on its own executor, so it kept reporting "Bot is online and monitoring" even with the polling thread hung or dead. It now checks the polling loop's liveness stamp and sends an explicit stale-poll warning when no poll has completed for over 2 minutes.
+- **`/help`'s "🔙 Back" button did nothing**: both help menus carry a Back button whose `help_back` callback matched no listener branch - clicking it stripped the keyboard (the shared scaffold does that before routing) and left the user stranded with no menu. It now re-sends the main help menu.
+- **`/modelstats` no longer stalls the polling thread**: it was the one report command still executed synchronously on the polling thread, yet its live scorecard re-extracts every board in the database. It now runs on a worker thread like its siblings, and its per-model decode cache actually caches misses (a missing model version was previously re-queried once per logged prediction).
+- **Shutdown visibility**: `isRunning` is now volatile - the polling loop reads it while `stop()` writes it from another thread; without the barrier the JMM permitted the loop to never observe the stop.
+- **Schema creation fails fast**: a failed `CREATE TABLE`/`CREATE INDEX` was logged and skipped, leaving a half-built schema that surfaced as confusing failures at first use. It now throws at startup, like connection-level failures always did.
+- **Negative CSV scores rejected**: score validation accepted any finite number, so a "-5" was silently ingested and decided outcomes by comparison.
+- **`/comparehalls` All-Years seating matrix keyed by player identity**: rows were keyed by display name, so a player renamed across years split into two rows (and two different players sharing a name would merge). Now keyed by player id with the most recent name shown - the same convention the player/hall info views already use.
+- **Deterministic ranking order on exact ties**: rating sorts had no tiebreak over HashMap-ordered input, so equal-rated players/halls could swap display order between runs/JVMs. Name (then hall/id) tiebreaks added to `/rankplayers`, `/rankhalls` and the hall roster tables in `/infohall`/`/comparehalls`.
+- **Round-scoped text headers show the round's real label** in `/rankplayers` and `/rankhalls`, matching the image-metadata fix from the visual audit (the raw selection value is an internal round number; the two can disagree on custom labels).
+- **`message_thread_id` sent as a number by the remaining senders**: half the send paths were fixed previously with an explicit "Telegram expects a number" note; the commands-channel and button senders still sent the string form. All JSON senders now parse to int.
+- **Over-length message recovery**: a Telegram 400 for "message is too long" (reachable on unchunked paths, e.g. an exception message interpolated into an error report) now re-sends the payload through the message chunker instead of being dropped after a futile parse_mode-strip retry.
+- **Wrong-channel error wording** no longer renders "Thread ID  (...)" with a blank in half-configured setups - it falls back to a generic channel label when the thread ID is empty.
+- **`/admins` replies "already an admin"** instead of a false "✅ Added" when the target already existed (the insert is if-absent).
+- **Discord log 429 retries capped** at 5 per message - a persistently rate-limited channel could spin the log worker forever and block the whole queue behind one message.
+- **One capped-list row claimed per player**: on first appearance a player claimed every unmapped same-name capped row, so if a year's list legitimately contained two distinct same-named people, the first to appear took both rows and the second was never flagged capped.
+- **`/predict` refuses without a current year** (parity with `/lineup`) instead of dressing up a meaningless "year 0" empty-features board as a real prediction.
+- **`formatHallName(null)`** hardened to "?" instead of an NPE.
+
+### Changed
+
+- **Name-containment matching requires 3+ characters on the shorter side**: any name containing a very short existing name (a 2-letter "Ng" inside every future "Nightingale...") triggered the same-person dialog on every such debut, forever. The word-overlap and Levenshtein typo checks are unaffected. The four sample-corpus dialogs where the 1-char name "X" partial-matched unrelated debuts no longer fire; all four were answered "different people", so ingestion outcomes are byte-identical - only the dialog noise is gone.
+- **Fuzzy-confirmed returning players get the hall-mismatch dialog**: a typo'd returning player who had also moved halls silently adopted the CSV row's hall, while the identical situation via exact name match prompted "Keep old hall / Use new hall". Both paths now share one dialog implementation.
+- **Pending yes/no confirmations outrank wizard text input** for exact yes/y/no/n answers: a user simultaneously mid-`/settings` text input and awaiting an upload confirmation had their "yes" swallowed by the wizard as invalid input while the confirmation timed out at 60s. Any other text keeps the wizard-first priority.
+- **`/comparehalls` win probability sorts both selected teams strongest-first**: the capped-filter branch returned its team capped-first, and with unequal roster sizes only the first N entries play - that played subset is now the strongest available boards. The displayed % changes only in that narrow (>2 capped in the top 5 AND unequal rosters) case.
+
+### Notes
+
+- 273 tests, 0 failures.
+
 ## [Beta 3 Update 24] - 2026-08-01
 
 Visual audit pass: every image-producing command rendered and manually inspected across a parameterized variant matrix (30 variants over two fictional datasets), two long-standing bugs fixed - one of them breaking the .xlsx export outright on any database with a trained model - and the database export round-trip is now verified end to end.

@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.discordbot.logs;
 
 import com.calplus.ihrgstats.utils.ChannelLog;
+import com.calplus.ihrgstats.utils.HttpClientFactory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -16,6 +17,10 @@ import java.util.concurrent.CompletableFuture;
  */
 public class DiscordLog extends ChannelLog {
     private static final int DISCORD_CHARACTER_LIMIT = 2000;
+    // Inline 429 retries are per-message and block the whole queue behind
+    // that message, so they must be finite - a persistently rate-limited
+    // channel would otherwise spin the log worker forever.
+    private static final int MAX_RATE_LIMIT_RETRIES = 5;
 
     private String botToken;
     private String channelId;
@@ -94,6 +99,7 @@ public class DiscordLog extends ChannelLog {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(this.discordApiUrl))
+                    .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                     .header("Authorization", "Bot " + this.botToken)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
@@ -165,7 +171,8 @@ public class DiscordLog extends ChannelLog {
                             // Try to send message, handle rate limiting
                             long result = sendMessage(queuedMsg.message);
 
-                            while (result > 0) {
+                            int rateLimitRetries = 0;
+                            while (result > 0 && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
                                 // Rate limited - wait for retry_after duration
                                 try {
                                     Thread.sleep(result);
@@ -175,6 +182,12 @@ public class DiscordLog extends ChannelLog {
                                 }
                                 // Retry sending the message
                                 result = sendMessage(queuedMsg.message);
+                                rateLimitRetries++;
+                            }
+                            if (result > 0) {
+                                System.err.println("Discord message dropped after "
+                                        + MAX_RATE_LIMIT_RETRIES + " rate-limit retries");
+                                result = -1;
                             }
 
                             // Complete future: result == 0 means success, result == -1 means failure

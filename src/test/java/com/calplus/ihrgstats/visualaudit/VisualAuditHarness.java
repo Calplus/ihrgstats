@@ -134,9 +134,10 @@ public class VisualAuditHarness {
                 if (message.contains("'Sam Le' may match existing player 'Sam Lee'")) {
                     return 1; // the deliberate near-duplicate pair - different people
                 }
-                if (message.contains("'Nightingale, Florence' may match existing player 'Ng'")) {
-                    return 1; // short-name substring cascade ("ng" inside "nightingale") - different people
-                }
+                // The historical "'Nightingale, Florence' may match 'Ng'"
+                // dialog no longer fires: the containment matcher requires
+                // the shorter side to be >=3 chars, so the 2-char name "Ng"
+                // no longer partial-matches every debut containing it.
                 throw new IllegalStateException("unexpected dialog: " + message);
             });
             if (!processor.processRound(csv.toString(), YEAR, round, NOW)) {
@@ -239,19 +240,19 @@ public class VisualAuditHarness {
 
         // The corpus's scripted identity dialogs (same answers as
         // CorpusIngestionTest); anything unexpected fails loudly.
+        // The four historical "'...' may match existing player 'X'" dialogs
+        // are gone: the containment matcher now requires the shorter side to
+        // be >=3 chars (all four were answered "different people", so the
+        // resulting rosters are identical - only the dialog noise is gone).
         Map<String, Integer> dialogAnswers = Map.ofEntries(
                 Map.entry("'Paul Murphy' may match existing player 'Paul Morphy'.", 1),
-                Map.entry("'X' may match existing player 'Kim Wexler'.", 1),
                 Map.entry("'Bobby Fischer' may match existing player 'Bob'.", 1),
                 Map.entry("'Teddy Rosevelt' may match existing player 'Teddy Roosevelt'.", 0),
                 Map.entry("Player: Joyce Byers", 1),
-                Map.entry("'Max Euwe' may match existing player 'X'.", 1),
                 Map.entry("'Jessie Pinkman' may match existing player 'Jesse Pinkman'.", 0),
                 Map.entry("'Margarey Tyrell' may match existing player 'Margaery Tyrell'.", 0),
-                Map.entry("'Max Mayfield' may match existing player 'X'.", 1),
                 Map.entry("Player: Jim Hopper", 1),
                 Map.entry("Player: Coral Reeves", 2),
-                Map.entry("'Zzyzx Quibble' may match existing player 'X'.", 1),
                 Map.entry("'Elven' may match existing player 'Eleven'.", 0),
                 Map.entry("'Dominique' may match existing player 'Dominique DiPierro'.", 0),
                 Map.entry("'Aniya Forger' may match existing player 'Anya Forger'.", 0),

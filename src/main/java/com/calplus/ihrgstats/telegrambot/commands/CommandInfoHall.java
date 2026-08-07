@@ -476,8 +476,16 @@ public class CommandInfoHall {
             }
         }
 
-        // Sort by last-known elo descending, assign hall-local rank
-        hallData.players.sort((a, b) -> Integer.compare(b.elo, a.elo));
+        // Sort by last-known elo descending, assign hall-local rank. Name
+        // then playerId tiebreak keeps equal-elo rows from swapping order
+        // between runs (input order comes from the status query).
+        hallData.players.sort((a, b) -> {
+            int byElo = Integer.compare(b.elo, a.elo);
+            if (byElo != 0) return byElo;
+            int byName = a.name.compareTo(b.name);
+            if (byName != 0) return byName;
+            return a.playerId.compareTo(b.playerId);
+        });
         for (int i = 0; i < hallData.players.size(); i++) {
             hallData.players.get(i).hallRank = i + 1;
         }

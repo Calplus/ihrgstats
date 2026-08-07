@@ -196,7 +196,13 @@ public class CommandPredict {
     private String generatePrediction(String player1Id, String player1Name, String player1Hall,
                                       String player2Id, String player2Name, String player2Hall) throws SQLException {
         Integer year = YearContext.getCurrentYear();
-        FeatureExtractor.RawBoard board = predictionService.buildHypotheticalBoard(player1Id, player2Id, year != null ? year : 0);
+        if (year == null) {
+            // Same refusal as /lineup - the old year-0 fallback built a
+            // meaningless empty-features board and dressed it up as a real
+            // prediction, masking a configuration error.
+            return "⚠️ No current year set. An admin must set `settings.currentYear` first.";
+        }
+        FeatureExtractor.RawBoard board = predictionService.buildHypotheticalBoard(player1Id, player2Id, year);
         MatchupPredictor champion = predictionService.loadChampion();
         GlickoBaseline baseline = predictionService.fitGlickoBaseline();
         MatchupPredictor.Probs baselineProbs = baseline.predict(board);

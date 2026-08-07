@@ -72,19 +72,15 @@ public class CorpusIngestionTest {
     private static final List<ScriptedDialog> DIALOG_SCRIPT = List.of(
             // 2001
             new ScriptedDialog("paul-murphy", "'Paul Murphy' may match existing player 'Paul Morphy'.", 1),
-            new ScriptedDialog("x-debut", "'X' may match existing player 'Kim Wexler'.", 1),
             new ScriptedDialog("bobby-fischer", "'Bobby Fischer' may match existing player 'Bob'.", 1),
             new ScriptedDialog("teddy-typo", "'Teddy Rosevelt' may match existing player 'Teddy Roosevelt'.", 0),
             // 2002
             new ScriptedDialog("joyce-move", "Player: Joyce Byers", 1),
-            new ScriptedDialog("max-euwe", "'Max Euwe' may match existing player 'X'.", 1),
             new ScriptedDialog("jessie-typo", "'Jessie Pinkman' may match existing player 'Jesse Pinkman'.", 0),
             new ScriptedDialog("margarey-typo", "'Margarey Tyrell' may match existing player 'Margaery Tyrell'.", 0),
-            new ScriptedDialog("max-mayfield", "'Max Mayfield' may match existing player 'X'.", 1),
             // 2003
             new ScriptedDialog("hopper-move", "Player: Jim Hopper", 1),
             new ScriptedDialog("coral-new-person", "Player: Coral Reeves", 2),
-            new ScriptedDialog("zzyzx", "'Zzyzx Quibble' may match existing player 'X'.", 1),
             new ScriptedDialog("elven-typo", "'Elven' may match existing player 'Eleven'.", 0),
             new ScriptedDialog("dominique-short", "'Dominique' may match existing player 'Dominique DiPierro'.", 0),
             new ScriptedDialog("aniya-typo", "'Aniya Forger' may match existing player 'Anya Forger'.", 0),
@@ -92,6 +88,12 @@ public class CorpusIngestionTest {
             new ScriptedDialog("hermoine-typo", "'Hermoine Granger' may match existing player 'Hermione Granger'.", 0),
             new ScriptedDialog("baracuda-typo", "'Baracuda' may match existing player 'Barracuda'.", 0),
             new ScriptedDialog("petrosyan-typo", "'Tigran Petrosyan' may match existing player 'Tigran Petrosian'.", 0));
+    // The four historical "may match existing player 'X'" dialogs (x-debut,
+    // max-euwe, max-mayfield, zzyzx) no longer fire: the containment matcher
+    // now requires the shorter side to be >=3 chars, so the 1-char name "X"
+    // no longer partial-matches every debut containing that letter. All four
+    // were answered "different people", so the resulting rosters/ratings are
+    // byte-identical - only the dialog noise is gone.
 
     /**
      * Which identity dialogs fire in which round ("year:round"), in CSV row
@@ -99,14 +101,13 @@ public class CorpusIngestionTest {
      * the match-type dialog first (asserted from an independent CSV scan).
      */
     private static final Map<String, List<String>> IDENTITY_DIALOGS_AT = Map.ofEntries(
-            Map.entry("2001:1", List.of("paul-murphy", "x-debut")),
+            Map.entry("2001:1", List.of("paul-murphy")),
             Map.entry("2001:2", List.of("bobby-fischer")),
             Map.entry("2001:3", List.of("teddy-typo")),
-            Map.entry("2002:1", List.of("joyce-move", "max-euwe")),
+            Map.entry("2002:1", List.of("joyce-move")),
             Map.entry("2002:3", List.of("jessie-typo")),
             Map.entry("2002:5", List.of("margarey-typo")),
-            Map.entry("2002:6", List.of("max-mayfield")),
-            Map.entry("2003:1", List.of("hopper-move", "coral-new-person", "zzyzx")),
+            Map.entry("2003:1", List.of("hopper-move", "coral-new-person")),
             Map.entry("2003:4", List.of("elven-typo")),
             Map.entry("2003:5", List.of("dominique-short")),
             Map.entry("2003:6", List.of("aniya-typo")),

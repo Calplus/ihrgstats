@@ -102,17 +102,7 @@ public class PlayerIdentityResolver {
             }
 
             // First appearance this year, hall differs from most recent prior year - interactive resolution.
-            A3_Halls.Hall priorHall = halls.getHallById(priorStatus.hallId);
-            String priorHallName = priorHall != null ? priorHall.hallName : "?";
-            int choice = requestMultiChoice(String.format(
-                "⚠️ Hall Mismatch Resolution\n\nPlayer: %s\nThis round's hall: %s\nLast known hall (%d): %s\n\nChoose resolution:",
-                name, hall.hallName, priorStatus.year, priorHallName),
-                new String[]{
-                    "Keep old hall (" + priorHallName + ") - same player",
-                    "Use new hall (" + hall.hallName + ") - same player who changed halls",
-                    "Use new hall (" + hall.hallName + ") - different player",
-                    "Cancel processing"
-                });
+            int choice = requestHallMismatchChoice(name, hall, priorStatus);
 
             if (choice == 0) {
                 resolvedPlayerId = candidatePlayerId;
@@ -154,8 +144,37 @@ public class PlayerIdentityResolver {
                             "same year - this is likely a data entry error and must be fixed manually.",
                             name, existingHall != null ? existingHall.hallName : "?", year, hall.hallName));
                     }
-                    resolvedPlayerId = fuzzy.playerId;
-                    resolvedHallId = thisYearStatus != null ? thisYearStatus.hallId : hall.id;
+                    if (thisYearStatus != null) {
+                        resolvedPlayerId = fuzzy.playerId;
+                        resolvedHallId = thisYearStatus.hallId;
+                    } else {
+                        // First appearance this year: a fuzzy-confirmed
+                        // returning player gets the same prior-year
+                        // hall-mismatch dialog the exact-name path offers -
+                        // previously a typo'd returning player who also
+                        // moved halls silently adopted the CSV row's hall
+                        // with no prompt, while the identical situation via
+                        // exact match prompted.
+                        B6_PlayerYearStatus.Status priorStatus = playerYearStatus.getMostRecentStatusBeforeYear(fuzzy.playerId, year);
+                        if (priorStatus != null && priorStatus.hallId != hall.id) {
+                            int choice = requestHallMismatchChoice(name, hall, priorStatus);
+                            if (choice == 0) {
+                                resolvedPlayerId = fuzzy.playerId;
+                                resolvedHallId = priorStatus.hallId;
+                            } else if (choice == 1) {
+                                resolvedPlayerId = fuzzy.playerId;
+                                resolvedHallId = hall.id;
+                            } else if (choice == 2) {
+                                // Different player after all - leave unresolved so
+                                // the new-player path below creates a fresh record.
+                            } else {
+                                return new ResolutionResult(null, hall.id, true);
+                            }
+                        } else {
+                            resolvedPlayerId = fuzzy.playerId;
+                            resolvedHallId = hall.id;
+                        }
+                    }
                 }
             }
         }
@@ -188,12 +207,38 @@ public class PlayerIdentityResolver {
             playerYearStatus.upsertStatus(resolvedPlayerId, year, resolvedHallId, capped, true, nowTimestamp);
             for (B7_CappedImports.ImportRow row : cappedRows) {
                 if (!row.mapped) {
+                    // Claim exactly ONE unmapped row: a year's capped list
+                    // can legitimately contain two distinct same-named
+                    // people, and if the first to appear claimed every
+                    // unmapped same-name row, the second would find them all
+                    // taken and never be flagged capped.
                     cappedImports.markMapped(row.id, resolvedPlayerId, nowTimestamp);
+                    break;
                 }
             }
         }
 
         return new ResolutionResult(resolvedPlayerId, resolvedHallId, false);
+    }
+
+    /**
+     * Shows the prior-year hall-mismatch dialog (shared by the exact-name
+     * and fuzzy-confirmed paths so the two can never drift apart) and
+     * returns the raw choice index: 0 = keep old hall, 1 = use new hall,
+     * 2 = different player, anything else = cancel.
+     */
+    private int requestHallMismatchChoice(String name, A3_Halls.Hall csvHall, B6_PlayerYearStatus.Status priorStatus) throws SQLException {
+        A3_Halls.Hall priorHall = halls.getHallById(priorStatus.hallId);
+        String priorHallName = priorHall != null ? priorHall.hallName : "?";
+        return requestMultiChoice(String.format(
+            "⚠️ Hall Mismatch Resolution\n\nPlayer: %s\nThis round's hall: %s\nLast known hall (%d): %s\n\nChoose resolution:",
+            name, csvHall.hallName, priorStatus.year, priorHallName),
+            new String[]{
+                "Keep old hall (" + priorHallName + ") - same player",
+                "Use new hall (" + csvHall.hallName + ") - same player who changed halls",
+                "Use new hall (" + csvHall.hallName + ") - different player",
+                "Cancel processing"
+            });
     }
 
     private static class FuzzyMatch {
@@ -283,7 +328,13 @@ public class PlayerIdentityResolver {
         String n1 = name1.toLowerCase().replace(",", "").replaceAll("\\s+", " ").trim();
         String n2 = name2.toLowerCase().replace(",", "").replaceAll("\\s+", " ").trim();
         if (n1.equals(n2)) return false; // handled elsewhere
-        if (n1.contains(n2) || n2.contains(n1)) return true;
+        // Containment only counts when the shorter side is a substantial
+        // string (>=3 chars): a 2-letter name like "Ng" is contained in every
+        // future debut sharing those letters ("Nightingale, ...") and
+        // permanently added a spurious dialog to ingestion. The word-overlap
+        // branch below is unaffected (it requires whole-word equality), and
+        // Levenshtein typo detection runs separately.
+        if (Math.min(n1.length(), n2.length()) >= 3 && (n1.contains(n2) || n2.contains(n1))) return true;
 
         String[] words1 = n1.split(" ");
         String[] words2 = n2.split(" ");

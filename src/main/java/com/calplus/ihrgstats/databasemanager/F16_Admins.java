@@ -71,7 +71,8 @@ public class F16_Admins {
         }
     }
 
-    private void addAdminIfAbsent(String platform, String platformUserId, String displayName, String nowTimestamp) throws SQLException {
+    /** Returns true if a row was inserted, false if the pair already existed. */
+    private boolean addAdminIfAbsent(String platform, String platformUserId, String displayName, String nowTimestamp) throws SQLException {
         String sql = "INSERT INTO admins (platform, platform_user_id, display_name, created_dttm, updated_dttm) " +
                 "SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM admins WHERE platform = ? AND platform_user_id = ?)";
         try (Connection conn = DatabaseHelper.getDefaultConnection();
@@ -83,7 +84,7 @@ public class F16_Admins {
             ps.setString(5, nowTimestamp);
             ps.setString(6, platform);
             ps.setString(7, platformUserId);
-            ps.executeUpdate();
+            return ps.executeUpdate() > 0;
         }
     }
 
@@ -115,8 +116,13 @@ public class F16_Admins {
         }
     }
 
-    public void addAdmin(String platform, String platformUserId, String displayName, String nowTimestamp) throws SQLException {
-        addAdminIfAbsent(platform, platformUserId, displayName, nowTimestamp);
+    /**
+     * Adds an admin (insert-if-absent). Returns true if a new row was
+     * inserted, false if that (platform, user) pair was already an admin -
+     * so callers can reply "already an admin" instead of a false "Added".
+     */
+    public boolean addAdmin(String platform, String platformUserId, String displayName, String nowTimestamp) throws SQLException {
+        return addAdminIfAbsent(platform, platformUserId, displayName, nowTimestamp);
     }
 
     public void removeAdmin(String platform, String platformUserId) throws SQLException {

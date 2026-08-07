@@ -4,6 +4,7 @@ import com.calplus.ihrgstats.Main;
 import com.calplus.ihrgstats.databasemanager.F16_Admins;
 import com.calplus.ihrgstats.telegrambot.listener.TelegramListener;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
+import com.calplus.ihrgstats.utils.HttpClientFactory;
 import com.calplus.ihrgstats.utils.LogHelper;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse;
 import com.calplus.ihrgstats.utils.TelegramHtml;
@@ -38,7 +39,7 @@ public class CommandAbout {
         this.logHelper = new LogHelper();
         this.version = loadVersion();
         this.botToken = botToken;
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClientFactory.newClient();
         this.gson = new Gson();
     }
 
@@ -69,6 +70,7 @@ public class CommandAbout {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();

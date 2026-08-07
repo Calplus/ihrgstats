@@ -101,12 +101,39 @@ public class CommandRankPlayers {
             return new RankResponse(errorMsg, (Path) null);
         }
 
-        players.sort((p1, p2) -> Double.compare(p2.trueElo, p1.trueElo));
+        // Name (then hall) tiebreak: the input order comes from HashMap entry
+        // iteration, so equal ratings would otherwise swap display order
+        // between runs/JVMs.
+        players.sort((p1, p2) -> {
+            int byElo = Double.compare(p2.trueElo, p1.trueElo);
+            if (byElo != 0) return byElo;
+            int byName = p1.name.compareTo(p2.name);
+            if (byName != 0) return byName;
+            return p1.hall.compareTo(p2.hall);
+        });
 
         String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
         String table = formatPlayersTable(players, homeHall);
 
-        String roundDisplay = allYears ? "All Years" : (selectedRound.equalsIgnoreCase("all") ? "All Rounds" : "Round " + selectedRound);
+        // Round-scoped header shows the round's real label (same resolution
+        // the image metadata uses) - the raw selection value is a
+        // round_order number, and the two can disagree on custom labels.
+        String roundDisplay;
+        if (allYears) {
+            roundDisplay = "All Years";
+        } else if (selectedRound.equalsIgnoreCase("all")) {
+            roundDisplay = "All Rounds";
+        } else {
+            roundDisplay = "Round " + selectedRound;
+            try {
+                A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
+                if (round != null && round.roundLabel != null && !round.roundLabel.isEmpty()) {
+                    roundDisplay = round.roundLabel;
+                }
+            } catch (SQLException | NumberFormatException e) {
+                // Keep the raw fallback - the header is not worth failing the command over.
+            }
+        }
         String yearDisplay = allYears ? "" : (", " + year);
         String message = "🏆 **Player Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
                 "Players ranked by TrueElo rating - ExpElo (the AI model's distilled rating) shown alongside where a champion has been trained\n\n" + table;

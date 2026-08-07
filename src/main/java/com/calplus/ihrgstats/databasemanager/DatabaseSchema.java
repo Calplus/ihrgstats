@@ -40,6 +40,11 @@ public class DatabaseSchema {
             String errorMsg = String.format("Error creating table %s: %s", tableName, e.getMessage());
             System.err.println(errorMsg);
             logHelper.logError(errorMsg);
+            // Fail fast: continuing here leaves a half-built schema that
+            // surfaces as confusing failures at first use. createDatabase
+            // already throws on connection-level failures - partial-schema
+            // failures must behave the same way.
+            throw new RuntimeException(errorMsg, e);
         }
     }
 
@@ -58,6 +63,8 @@ public class DatabaseSchema {
             String errorMsg = String.format("Error creating index %s on %s: %s", indexName, tableName, e.getMessage());
             System.err.println(errorMsg);
             logHelper.logError(errorMsg);
+            // Fail fast - same rationale as createTable.
+            throw new RuntimeException(errorMsg, e);
         }
     }
 

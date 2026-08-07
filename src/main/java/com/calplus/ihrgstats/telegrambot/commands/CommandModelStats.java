@@ -133,7 +133,10 @@ public class CommandModelStats {
             boardsByMatchId.put(rb.matchId, rb);
         }
 
-        Map<String, MatchupPredictor> modelCache = new HashMap<>();
+        // Optional values, not nullable ones: computeIfAbsent never caches a
+        // null result, so a missing/undecodable model version would be
+        // re-queried once per logged prediction instead of once total.
+        Map<String, Optional<MatchupPredictor>> modelCache = new HashMap<>();
         int scored = 0;
         int winnerHits = 0;
         int decisiveCount = 0; // excludes boards the model called as a draw (no winner to compare)
@@ -161,11 +164,11 @@ public class CommandModelStats {
             MatchupPredictor model = modelCache.computeIfAbsent(p.modelVersion, version -> {
                 try {
                     E17_MlModels.MlModel row = mlModels.getByVersion(version);
-                    return row != null ? ModelCodec.decode(row.family, row.paramsJson) : null;
+                    return Optional.ofNullable(row != null ? ModelCodec.decode(row.family, row.paramsJson) : null);
                 } catch (SQLException e) {
-                    return null;
+                    return Optional.empty();
                 }
-            });
+            }).orElse(null);
             if (model != null) {
                 MatchupPredictor.Probs probs = model.predict(rb);
                 double pRealized = rb.outcomeA == 1.0 ? probs.pWin : (rb.outcomeA == 0.0 ? probs.pLoss : probs.pDraw);

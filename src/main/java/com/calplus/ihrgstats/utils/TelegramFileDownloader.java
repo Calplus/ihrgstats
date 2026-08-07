@@ -19,7 +19,7 @@ public class TelegramFileDownloader {
 
     public TelegramFileDownloader(String botToken) {
         this.botToken = botToken;
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClientFactory.newClient();
     }
 
     /**
@@ -35,6 +35,7 @@ public class TelegramFileDownloader {
             
             HttpRequest getFileRequest = HttpRequest.newBuilder()
                 .uri(URI.create(getFileUrl))
+                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
                 .GET()
                 .build();
 
@@ -59,6 +60,7 @@ public class TelegramFileDownloader {
             
             HttpRequest downloadRequest = HttpRequest.newBuilder()
                 .uri(URI.create(downloadUrl))
+                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
                 .GET()
                 .build();
 

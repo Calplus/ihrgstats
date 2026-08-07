@@ -212,7 +212,14 @@ public class CommandAdmins {
 
         try {
             String nowTimestamp = TimezoneHelper.formatNow("yyyy-MM-dd HH:mm:ss.SSS");
-            admins.addAdmin(platform, platformUserId, displayName, nowTimestamp);
+            boolean inserted = admins.addAdmin(platform, platformUserId, displayName, nowTimestamp);
+
+            if (!inserted) {
+                // addAdmin is insert-if-absent - report the no-op honestly
+                // instead of a false "Added".
+                return new CommandResponse(String.format("ℹ️ <b>%s %s</b> is already an admin - nothing changed.",
+                        TelegramHtml.escape(platform), TelegramHtml.escape(platformUserId)), (java.nio.file.Path) null, null);
+            }
 
             String successMsg = String.format("✅ Added admin <b>%s %s</b>%s.",
                     TelegramHtml.escape(platform), TelegramHtml.escape(platformUserId),
