@@ -4,7 +4,9 @@ import com.calplus.ihrgstats.utils.DatabaseHelper;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Data-access helper for the {@code player_ratings_snapshot} table - the
@@ -119,6 +121,33 @@ public class D15_PlayerRatingSnapshots {
             }
         }
         return snapshots;
+    }
+
+    /**
+     * Every player's most recent snapshot row at or before the given round
+     * of a year, in ONE query - the bulk analog of calling
+     * {@link #getLatestSnapshotUpToRound} once per player. Rows are scanned
+     * in round_order ascending so the last write per player wins.
+     */
+    public Map<String, Snapshot> getLatestSnapshotsUpToRoundBulk(int year, int roundOrder, int ratingTypeId) throws SQLException {
+        String sql = "SELECT prs.* FROM player_ratings_snapshot prs " +
+                "JOIN rounds r ON prs.round_id = r.id " +
+                "WHERE prs.rating_type_id = ? AND r.year = ? AND r.round_order <= ? " +
+                "ORDER BY r.round_order ASC";
+        Map<String, Snapshot> latestByPlayer = new HashMap<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, ratingTypeId);
+            ps.setInt(2, year);
+            ps.setInt(3, roundOrder);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Snapshot snapshot = mapRow(rs);
+                    latestByPlayer.put(snapshot.playerId, snapshot);
+                }
+            }
+        }
+        return latestByPlayer;
     }
 
     /**

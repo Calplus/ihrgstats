@@ -4,10 +4,7 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 import java.util.Set;
 
@@ -249,97 +246,7 @@ public class TableImageGenerator {
                                           Set<Integer> highlightRows,
                                           String commandName,
                                           String entityName) throws IOException {
-        // Calculate optimal table width based on actual content
-        FontMetrics fm = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
-            .createGraphics().getFontMetrics(TABLE_FONT);
-        
-        // Calculate actual pixel widths for each column based on content
-        int[] actualColumnWidths = calculateColumnWidths(headers, rows, fm);
-        
-        // Calculate total table width including spacing
-        int tableWidth = calculateTableWidth(actualColumnWidths, fm);
-        // The canvas must be wide enough for the header text too, not just
-        // the table - otherwise a short table with a long title/description
-        // gets clipped, either off-canvas or by the crop below (A37).
-        int headerContentWidth = calculateHeaderContentWidth(metadata);
-        int imageWidth = Math.max(Math.max(tableWidth, headerContentWidth) + 40, 600);
-
-        // Calculate dynamic header height based on metadata
-        int headerOffset = calculateHeaderHeight(metadata);
-        int totalRows = rows.size() + 1; // +1 for header
-        int imageHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
-
-        BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = image.createGraphics();
-
-        // Enable anti-aliasing
-        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-
-        // Fill background
-        g2d.setColor(Color.WHITE);
-        g2d.fillRect(0, 0, imageWidth, imageHeight);
-
-        // Draw header metadata if provided
-        if (metadata != null) {
-            drawHeaderMetadata(g2d, metadata, imageWidth);
-        }
-
-        // Calculate table starting position (centered)
-        int tableStartX = (imageWidth - tableWidth) / 2;
-        int tableStartY = headerOffset + PADDING;
-        
-        g2d.setFont(TABLE_FONT);
-        
-        // Draw header row (light gray background)
-        g2d.setColor(new Color(220, 220, 220));
-        g2d.fillRect(tableStartX, tableStartY, tableWidth, ROW_HEIGHT);
-        g2d.setColor(TEXT_COLOR);
-        drawRow(g2d, headers, 0, alignments, actualColumnWidths, tableStartX, tableStartY);
-        
-        // Draw data rows
-        for (int i = 0; i < rows.size(); i++) {
-            int rowIndex = i + 1;
-            int yPos = tableStartY + rowIndex * ROW_HEIGHT;
-            
-            // Determine color based on position or highlight
-            Color bgColor;
-            if (highlightRows != null && highlightRows.contains(i)) {
-                bgColor = GREEN_HIGHLIGHT;  // Green for highlighted rows (home hall)
-            } else {
-                bgColor = getRowColor(i);
-            }
-            
-            g2d.setColor(bgColor);
-            g2d.fillRect(tableStartX, yPos, tableWidth, ROW_HEIGHT);
-            
-            g2d.setColor(TEXT_COLOR);
-            drawRow(g2d, rows.get(i), rowIndex, alignments, actualColumnWidths, tableStartX, tableStartY);
-        }
-        
-        g2d.dispose();
-
-        // Crop image to content bounds - wide enough for the header text as
-        // well as the table, so a short table with a long title/description
-        // doesn't get its header clipped at both edges (A37).
-        int croppedContentWidth = Math.min(imageWidth, Math.max(tableWidth, headerContentWidth));
-        int contentX = (imageWidth - croppedContentWidth) / 2;
-        int contentY = 0;  // Include header from top
-        int contentWidth = croppedContentWidth;
-        int contentHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
-        BufferedImage croppedImage = cropImage(image, contentX, contentY, contentWidth, contentHeight);
-
-        // Generate filename with convention: {command}_{name}_{date}_{time}.png
-        String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
-        String sanitizedName = entityName.isEmpty() ? "" : ImageRenderSupport.sanitizeName(entityName) + "_";
-        String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
-
-        // Save to the shared, dedicated output directory (not the OS temp
-        // dir - nothing was ever cleaning that up, so images accumulated
-        // there indefinitely with no inspectable, intentional home).
-        Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
-        ImageIO.write(croppedImage, "PNG", tempFile.toFile());
-
-        return tempFile;
+        return generateTable(headers, rows, null, alignments, metadata, highlightRows, commandName, entityName);
     }
 
     /**
@@ -367,58 +274,75 @@ public class TableImageGenerator {
                                         Set<Integer> highlightRows,
                                         String commandName,
                                         String entityName) throws IOException {
+        return generateTable(headers, rows, hallNames, alignments, metadata, highlightRows, commandName, entityName);
+    }
+
+    /**
+     * Shared core for the two ranking-table images - previously ~100
+     * near-identical lines maintained in parallel. The only difference:
+     * hall tables ({@code hallNames} non-null) reserve an icon column on
+     * the left and draw each row's hall icon in it.
+     */
+    private static Path generateTable(String[] headers, List<String[]> rows, List<String> hallNames,
+                                      TableFormatter.Alignment[] alignments,
+                                      ImageMetadata metadata, Set<Integer> highlightRows,
+                                      String commandName, String entityName) throws IOException {
+        boolean withIcons = hallNames != null;
+        int iconOffset = withIcons ? ICON_SIZE : 0;
+
         // Calculate optimal table width based on actual content
-        FontMetrics fm = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
-            .createGraphics().getFontMetrics(TABLE_FONT);
-        
+        Graphics2D metricsG2d = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
+        FontMetrics fm = metricsG2d.getFontMetrics(TABLE_FONT);
+        metricsG2d.dispose(); // FontMetrics stays valid after dispose
+
         // Calculate actual pixel widths for each column based on content
         int[] actualColumnWidths = calculateColumnWidths(headers, rows, fm);
-        
-        // Calculate total table width including spacing and icon
-        int tableWidth = calculateTableWidth(actualColumnWidths, fm) + ICON_SIZE;
+
+        // Calculate total table width including spacing (and the icon column for hall tables)
+        int tableWidth = calculateTableWidth(actualColumnWidths, fm) + iconOffset;
         // The canvas must be wide enough for the header text too, not just
         // the table - otherwise a short table with a long title/description
         // gets clipped, either off-canvas or by the crop below (A37).
         int headerContentWidth = calculateHeaderContentWidth(metadata);
         int imageWidth = Math.max(Math.max(tableWidth, headerContentWidth) + 40, 600);
-        
+
         // Calculate dynamic header height based on metadata
         int headerOffset = calculateHeaderHeight(metadata);
         int totalRows = rows.size() + 1; // +1 for header
         int imageHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
-        
+
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = image.createGraphics();
-        
+
         // Enable anti-aliasing
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        
+
         // Fill background
         g2d.setColor(Color.WHITE);
         g2d.fillRect(0, 0, imageWidth, imageHeight);
-        
+
         // Draw header metadata if provided
         if (metadata != null) {
             drawHeaderMetadata(g2d, metadata, imageWidth);
         }
-        
+
         // Calculate table starting position (centered)
         int tableStartX = (imageWidth - tableWidth) / 2;
         int tableStartY = headerOffset + PADDING;
-        
+
         g2d.setFont(TABLE_FONT);
-        
+
         // Draw header row (light gray background)
         g2d.setColor(new Color(220, 220, 220));
         g2d.fillRect(tableStartX, tableStartY, tableWidth, ROW_HEIGHT);
         g2d.setColor(TEXT_COLOR);
-        drawRow(g2d, headers, 0, alignments, actualColumnWidths, tableStartX + ICON_SIZE, tableStartY);
-        
-        // Draw data rows with hall icons
+        drawRow(g2d, headers, 0, alignments, actualColumnWidths, tableStartX + iconOffset, tableStartY);
+
+        // Draw data rows
         for (int i = 0; i < rows.size(); i++) {
             int rowIndex = i + 1;
             int yPos = tableStartY + rowIndex * ROW_HEIGHT;
-            
+
             // Determine color based on position or highlight
             Color bgColor;
             if (highlightRows != null && highlightRows.contains(i)) {
@@ -426,21 +350,21 @@ public class TableImageGenerator {
             } else {
                 bgColor = getRowColor(i);
             }
-            
+
             g2d.setColor(bgColor);
             g2d.fillRect(tableStartX, yPos, tableWidth, ROW_HEIGHT);
-            
-            // Draw hall icon
-            String hallName = hallNames.get(i);
-            BufferedImage hallIcon = loadHallIcon(hallName);
-            if (hallIcon != null) {
-                g2d.drawImage(hallIcon, tableStartX, yPos, ICON_SIZE, ICON_SIZE, null);
+
+            if (withIcons) {
+                BufferedImage hallIcon = loadHallIcon(hallNames.get(i));
+                if (hallIcon != null) {
+                    g2d.drawImage(hallIcon, tableStartX, yPos, ICON_SIZE, ICON_SIZE, null);
+                }
             }
-            
+
             g2d.setColor(TEXT_COLOR);
-            drawRow(g2d, rows.get(i), rowIndex, alignments, actualColumnWidths, tableStartX + ICON_SIZE, tableStartY);
+            drawRow(g2d, rows.get(i), rowIndex, alignments, actualColumnWidths, tableStartX + iconOffset, tableStartY);
         }
-        
+
         g2d.dispose();
 
         // Crop image to content bounds - wide enough for the header text as
@@ -457,13 +381,13 @@ public class TableImageGenerator {
         String timestamp = TimezoneHelper.formatNow("yyMMdd_HHmmss");
         String sanitizedName = entityName.isEmpty() ? "" : ImageRenderSupport.sanitizeName(entityName) + "_";
         String filename = String.format("%s_%s%s.png", commandName, sanitizedName, timestamp);
-        
+
         // Save to the shared, dedicated output directory (not the OS temp
         // dir - nothing was ever cleaning that up, so images accumulated
         // there indefinitely with no inspectable, intentional home).
         Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
         ImageIO.write(croppedImage, "PNG", tempFile.toFile());
-        
+
         return tempFile;
     }
     

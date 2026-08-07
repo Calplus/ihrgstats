@@ -6,7 +6,6 @@ import com.calplus.ihrgstats.databasemanager.D15_PlayerRatingSnapshots;
 
 import java.sql.SQLException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,16 +38,23 @@ public class RankingQueryHelper {
      */
     public Map<String, D11_PlayerRatings.Rating> getLatestRatingsUpToRound(int year, int roundOrderLimit, int ratingTypeId) throws SQLException {
         boolean pointInTime = roundOrderLimit != Integer.MAX_VALUE;
+        // Three flat queries instead of up to two PER active player: the bulk
+        // latest-rating rows, (point-in-time only) the bulk latest-snapshot
+        // rows overlaid on top - snapshot wins wherever one exists, exactly
+        // like the old per-player probe order - and the active roster, which
+        // restricts the result to this year's active players just as the old
+        // per-player loop did. Player-for-player identical output.
+        Map<String, D11_PlayerRatings.Rating> merged =
+                new HashMap<>(playerRatings.getLatestRatingsUpToRoundBulk(year, roundOrderLimit, ratingTypeId));
+        if (pointInTime) {
+            for (Map.Entry<String, D15_PlayerRatingSnapshots.Snapshot> entry
+                    : ratingSnapshots.getLatestSnapshotsUpToRoundBulk(year, roundOrderLimit, ratingTypeId).entrySet()) {
+                merged.put(entry.getKey(), toRating(entry.getValue()));
+            }
+        }
         Map<String, D11_PlayerRatings.Rating> ratings = new HashMap<>();
-        List<B6_PlayerYearStatus.Status> statuses = playerYearStatus.getActiveStatusesForYear(year);
-        for (B6_PlayerYearStatus.Status status : statuses) {
-            D11_PlayerRatings.Rating rating = null;
-            if (pointInTime) {
-                rating = toRating(ratingSnapshots.getLatestSnapshotUpToRound(status.playerId, year, roundOrderLimit, ratingTypeId));
-            }
-            if (rating == null) {
-                rating = playerRatings.getLatestRatingUpToRound(status.playerId, year, roundOrderLimit, ratingTypeId);
-            }
+        for (B6_PlayerYearStatus.Status status : playerYearStatus.getActiveStatusesForYear(year)) {
+            D11_PlayerRatings.Rating rating = merged.get(status.playerId);
             if (rating != null) {
                 ratings.put(status.playerId, rating);
             }

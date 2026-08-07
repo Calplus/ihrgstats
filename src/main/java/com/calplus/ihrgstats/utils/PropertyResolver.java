@@ -103,8 +103,10 @@ public class PropertyResolver {
      */
     public static String getProperty(String key) {
         try {
-            Properties props = loadAndResolve("application.properties");
-            return props.getProperty(key);
+            // Resolve only the requested key - resolving every ${} in the
+            // whole file per lookup was O(keys) regex work on every incoming
+            // update (the live-read settings getters call this constantly).
+            return resolvePlaceholders(loadRawProperties("application.properties").getProperty(key));
         } catch (IOException e) {
             System.err.println("Error loading property " + key + ": " + e.getMessage());
             return null;

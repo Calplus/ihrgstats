@@ -137,14 +137,23 @@ public class RatingRecalculator {
         }
 
         // 3. Rated set per round: players who played it, plus active same-hall
-        //    players who had already appeared earlier that year.
+        //    players who had already appeared earlier that year. The (hall,
+        //    year) statuses are cached for the run - the same pair was
+        //    previously re-queried for every round of the year.
         Set<String> allPlayerIds = new HashSet<>();
+        Map<String, List<B6_PlayerYearStatus.Status>> statusesByHallYear = new HashMap<>();
         for (RoundRef ref : roundRefs) {
             ref.ratedSet.addAll(ref.playersPlaying);
             Map<String, Integer> yearFirstAppearance =
                     firstAppearance.getOrDefault(ref.round.year, Map.of());
             for (int hallId : ref.hallsPlaying) {
-                for (B6_PlayerYearStatus.Status status : playerYearStatus.getStatusesForHallAndYear(hallId, ref.round.year)) {
+                String hallYearKey = hallId + ":" + ref.round.year;
+                List<B6_PlayerYearStatus.Status> hallStatuses = statusesByHallYear.get(hallYearKey);
+                if (hallStatuses == null) {
+                    hallStatuses = playerYearStatus.getStatusesForHallAndYear(hallId, ref.round.year);
+                    statusesByHallYear.put(hallYearKey, hallStatuses);
+                }
+                for (B6_PlayerYearStatus.Status status : hallStatuses) {
                     Integer first = yearFirstAppearance.get(status.playerId);
                     if (first != null && first <= ref.round.roundOrder) {
                         ref.ratedSet.add(status.playerId);

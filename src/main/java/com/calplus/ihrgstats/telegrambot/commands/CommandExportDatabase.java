@@ -248,12 +248,31 @@ public class CommandExportDatabase {
             if (sheet == null) {
                 return false;
             }
+            // Column widths from the header plus a bounded sample of rows -
+            // autoSizeColumn measured EVERY cell with font metrics, which
+            // dominated .xlsx export time on the largest tables
+            // (match_participants, player_ratings). Widths are display-only.
+            int lastSampleRow = Math.min(sheet.getLastRowNum(), AUTOSIZE_SAMPLE_ROWS);
             for (int c = 0; c < columnCount; c++) {
-                sheet.autoSizeColumn(c);
+                int maxChars = 0;
+                for (int r = 0; r <= lastSampleRow; r++) {
+                    Row sampleRow = sheet.getRow(r);
+                    if (sampleRow == null) continue;
+                    org.apache.poi.ss.usermodel.Cell cell = sampleRow.getCell(c);
+                    if (cell != null) {
+                        maxChars = Math.max(maxChars, cell.getStringCellValue().length());
+                    }
+                }
+                // POI column width units are 1/256 of a character; +2 chars
+                // of breathing room, capped at POI's 255-character maximum.
+                sheet.setColumnWidth(c, Math.min((maxChars + 2) * 256, 255 * 256));
             }
             return true;
         }
     }
+
+    /** Rows sampled per sheet when sizing columns (plus the header row). */
+    private static final int AUTOSIZE_SAMPLE_ROWS = 200;
 
     /**
      * Excel hard-caps cell text at 32,767 characters and POI throws past it,

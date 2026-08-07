@@ -25,7 +25,8 @@ public class LineupOptimizer {
 
     public static final int LINEUP_SIZE = Constants.Validation.MAX_PLAYERS_PER_HALL; // 5
     private static final int PRUNE_THRESHOLD = 16;
-    private static final int PRUNE_TARGET = 12;
+    /** Public so /lineup's "Roster pruned to top N" message can never drift from the actual cap. */
+    public static final int PRUNE_TARGET = 12;
 
     /** Both models' win/draw/loss for one board, our seat-player's perspective - the pairing table's "side by side". */
     public static class PairingProbs {

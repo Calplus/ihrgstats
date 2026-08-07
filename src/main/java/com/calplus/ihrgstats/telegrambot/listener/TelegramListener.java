@@ -1288,6 +1288,7 @@ public class TelegramListener {
             // clearing and re-flagging the CURRENT year's capped players
             // from a list that was never about this year at all.
             ParsedCappedlistFilename parsedCapped = parseCappedlistFilename(fileName);
+            RoundCsvProcessor.ParsedFilename parsedRound = RoundCsvProcessor.parseFilename(fileName);
             if (parsedCapped.matched) {
                 Integer year = parsedCapped.year != null ? parsedCapped.year : YearContext.getCurrentYear();
                 if (year == null) {
@@ -1315,8 +1316,8 @@ public class TelegramListener {
                     sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
 
-            } else if (RoundCsvProcessor.parseFilename(fileName).matched) {
-                RoundCsvProcessor.ParsedFilename parsed = RoundCsvProcessor.parseFilename(fileName);
+            } else if (parsedRound.matched) {
+                RoundCsvProcessor.ParsedFilename parsed = parsedRound;
                 Integer year = parsed.year != null ? parsed.year : YearContext.getCurrentYear();
 
                 if (year == null) {
@@ -1675,42 +1676,13 @@ public class TelegramListener {
 
             JsonObject payload = new JsonObject();
 
-            // Determine where to send the message
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                // Send to the same channel where the command was received
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-                
-                // Add thread ID if the original message was in a thread
-                if (originalMessage.has("message_thread_id")) {
-                    // Telegram's API expects message_thread_id as a number -
-                    // same fix as the upload/status/button senders.
-                    try {
-                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            } else {
-                // Send to the configured commands channel using helper method
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                    System.err.println("Cannot send command response: commands chat ID is not configured");
-                    return;
-                }
-                
-                payload.addProperty("chat_id", chatAndThread[0]);
-                
-                // Add thread ID if specified
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    try {
-                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
+            String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
+            if (target == null) {
+                System.err.println("Cannot send command response: commands chat ID is not configured");
+                return;
             }
-            
+            applySendTarget(payload, target);
+
             payload.addProperty("text", message);
             
             // Add parse_mode for HTML if message contains HTML tags
@@ -1854,41 +1826,15 @@ public class TelegramListener {
     private void sendMessageWithButtons(String message, String[] options, JsonObject originalMessage, String nonce) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String chatId;
-            String threadId;
 
-            // Determine where to send the message
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                // Send to the same channel where the file was uploaded
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                chatId = chat.get("id").getAsString();
-
-                // Add thread ID if the original message was in a thread
-                threadId = originalMessage.has("message_thread_id") ?
-                    originalMessage.get("message_thread_id").getAsString() : null;
-            } else {
-                // Use configured upload chat
-                String[] chatAndThread = getUploadChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                    System.err.println("Cannot send message with buttons: upload chat ID is not configured");
-                    return;
-                }
-                
-                chatId = chatAndThread[0];
-                threadId = chatAndThread[1];
+            String[] target = resolveSendTarget(originalMessage, this::getUploadChatIdAndThread);
+            if (target == null) {
+                System.err.println("Cannot send message with buttons: upload chat ID is not configured");
+                return;
             }
-            
+
             JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", chatId);
-
-            // Add thread ID if specified
-            if (threadId != null && !threadId.isEmpty()) {
-                try {
-                    payload.addProperty("message_thread_id", Integer.parseInt(threadId));
-                } catch (NumberFormatException e) {
-                    // Ignore if not a valid number
-                }
-            }
+            applySendTarget(payload, target);
 
             // Add parse_mode for HTML if message contains HTML tags
             if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
@@ -1943,31 +1889,16 @@ public class TelegramListener {
     private void sendMessageToUploadChat(String message, JsonObject originalMessage) {
         try {
             message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-            String chatId;
-            String threadId;
 
-            // Determine where to send the message
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                // Send to the same channel where the file was uploaded
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                chatId = chat.get("id").getAsString();
-
-                // Add thread ID if the original message was in a thread
-                threadId = originalMessage.has("message_thread_id") ?
-                    originalMessage.get("message_thread_id").getAsString() : null;
-            } else {
-                // Use configured upload chat
-                String[] chatAndThread = getUploadChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                    System.err.println("Cannot send message: upload chat ID is not configured");
-                    discordLog.logWarning("Cannot send message to Telegram: upload chat not configured");
-                    return;
-                }
-                
-                chatId = chatAndThread[0];
-                threadId = chatAndThread[1];
+            String[] target = resolveSendTarget(originalMessage, this::getUploadChatIdAndThread);
+            if (target == null) {
+                System.err.println("Cannot send message: upload chat ID is not configured");
+                discordLog.logWarning("Cannot send message to Telegram: upload chat not configured");
+                return;
             }
-            
+            String chatId = target[0];
+            String threadId = target[1];
+
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
             payload.addProperty("text", message);
@@ -2102,62 +2033,32 @@ public class TelegramListener {
      * Handles /settings command
      */
     private void handleSettingsCommand(JsonObject message) {
-        try {
-            // Get user ID from message
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandSettings settingsCommand = 
-                new com.calplus.ihrgstats.telegrambot.commands.CommandSettings();
-            
-            com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse response = 
-                settingsCommand.handleCommand(userId);
-
+        runCommandHandler(message, "/settings", false, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandSettings.SettingsResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandSettings().handleCommand(userId);
             if (response.buttons != null) {
-                // Send message with buttons
                 sendMessageWithSettingsButtons(response.message, response.buttons, message);
             } else {
                 // Just send message (e.g., unauthorized)
                 sendMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /settings command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+        });
     }
 
     /**
      * Handles /exportdatabase command
      */
     private void handleExportDatabaseCommand(JsonObject message) {
-        try {
-            // Get user ID from message
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase exportCommand = 
-                new com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase();
-            
+        runCommandHandler(message, "/exportdatabase", false, userId -> {
             com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase.ExportResponse response =
-                exportCommand.requestFormatChoice(userId);
-
+                new com.calplus.ihrgstats.telegrambot.commands.CommandExportDatabase().requestFormatChoice(userId);
             if (response.buttons != null) {
-                // Send confirmation message with buttons
                 sendMessageWithExportButtons(response.message, response.buttons, message, userId);
             } else {
                 // Just send message (e.g., unauthorized)
                 sendMessageToCommandsChannel(response.message, message);
             }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /exportdatabase command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+        });
     }
 
     /**
@@ -2169,39 +2070,15 @@ public class TelegramListener {
      * user's button clicks and confirmation replies behind it.
      */
     private void handleRankPlayersCommand(JsonObject message) {
-        Thread rankPlayersThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers rankCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers.RankResponse response =
-                    rankCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithRankPlayersButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /rankplayers command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/rankplayers", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers.RankResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandRankPlayers().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithRankPlayersButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        rankPlayersThread.setDaemon(true);
-        rankPlayersThread.start();
     }
 
     /**
@@ -2209,39 +2086,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleRankHallsCommand(JsonObject message) {
-        Thread rankHallsThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls rankCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls.RankResponse response =
-                    rankCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithRankHallsButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /rankhalls command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/rankhalls", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls.RankResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandRankHalls().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithRankHallsButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        rankHallsThread.setDaemon(true);
-        rankHallsThread.start();
     }
 
     /**
@@ -2249,33 +2102,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleCompareHallsCommand(JsonObject message) {
-        Thread compareHallsThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls compareCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response =
-                    compareCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
-                } else {
-                    sendMessageToCommandsChannel(response.message, message);
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /comparehalls command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/comparehalls", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls.CompareResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandCompareHalls().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithCompareHallsButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
             }
         });
-        compareHallsThread.setDaemon(true);
-        compareHallsThread.start();
     }
 
     /**
@@ -2325,6 +2160,42 @@ public class TelegramListener {
             String errorMsg = "Error processing " + context + ": " + e.getMessage();
             logHelper.logError(errorMsg);
             e.printStackTrace();
+        }
+    }
+
+    /** Command-specific work for one slash command; may throw - the scaffold logs and reports failures. */
+    private interface CommandHandlerBody {
+        void handle(String userId) throws Exception;
+    }
+
+    /**
+     * Shared scaffold for the slash-command handlers (the command-side twin
+     * of {@link #runCallbackRouting}): extracts the sender's userId, runs
+     * the handler body - on a daemon worker thread when the command is
+     * heavy (report/image generation must not stall the polling thread) -
+     * and reports any failure to the logs and to the chat the command came
+     * from. Previously this same ~25-line frame was copy-pasted into every
+     * one of the fifteen handlers.
+     */
+    private void runCommandHandler(JsonObject message, String commandLabel, boolean onWorkerThread, CommandHandlerBody body) {
+        Runnable work = () -> {
+            try {
+                JsonObject from = message.getAsJsonObject("from");
+                String userId = from.get("id").getAsString();
+                body.handle(userId);
+            } catch (Exception e) {
+                String errorMsg = "Error processing " + commandLabel + " command: " + e.getMessage();
+                logHelper.logError(errorMsg);
+                e.printStackTrace();
+                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+            }
+        };
+        if (onWorkerThread) {
+            Thread workerThread = new Thread(work);
+            workerThread.setDaemon(true);
+            workerThread.start();
+        } else {
+            work.run();
         }
     }
 
@@ -2425,33 +2296,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleComparePlayersCommand(JsonObject message) {
-        Thread comparePlayersThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers compareCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.CompareResponse response =
-                    compareCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
-                } else {
-                    sendMessageToCommandsChannel(response.message, message);
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /compareplayers command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/compareplayers", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers.CompareResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandComparePlayers().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithComparePlayersButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendMessageToCommandsChannel(response.message, message);
             }
         });
-        comparePlayersThread.setDaemon(true);
-        comparePlayersThread.start();
     }
 
     /**
@@ -2557,57 +2410,22 @@ public class TelegramListener {
      * therefore all other incoming updates) for as long as those calls take.
      */
     private void handleAboutCommand(JsonObject message) {
-        Thread aboutThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandAbout aboutCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandAbout(botToken);
-
-                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                    aboutCommand.handleCommand(userId);
-
-                sendMessageToCommandsChannel(response.message, message);
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /about command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-            }
+        runCommandHandler(message, "/about", true, userId -> {
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandAbout(botToken).handleCommand(userId);
+            sendMessageToCommandsChannel(response.message, message);
         });
-        aboutThread.setDaemon(true);
-        aboutThread.start();
     }
 
     /**
      * Handles /help command
      */
     private void handleHelpCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-            
-            com.calplus.ihrgstats.telegrambot.commands.CommandHelp helpCommand = 
-                new com.calplus.ihrgstats.telegrambot.commands.CommandHelp();
-            
-            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response = 
-                helpCommand.handleCommand(userId);
-            
-            // Send message with buttons if available
-            if (response.buttonConfig != null) {
-                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-            } else {
-                sendMessageToCommandsChannel(response.message, message);
-            }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /help command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+        runCommandHandler(message, "/help", false, userId -> {
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandHelp().handleCommand(userId);
+            sendStepOrPlain(response.message, response.buttonConfig, message);
+        });
     }
 
     /**
@@ -2615,39 +2433,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleInfoPlayerCommand(JsonObject message) {
-        Thread infoPlayerThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer infoCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response =
-                    infoCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /infoplayer command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/infoplayer", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer.InfoResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoPlayer().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        infoPlayerThread.setDaemon(true);
-        infoPlayerThread.start();
     }
 
     /**
@@ -2655,39 +2449,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleInfoHallCommand(JsonObject message) {
-        Thread infoHallThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall infoCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response =
-                    infoCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /infohall command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/infohall", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall.InfoResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoHall().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        infoHallThread.setDaemon(true);
-        infoHallThread.start();
     }
 
     /**
@@ -2695,39 +2465,15 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleInfoMatchCommand(JsonObject message) {
-        Thread infoMatchThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch infoCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response =
-                    infoCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /infomatch command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/infomatch", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch.MatchResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatch().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        infoMatchThread.setDaemon(true);
-        infoMatchThread.start();
     }
 
     /**
@@ -2735,95 +2481,37 @@ public class TelegramListener {
      * {@link #handleRankPlayersCommand} for why.
      */
     private void handleInfoMatchHallCommand(JsonObject message) {
-        Thread infoMatchHallThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall infoCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response =
-                    infoCommand.handleCommand(userId);
-
-                // Send message with buttons if available
-                if (response.buttonConfig != null) {
-                    sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-                } else {
-                    // Send text message
-                    sendLongMessageToCommandsChannel(response.message, message);
-
-                    // Send image if available
-                    if (response.imagePath != null) {
-                        sendImageToCommandsChannel(response.imagePath, message);
-                    }
-                }
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /infomatchhall command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
+        runCommandHandler(message, "/infomatchhall", true, userId -> {
+            com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall.InfoResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandInfoMatchHall().handleCommand(userId);
+            if (response.buttonConfig != null) {
+                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
+            } else {
+                sendReportWithImage(response.message, response.imagePath, message);
             }
         });
-        infoMatchHallThread.setDaemon(true);
-        infoMatchHallThread.start();
     }
 
     /**
      * Handles /matchtypes command (admin-only)
      */
     private void handleMatchTypesCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes matchTypesCommand =
-                new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes();
-
+        runCommandHandler(message, "/matchtypes", false, userId -> {
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                matchTypesCommand.handleCommand(userId);
-
-            if (response.buttonConfig != null) {
-                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-            } else {
-                sendMessageToCommandsChannel(response.message, message);
-            }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /matchtypes command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+                new com.calplus.ihrgstats.telegrambot.commands.CommandMatchTypes().handleCommand(userId);
+            sendStepOrPlain(response.message, response.buttonConfig, message);
+        });
     }
 
     /**
      * Handles /admins command (admin-only)
      */
     private void handleAdminsCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandAdmins adminsCommand =
-                new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins();
-
+        runCommandHandler(message, "/admins", false, userId -> {
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                adminsCommand.handleCommand(userId);
-
-            if (response.buttonConfig != null) {
-                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-            } else {
-                sendMessageToCommandsChannel(response.message, message);
-            }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /admins command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+                new com.calplus.ihrgstats.telegrambot.commands.CommandAdmins().handleCommand(userId);
+            sendStepOrPlain(response.message, response.buttonConfig, message);
+        });
     }
 
     /**
@@ -2895,60 +2583,25 @@ public class TelegramListener {
      * Handles /modelstats command (admin-only) - a single read-only report, no wizard.
      */
     private void handleModelStatsCommand(JsonObject message) {
-        // Runs on a background thread like the other report commands - the
-        // live scorecard re-extracts every board in the database, which
-        // would otherwise stall the polling loop (and every other user's
-        // updates) for the full duration.
-        Thread modelStatsThread = new Thread(() -> {
-            try {
-                JsonObject from = message.getAsJsonObject("from");
-                String userId = from.get("id").getAsString();
-
-                com.calplus.ihrgstats.telegrambot.commands.CommandModelStats modelStatsCommand =
-                    new com.calplus.ihrgstats.telegrambot.commands.CommandModelStats();
-
-                com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                    modelStatsCommand.handleCommand(userId);
-
-                sendLongMessageToCommandsChannel(response.message, message);
-
-            } catch (Exception e) {
-                String errorMsg = "Error processing /modelstats command: " + e.getMessage();
-                logHelper.logError(errorMsg);
-                e.printStackTrace();
-                sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-            }
+        // Worker thread like the other report commands - the live scorecard
+        // re-extracts every board in the database, which would otherwise
+        // stall the polling loop for the full duration.
+        runCommandHandler(message, "/modelstats", true, userId -> {
+            com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
+                new com.calplus.ihrgstats.telegrambot.commands.CommandModelStats().handleCommand(userId);
+            sendLongMessageToCommandsChannel(response.message, message);
         });
-        modelStatsThread.setDaemon(true);
-        modelStatsThread.start();
     }
 
     /**
      * Handles /predict command (admin-only) - starts the hall/player/hall/player wizard.
      */
     private void handlePredictCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandPredict predictCommand =
-                new com.calplus.ihrgstats.telegrambot.commands.CommandPredict();
-
+        runCommandHandler(message, "/predict", false, userId -> {
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                predictCommand.handleCommand(userId);
-
-            if (response.buttonConfig != null) {
-                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-            } else {
-                sendMessageToCommandsChannel(response.message, message);
-            }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /predict command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+                new com.calplus.ihrgstats.telegrambot.commands.CommandPredict().handleCommand(userId);
+            sendStepOrPlain(response.message, response.buttonConfig, message);
+        });
     }
 
     /**
@@ -2987,28 +2640,11 @@ public class TelegramListener {
      * Handles /lineup command (admin-only) - starts the opponent-hall picker.
      */
     private void handleLineupCommand(JsonObject message) {
-        try {
-            JsonObject from = message.getAsJsonObject("from");
-            String userId = from.get("id").getAsString();
-
-            com.calplus.ihrgstats.telegrambot.commands.CommandLineup lineupCommand =
-                new com.calplus.ihrgstats.telegrambot.commands.CommandLineup();
-
+        runCommandHandler(message, "/lineup", false, userId -> {
             com.calplus.ihrgstats.utils.TelegramCommandUtils.CommandResponse response =
-                lineupCommand.handleCommand(userId);
-
-            if (response.buttonConfig != null) {
-                sendMessageWithGenericButtons(response.message, response.buttonConfig, message);
-            } else {
-                sendMessageToCommandsChannel(response.message, message);
-            }
-
-        } catch (Exception e) {
-            String errorMsg = "Error processing /lineup command: " + e.getMessage();
-            logHelper.logError(errorMsg);
-            e.printStackTrace();
-            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
-        }
+                new com.calplus.ihrgstats.telegrambot.commands.CommandLineup().handleCommand(userId);
+            sendStepOrPlain(response.message, response.buttonConfig, message);
+        });
     }
 
     /**
@@ -3207,6 +2843,43 @@ public class TelegramListener {
     }
 
     /**
+     * Resolves the destination for an outgoing send: the chat the original
+     * message came from (when allowAllChannelsProcessing is on), or the
+     * configured fallback channel. Returns {chatId, threadIdOrNull}, or
+     * null when no destination is configured - callers print their own
+     * per-context error and skip the send. Previously this same block was
+     * copy-pasted into every sender.
+     */
+    private String[] resolveSendTarget(JsonObject originalMessage, java.util.function.Supplier<String[]> configuredFallback) {
+        if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
+            JsonObject chat = originalMessage.getAsJsonObject("chat");
+            String threadId = originalMessage.has("message_thread_id")
+                ? originalMessage.get("message_thread_id").getAsString() : null;
+            return new String[]{chat.get("id").getAsString(), threadId};
+        }
+        String[] chatAndThread = configuredFallback.get();
+        if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
+            return null;
+        }
+        return chatAndThread;
+    }
+
+    /**
+     * Adds chat_id (and message_thread_id when present) to a payload, thread
+     * id parsed to int - Telegram's API expects a number there.
+     */
+    private static void applySendTarget(JsonObject payload, String[] target) {
+        payload.addProperty("chat_id", target[0]);
+        if (target[1] != null && !target[1].isEmpty()) {
+            try {
+                payload.addProperty("message_thread_id", Integer.parseInt(target[1]));
+            } catch (NumberFormatException e) {
+                // Ignore if not a valid number
+            }
+        }
+    }
+
+    /**
      * Sends an image to the commands channel (both compressed and uncompressed)
      */
     private void sendImageToCommandsChannel(java.nio.file.Path imagePath, JsonObject originalMessage) {
@@ -3225,169 +2898,91 @@ public class TelegramListener {
     }
     
     /**
-     * Sends an image as a photo (compressed) to the commands channel
+     * Builds and POSTs one multipart upload (chat routing fields plus a
+     * single file part). Shared by the photo/document image senders and the
+     * DM file sender - previously three byte-identical copies of this body
+     * construction.
      */
-    private void sendImageAsPhoto(java.nio.file.Path imagePath, JsonObject originalMessage) {
+    private HttpResponse<String> postMultipart(String url, String chatId, String threadId,
+            String fieldName, String fileName, String fileContentType, byte[] fileBytes)
+            throws IOException, InterruptedException {
+        String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+        java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+        java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
+
+        // Add chat_id
+        writer.append("--" + boundary).append("\r\n");
+        writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
+        writer.append("\r\n");
+        writer.append(chatId).append("\r\n");
+
+        // Add message_thread_id if specified
+        if (threadId != null && !threadId.isEmpty()) {
+            writer.append("--" + boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"message_thread_id\"").append("\r\n");
+            writer.append("\r\n");
+            writer.append(threadId).append("\r\n");
+        }
+
+        // Add the file part
+        writer.append("--" + boundary).append("\r\n");
+        writer.append("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileName + "\"").append("\r\n");
+        writer.append("Content-Type: " + fileContentType).append("\r\n");
+        writer.append("\r\n");
+        writer.flush();
+
+        outputStream.write(fileBytes);
+        outputStream.flush();
+
+        writer.append("\r\n");
+        writer.append("--" + boundary + "--").append("\r\n");
+        writer.flush();
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
+            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+            .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
+            .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * Shared frame for the photo/document image sends - the two were
+     * byte-identical except endpoint, form field name and log wording.
+     */
+    private void sendImageMultipart(String endpoint, String fieldName, String cannotLabel, String kindLabel,
+            java.nio.file.Path imagePath, JsonObject originalMessage) {
         try {
-            String url = "https://api.telegram.org/bot" + botToken + "/sendPhoto";
-            
-            // Read image bytes
+            String url = "https://api.telegram.org/bot" + botToken + "/" + endpoint;
             byte[] imageBytes = java.nio.file.Files.readAllBytes(imagePath);
-            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-            
-            // Determine where to send
-            String targetChatId;
-            String targetThreadId = null;
-            
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                // Send to the same channel where the command was received
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                targetChatId = chat.get("id").getAsString();
-                if (originalMessage.has("message_thread_id")) {
-                    targetThreadId = originalMessage.get("message_thread_id").getAsString();
-                }
-            } else {
-                // Send to the configured commands channel
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                    System.err.println("Cannot send image: commands chat ID is not configured");
-                    return;
-                }
-                targetChatId = chatAndThread[0];
-                targetThreadId = chatAndThread[1];
+
+            String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
+            if (target == null) {
+                System.err.println("Cannot send " + cannotLabel + ": commands chat ID is not configured");
+                return;
             }
-            
-            // Build multipart request body
-            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-            java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
-            
-            // Add chat_id
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
-            writer.append("\r\n");
-            writer.append(targetChatId).append("\r\n");
-            
-            // Add message_thread_id if specified
-            if (targetThreadId != null && !targetThreadId.isEmpty()) {
-                writer.append("--" + boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"message_thread_id\"").append("\r\n");
-                writer.append("\r\n");
-                writer.append(targetThreadId).append("\r\n");
-            }
-            
-            // Add photo
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"photo\"; filename=\"" + imagePath.getFileName().toString() + "\"").append("\r\n");
-            writer.append("Content-Type: image/png").append("\r\n");
-            writer.append("\r\n");
-            writer.flush();
-            
-            outputStream.write(imageBytes);
-            outputStream.flush();
-            
-            writer.append("\r\n");
-            writer.append("--" + boundary + "--").append("\r\n");
-            writer.flush();
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
-                .build();
-            
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            HttpResponse<String> response = postMultipart(url, target[0], target[1],
+                fieldName, imagePath.getFileName().toString(), "image/png", imageBytes);
+
             if (response.statusCode() != 200) {
-                System.err.println("Failed to send image as photo (HTTP " + response.statusCode() + "): " + response.body());
+                System.err.println("Failed to send " + kindLabel + " (HTTP " + response.statusCode() + "): " + response.body());
             }
         } catch (Exception e) {
-            System.err.println("Error sending image as photo: " + e.getMessage());
+            System.err.println("Error sending " + kindLabel + ": " + e.getMessage());
             e.printStackTrace();
         }
     }
-    
-    /**
-     * Sends an image as a document (uncompressed PNG) to the commands channel
-     */
+
+    /** Sends an image as a photo (compressed) to the commands channel. */
+    private void sendImageAsPhoto(java.nio.file.Path imagePath, JsonObject originalMessage) {
+        sendImageMultipart("sendPhoto", "photo", "image", "image as photo", imagePath, originalMessage);
+    }
+
+    /** Sends an image as a document (uncompressed PNG) to the commands channel. */
     private void sendImageAsDocument(java.nio.file.Path imagePath, JsonObject originalMessage) {
-        try {
-            String url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
-            
-            // Read image bytes
-            byte[] imageBytes = java.nio.file.Files.readAllBytes(imagePath);
-            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-            
-            // Determine where to send
-            String targetChatId;
-            String targetThreadId = null;
-            
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                // Send to the same channel where the command was received
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                targetChatId = chat.get("id").getAsString();
-                if (originalMessage.has("message_thread_id")) {
-                    targetThreadId = originalMessage.get("message_thread_id").getAsString();
-                }
-            } else {
-                // Send to the configured commands channel
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null || chatAndThread[0].isEmpty()) {
-                    System.err.println("Cannot send document: commands chat ID is not configured");
-                    return;
-                }
-                targetChatId = chatAndThread[0];
-                targetThreadId = chatAndThread[1];
-            }
-            
-            // Build multipart request body
-            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-            java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
-            
-            // Add chat_id
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
-            writer.append("\r\n");
-            writer.append(targetChatId).append("\r\n");
-            
-            // Add message_thread_id if specified
-            if (targetThreadId != null && !targetThreadId.isEmpty()) {
-                writer.append("--" + boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"message_thread_id\"").append("\r\n");
-                writer.append("\r\n");
-                writer.append(targetThreadId).append("\r\n");
-            }
-            
-            // Add document
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"document\"; filename=\"" + imagePath.getFileName().toString() + "\"").append("\r\n");
-            writer.append("Content-Type: image/png").append("\r\n");
-            writer.append("\r\n");
-            writer.flush();
-            
-            outputStream.write(imageBytes);
-            outputStream.flush();
-            
-            writer.append("\r\n");
-            writer.append("--" + boundary + "--").append("\r\n");
-            writer.flush();
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
-                .build();
-            
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            if (response.statusCode() != 200) {
-                System.err.println("Failed to send image as document (HTTP " + response.statusCode() + "): " + response.body());
-            }
-        } catch (Exception e) {
-            System.err.println("Error sending image as document: " + e.getMessage());
-            e.printStackTrace();
-        }
+        sendImageMultipart("sendDocument", "document", "document", "image as document", imagePath, originalMessage);
     }
 
     private void sendMessageWithSettingsButtons(String message,
@@ -3410,34 +3005,10 @@ public class TelegramListener {
 
             JsonObject payload = new JsonObject();
             
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-                
-                if (originalMessage.has("message_thread_id")) {
-                    // Telegram's API expects message_thread_id as a number -
-                    // same fix as the upload/status/button senders.
-                    try {
-                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-                
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    try {
-                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            }
-            
+            String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
+            if (target == null) return;
+            applySendTarget(payload, target);
+
             payload.addProperty("text", message);
             
             // Add parse_mode for HTML if message contains HTML tags
@@ -3488,33 +3059,9 @@ public class TelegramListener {
 
             JsonObject payload = new JsonObject();
 
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-
-                if (originalMessage.has("message_thread_id")) {
-                    // Telegram's API expects message_thread_id as a number -
-                    // same fix as the upload/status/button senders.
-                    try {
-                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    try {
-                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            }
+            String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
+            if (target == null) return;
+            applySendTarget(payload, target);
 
             payload.addProperty("text", message);
 
@@ -3603,33 +3150,9 @@ public class TelegramListener {
 
             JsonObject payload = new JsonObject();
 
-            // Determine where to send
-            if (isAllowAllChannelsProcessing() && originalMessage != null && originalMessage.has("chat")) {
-                JsonObject chat = originalMessage.getAsJsonObject("chat");
-                payload.addProperty("chat_id", chat.get("id").getAsString());
-
-                if (originalMessage.has("message_thread_id")) {
-                    // Telegram's API expects message_thread_id as a number -
-                    // same fix as the upload/status/button senders.
-                    try {
-                        payload.addProperty("message_thread_id", originalMessage.get("message_thread_id").getAsInt());
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            } else {
-                String[] chatAndThread = getCommandsChatIdAndThread();
-                if (chatAndThread == null || chatAndThread[0] == null) return;
-
-                payload.addProperty("chat_id", chatAndThread[0]);
-                if (chatAndThread[1] != null && !chatAndThread[1].isEmpty()) {
-                    try {
-                        payload.addProperty("message_thread_id", Integer.parseInt(chatAndThread[1]));
-                    } catch (NumberFormatException e) {
-                        // Ignore if not a valid number
-                    }
-                }
-            }
+            String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
+            if (target == null) return;
+            applySendTarget(payload, target);
 
             payload.addProperty("text", message);
 
@@ -3709,45 +3232,12 @@ public class TelegramListener {
     private void sendFileToUser(String userId, String filePath) {
         try {
             String url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
-            
-            // Read file content
             byte[] fileBytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath));
-            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-            
-            // Build multipart request body
-            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-            java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8), true);
-            
-            // Add chat_id (user's DM)
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"chat_id\"").append("\r\n");
-            writer.append("\r\n");
-            writer.append(userId).append("\r\n");
-            
-            // Add file
-            writer.append("--" + boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"document\"; filename=\"" + 
-                java.nio.file.Paths.get(filePath).getFileName().toString() + "\"").append("\r\n");
-            writer.append("Content-Type: application/octet-stream").append("\r\n");
-            writer.append("\r\n");
-            writer.flush();
-            
-            outputStream.write(fileBytes);
-            outputStream.flush();
-            
-            writer.append("\r\n");
-            writer.append("--" + boundary + "--").append("\r\n");
-            writer.flush();
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
-                .build();
-            
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
+
+            // chat_id is the user's DM; no thread id in a DM.
+            HttpResponse<String> response = postMultipart(url, userId, null, "document",
+                java.nio.file.Paths.get(filePath).getFileName().toString(), "application/octet-stream", fileBytes);
+
             if (response.statusCode() != 200) {
                 System.err.println("Failed to send file to user (HTTP " + response.statusCode() + "): " + response.body());
                 logHelper.logError("Failed to send database file to user DM: HTTP " + response.statusCode());

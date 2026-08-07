@@ -1,8 +1,10 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.PlayerStatsBuilder;
+import com.calplus.ihrgstats.telegrambot.utils.PlayerStatsBuilder.PlayerData;
+import com.calplus.ihrgstats.telegrambot.utils.PlayerStatsBuilder.YearSummary;
 import com.calplus.ihrgstats.telegrambot.utils.SelectionKeyboards;
-import com.calplus.ihrgstats.telegrambot.utils.RankingQueryHelper;
 import com.calplus.ihrgstats.utils.*;
 import com.calplus.ihrgstats.utils.TelegramCommandUtils.*;
 
@@ -23,9 +25,8 @@ public class CommandInfoPlayer {
     private final A3_Halls halls = new A3_Halls();
     private final B5_PlayerNames playerNames = new B5_PlayerNames();
     private final B6_PlayerYearStatus playerYearStatus = new B6_PlayerYearStatus();
-    private final C9_MatchParticipants participants = new C9_MatchParticipants();
     private final D10_RatingTypes ratingTypes = new D10_RatingTypes();
-    private final RankingQueryHelper rankingQueryHelper = new RankingQueryHelper();
+    private final PlayerStatsBuilder playerStatsBuilder = new PlayerStatsBuilder();
 
     private static final Map<String, PlayerInfoSelectionState> userSelectionStates = new ConcurrentHashMap<>();
 
@@ -164,24 +165,9 @@ public class CommandInfoPlayer {
         return new InfoResponse("ℹ️ Player information request cancelled.", (Path) null, null);
     }
 
-    /** Per-round player data, keyed by round_order for display. */
-    static class PlayerData {
-        String name;
-        String hall;
-        Map<Integer, String> roundLabelByOrder = new TreeMap<>();
-        Map<Integer, Integer> rankByRound = new TreeMap<>();
-        Map<Integer, Integer> eloByRound = new TreeMap<>();
-        Map<Integer, Integer> seatByRound = new TreeMap<>();
-        Map<Integer, Integer> outcomeByRound = new TreeMap<>(); // legacy 1/0/-1 convention
-        Map<Integer, String> oppNameByRound = new TreeMap<>();
-        Map<Integer, String> oppHallByRound = new TreeMap<>();
-        Map<Integer, Integer> oppEloByRound = new TreeMap<>();
-        Map<Integer, Double> scoreByRound = new TreeMap<>();
-        Map<Integer, Double> oppScoreByRound = new TreeMap<>();
-        Map<Integer, Boolean> selfTimeoutByRound = new TreeMap<>();
-        Map<Integer, Boolean> oppTimeoutByRound = new TreeMap<>();
-        Integer lastRoundOrder;
-    }
+    // PlayerData / YearSummary now live in the shared PlayerStatsBuilder
+    // (imported by name above) - /compareplayers renders from the same
+    // carriers.
 
     private InfoResponse generatePlayerInfo(String playerId, String playerName, String hallName, int year, String selectedRound) throws Exception {
         List<A1_Rounds.Round> availableRounds = rounds.getRoundsForYear(year);
@@ -195,7 +181,7 @@ public class CommandInfoPlayer {
             throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
         }
 
-        PlayerData player = fetchPlayerData(playerId, playerName, hallName, year, roundsToInclude, trueEloTypeId);
+        PlayerData player = playerStatsBuilder.fetchPlayerData(playerId, playerName, hallName, year, roundsToInclude, trueEloTypeId);
 
         if (player.eloByRound.isEmpty()) {
             throw new IllegalStateException("Player " + player.name + " has no data for " + year);
@@ -210,72 +196,11 @@ public class CommandInfoPlayer {
         return new InfoResponse(textOutput, imagePath, null);
     }
 
-    private PlayerData fetchPlayerData(String playerId, String playerName, String hallName, int year,
-                                        List<A1_Rounds.Round> roundsToInclude, int trueEloTypeId) throws SQLException {
-        PlayerData player = new PlayerData();
-        player.name = playerName != null ? playerName : playerId;
-        player.hall = hallName;
-
-        for (A1_Rounds.Round round : roundsToInclude) {
-            D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(playerId, round.id, trueEloTypeId);
-            if (rating == null) continue;
-
-            int elo = (int) Math.round(rating.ratingValue);
-            player.eloByRound.put(round.roundOrder, elo);
-            player.roundLabelByOrder.put(round.roundOrder, round.roundLabel);
-            player.lastRoundOrder = round.roundOrder;
-
-            Map<String, D11_PlayerRatings.Rating> allRatings = rankingQueryHelper.getLatestRatingsUpToRound(year, round.roundOrder, trueEloTypeId);
-            player.rankByRound.put(round.roundOrder, rankingQueryHelper.calculateRank(allRatings, rating.ratingValue));
-
-            C9_MatchParticipants.Participant me = participants.getParticipantForPlayerAndRound(playerId, round.id);
-            if (me != null) {
-                if (me.hallSeatNumber != null) player.seatByRound.put(round.roundOrder, me.hallSeatNumber);
-                player.outcomeByRound.put(round.roundOrder, VictoryRecordCalculator.toLegacyOutcome(me.outcome));
-                player.scoreByRound.put(round.roundOrder, me.score);
-                player.selfTimeoutByRound.put(round.roundOrder, C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(me.participationType));
-
-                C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(me.matchId, playerId);
-                if (opp != null) {
-                    player.oppScoreByRound.put(round.roundOrder, opp.score);
-                    player.oppTimeoutByRound.put(round.roundOrder, C9_MatchParticipants.PARTICIPATION_TIMEOUT.equals(opp.participationType));
-                    if (opp.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) {
-                        player.oppNameByRound.put(round.roundOrder, "WALKOVER");
-                    } else {
-                        String oppName = playerNames.getNameForYear(opp.playerId, year);
-                        player.oppNameByRound.put(round.roundOrder, oppName != null ? oppName : opp.playerId);
-                        D11_PlayerRatings.Rating oppRating = rankingQueryHelper.getPointInTimeRating(opp.playerId, round.id, trueEloTypeId);
-                        if (oppRating != null) {
-                            player.oppEloByRound.put(round.roundOrder, (int) Math.round(oppRating.ratingValue));
-                        }
-                    }
-                    A3_Halls.Hall oppHall = halls.getHallById(opp.hallId);
-                    if (oppHall != null && !oppHall.hallCode.equals(A3_Halls.UNKNOWN_HALL_CODE)) {
-                        player.oppHallByRound.put(round.roundOrder, oppHall.hallName);
-                    }
-                }
-            }
-        }
-
-        return player;
-    }
-
-    /** One year's collapsed summary row, for the "All Years" view. */
-    private static class YearSummary {
-        int year;
-        Integer finalRank;
-        Integer finalElo;
-        double avgSeat = 999;
-        double wins;
-        double losses;
-    }
-
     /**
-     * Reuses fetchPlayerData's existing per-round computation once per year
-     * (rather than re-deriving new aggregation math), collapsing each year
-     * down to a single summary row - the round axis becomes the year axis,
-     * avoiding the per-round width/height budgets exploding once a player
-     * has multiple years of history.
+     * Collapses each year down to a single summary row via the shared
+     * builder - the round axis becomes the year axis, avoiding the
+     * per-round width/height budgets exploding once a player has multiple
+     * years of history.
      */
     private InfoResponse generatePlayerInfoAllYears(String playerId, String playerName, String hallName) throws Exception {
         Integer trueEloTypeId = ratingTypes.getRatingTypeId(D10_RatingTypes.TRUE_ELO);
@@ -283,30 +208,7 @@ public class CommandInfoPlayer {
             throw new IllegalStateException("TrueElo rating type not found - has the database been seeded?");
         }
 
-        List<YearSummary> yearSummaries = new ArrayList<>();
-        for (int year : rounds.getAllYears()) {
-            List<A1_Rounds.Round> yearRounds = rounds.getRoundsForYear(year);
-            PlayerData yearData = fetchPlayerData(playerId, playerName, hallName, year, yearRounds, trueEloTypeId);
-            if (yearData.eloByRound.isEmpty()) continue;
-
-            YearSummary summary = new YearSummary();
-            summary.year = year;
-            summary.finalRank = yearData.rankByRound.get(yearData.lastRoundOrder);
-            summary.finalElo = yearData.eloByRound.get(yearData.lastRoundOrder);
-
-            List<Integer> seats = new ArrayList<>(yearData.seatByRound.values());
-            summary.avgSeat = seats.isEmpty() ? 999 : seats.stream().mapToInt(Integer::intValue).average().orElse(999);
-
-            for (Integer outcome : yearData.outcomeByRound.values()) {
-                if (outcome == null) continue;
-                Double points = VictoryRecordCalculator.outcomeToPoints(outcome);
-                if (points == null) continue;
-                summary.wins += points;
-                summary.losses += (1.0 - points);
-            }
-
-            yearSummaries.add(summary);
-        }
+        List<YearSummary> yearSummaries = playerStatsBuilder.buildYearSummaries(playerId, playerName, hallName, trueEloTypeId);
 
         if (yearSummaries.isEmpty()) {
             throw new IllegalStateException("Player " + (playerName != null ? playerName : playerId) + " has no data for any year");
@@ -351,7 +253,7 @@ public class CommandInfoPlayer {
 
         sb.append("**🏆 Season Record (wins-losses per year):**\n```\n");
         for (YearSummary s : yearSummaries) {
-            sb.append(String.format("%-6d %s\n", s.year, formatWinLoss(s.wins, s.losses)));
+            sb.append(String.format("%-6d %s\n", s.year, VictoryRecordCalculator.formatScorePair(s.wins, s.losses)));
         }
         sb.append("```\n");
 
@@ -394,18 +296,11 @@ public class CommandInfoPlayer {
 
         InfoImageGenerator.Section seasonSection = new InfoImageGenerator.Section("Season Record");
         for (YearSummary s : yearSummaries) {
-            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, formatWinLoss(s.wins, s.losses)));
+            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, VictoryRecordCalculator.formatScorePair(s.wins, s.losses)));
         }
         sections.add(seasonSection);
 
         return InfoImageGenerator.generateInfoImage(metadata, sections, hallName, "InfoPlayer", playerName);
-    }
-
-    private static String formatWinLoss(double wins, double losses) {
-        if (wins == Math.floor(wins) && losses == Math.floor(losses)) {
-            return String.format("%d-%d", (int) wins, (int) losses);
-        }
-        return String.format("%.1f-%.1f", wins, losses);
     }
 
     private String generateTextOutput(PlayerData player, List<Integer> roundOrders) {

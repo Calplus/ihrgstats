@@ -17,10 +17,15 @@ public class PropertyManager {
      */
     public static Map<String, String> getPropertiesByPrefix(String prefix) {
         Map<String, String> result = new LinkedHashMap<>();
-        
+
         try {
             Properties props = PropertyResolver.loadAndResolve(PROPERTIES_FILE);
-            for (String key : props.stringPropertyNames()) {
+            // Sorted: stringPropertyNames() is Hashtable-backed with no
+            // defined order, so the /settings menu ordering was JVM-dependent
+            // and could differ between restarts.
+            List<String> keys = new ArrayList<>(props.stringPropertyNames());
+            Collections.sort(keys);
+            for (String key : keys) {
                 if (key.startsWith(prefix)) {
                     result.put(key, props.getProperty(key));
                 }
@@ -28,7 +33,7 @@ public class PropertyManager {
         } catch (IOException e) {
             System.err.println("Error reading properties: " + e.getMessage());
         }
-        
+
         return result;
     }
     

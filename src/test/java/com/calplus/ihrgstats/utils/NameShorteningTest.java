@@ -33,7 +33,7 @@ public class NameShorteningTest {
     @Test
     void infoImage_nameThatAlreadyFits_isReturnedUnchanged() {
         FontMetrics fm = realTableFontMetrics();
-        String result = InfoImageGenerator.shortenNameWithInitials("Finn Vale", 500, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Finn Vale", 500, fm);
         assertEquals("Finn Vale", result);
     }
 
@@ -41,7 +41,7 @@ public class NameShorteningTest {
     void infoImage_longMultiWordName_shortensToFitWithinSafetyMargin() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 150; // deliberately tight
-        String result = InfoImageGenerator.shortenNameWithInitials("Barnaby Puck Vo Lin", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Barnaby Puck Vo Lin", availableWidth, fm);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
     }
@@ -52,7 +52,7 @@ public class NameShorteningTest {
         // carries - checked mathematically here and visually in the audit.
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 120;
-        String result = InfoImageGenerator.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
     }
@@ -61,7 +61,7 @@ public class NameShorteningTest {
     void infoImage_longSingleWordName_hardTruncatesWithEllipsisAndFits() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 100;
-        String result = InfoImageGenerator.shortenNameWithInitials("Supercalifragilisticexpialidocious", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Supercalifragilisticexpialidocious", availableWidth, fm);
         assertTrue(result.endsWith("..."), "A truncated single word should end with an ellipsis: " + result);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
@@ -71,7 +71,7 @@ public class NameShorteningTest {
     void infoImage_extremelyCrampedBudget_returnsEmptyRatherThanOverflowing() {
         FontMetrics fm = realTableFontMetrics();
         // Not even room for "..." itself.
-        String result = InfoImageGenerator.truncateToPixelWidth("Some Long Name", 10, fm);
+        String result = ImageRenderSupport.truncateToPixelWidth("Some Long Name", 10, fm);
         assertEquals("", result);
     }
 
@@ -82,7 +82,7 @@ public class NameShorteningTest {
         // Every "word" is already a single letter - the initials-shortening
         // loop can't reduce this further, so it must fall back to
         // truncateToPixelWidth instead of returning an oversized string.
-        String result = InfoImageGenerator.shortenNameWithInitials("A B C D E F G H I J K L M", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("A B C D E F G H I J K L M", availableWidth, fm);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
     }
@@ -91,7 +91,7 @@ public class NameShorteningTest {
     void infoImage_safetyMarginIsActuallyApplied_notJustAnExactFit() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 300;
-        String result = InfoImageGenerator.shortenNameWithInitials("Bartholomew Krieger Vandersloot", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Bartholomew Krieger Vandersloot", availableWidth, fm);
         // The result must land comfortably under the hard limit, not just barely under it.
         assertTrue(fm.stringWidth(result) <= availableWidth * 0.9 + 1,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") should respect the ~90% safety margin of " + availableWidth);
@@ -103,7 +103,7 @@ public class NameShorteningTest {
     void comparisonImage_longMultiWordName_shortensToFitWithinSafetyMargin() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 150;
-        String result = ComparisonImageGenerator.shortenNameWithInitials("Barnaby Puck Vo Lin", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Barnaby Puck Vo Lin", availableWidth, fm);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
     }
@@ -112,7 +112,7 @@ public class NameShorteningTest {
     void comparisonImage_commaContainingName_neverOverflowsATightBudget() {
         FontMetrics fm = realTableFontMetrics();
         int availableWidth = 120;
-        String result = ComparisonImageGenerator.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);
+        String result = ImageRenderSupport.shortenNameWithInitials("Nightingale, Florence", availableWidth, fm);
         assertTrue(fm.stringWidth(result) <= availableWidth,
                 "Result '" + result + "' (width " + fm.stringWidth(result) + ") must fit within " + availableWidth);
     }
@@ -120,7 +120,7 @@ public class NameShorteningTest {
     @Test
     void comparisonImage_extremelyCrampedBudget_returnsEmptyRatherThanOverflowing() {
         FontMetrics fm = realTableFontMetrics();
-        String result = ComparisonImageGenerator.truncateToPixelWidth("Some Long Name", 10, fm);
+        String result = ImageRenderSupport.truncateToPixelWidth("Some Long Name", 10, fm);
         assertEquals("", result);
     }
 }

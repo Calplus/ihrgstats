@@ -4,7 +4,9 @@ import com.calplus.ihrgstats.utils.DatabaseHelper;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Data-access helper for the {@code player_ratings} table - one row per
@@ -160,6 +162,33 @@ public class D11_PlayerRatings {
             }
         }
         return ratings;
+    }
+
+    /**
+     * Every player's most recent rating row at or before the given round of
+     * a year, in ONE query - the bulk analog of calling
+     * {@link #getLatestRatingUpToRound} once per player. Rows are scanned in
+     * round_order ascending so the last write per player wins.
+     */
+    public Map<String, Rating> getLatestRatingsUpToRoundBulk(int year, int roundOrder, int ratingTypeId) throws SQLException {
+        String sql = "SELECT pr.* FROM player_ratings pr " +
+                "JOIN rounds r ON pr.round_id = r.id " +
+                "WHERE pr.rating_type_id = ? AND r.year = ? AND r.round_order <= ? " +
+                "ORDER BY r.round_order ASC";
+        Map<String, Rating> latestByPlayer = new HashMap<>();
+        try (Connection conn = DatabaseHelper.getDefaultConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, ratingTypeId);
+            ps.setInt(2, year);
+            ps.setInt(3, roundOrder);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Rating rating = mapRow(rs);
+                    latestByPlayer.put(rating.playerId, rating);
+                }
+            }
+        }
+        return latestByPlayer;
     }
 
     /** A player's full rating history for a rating type, ordered oldest-first. */

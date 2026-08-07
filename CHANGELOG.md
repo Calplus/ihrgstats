@@ -2,6 +2,35 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 26] - 2026-08-07
+
+Performance + deduplication batch from the full-codebase review. Strictly behavior-preserving: the corpus exact-value battery and the full suite pass unchanged (273/0), and the perf harness was re-run against the recorded pre-review baseline.
+
+### Changed
+
+- **The per-player rank-map query collapsed to three flat queries**: `RankingQueryHelper.getLatestRatingsUpToRound` ran up to two queries per active player (snapshot probe + ratings fallback); it now runs one bulk latest-ratings query, one bulk latest-snapshots query overlaid on top, and the active-roster filter - same signature, player-for-player identical output, and every ranking/info/compare view benefits.
+- **`/comparehalls` ported onto the bulk-loading path** it never received: a new shared `HallStatsBuilder` (extracted verbatim from `/infohall`'s already-optimized report body) builds the per-round context (point-in-time ratings, rank maps, participants, halls) ONCE per comparison and shares it across BOTH halls - previously each hall re-fetched the point-in-time rating, the FULL rank map, the participant row, the opponent row and the opponent's hall once per player per round (thousands of queries per rendered view on a full season, multiplied by year count in the All-Years view, which now also builds each year's context once for both halls).
+- **`/compareplayers`/`/infoplayer` share one `PlayerStatsBuilder`**: their byte-identical ~50-line `fetchPlayerData` copies (plus `YearSummary` building and `formatWinLoss`, which was itself a byte-identical copy of `VictoryRecordCalculator.formatScorePair`) now live in one class, with per-view caches so a two-player comparison computes each round's rank map once, not once per player.
+- **Listener scaffolding deduplicated (~350 lines)**: the fifteen slash-command handlers' copy-pasted frame (extract userId → run command → dispatch → catch/log/report) collapsed onto one `runCommandHandler` scaffold (the command-side twin of the existing callback scaffold; which handlers run on a worker thread is unchanged per handler); the "determine where to send" chat/thread resolution block (7 copies) onto `resolveSendTarget`/`applySendTarget`; and the three byte-identical multipart body builders (photo, document, DM file) onto one `postMultipart` core with the photo/document senders merged into a single parameterized frame.
+- **Image generators**: the byte-identical name shortening/truncation twins (~90 lines) moved to `ImageRenderSupport`; `TableImageGenerator`'s player/hall table methods (~100 near-identical lines) merged into one core whose only branch is the hall-icon column. Hygiene: three undisposed font-metrics `Graphics2D` now disposed, dead imports removed from all three generators, and two long-deprecated `VictoryEntry` fields with zero readers deleted.
+- **Smaller**: whole-history recalculation caches the per-(hall, year) status list instead of re-querying it for every round; `.xlsx` export sizes columns from the header plus a bounded 200-row sample (character-count based) instead of font-measuring every cell of every table - widths are display-only; single-key property reads no longer regex-resolve every `${}` in the file per lookup; `/settings` menu keys are sorted (previously JVM-dependent Hashtable order); `/lineup`'s "pruned to top N" message references the optimizer's actual constant; a double filename parse in the upload router hoisted.
+
+### Performance (benchmark: 12 rounds, 3 halls, 24 players; baseline recorded pre-review at the same commit the review audited)
+
+- `/infohall` all-rounds view: **609 ms → 421-480 ms** (two after-runs)
+- `/rankplayers` all-rounds view: **124 ms → 94-109 ms**
+- `recalculateAll`: **68 ms → 53-60 ms**
+- retrain+distill+cache: 1494 ms → 1514-1540 ms (untouched path, within noise)
+- ingest 12 rounds: 9850 ms → 10378-10685 ms - within this metric's historical run-to-run swing (it has varied 2x across sessions on identical code); nothing on the ingest path changed except cheaper recalculation
+- The benchmark has no `/comparehalls` probe; its improvement is structural (the per-player-per-round query pattern is gone) and scales with roster and season size.
+
+### Notes
+
+- Deliberately NOT deduplicated after review: `/infomatchhall`'s per-opponent tally (a third copy of the fix, but a genuinely different shape - flat single-round fields plus the walkover "3-2" normalization); the round-scoped rewrite of upload prediction logging and the rolling-cache read loop (its most-recent-first ordering assumptions are load-bearing, per the previous perf pass).
+- The send-target dedup tightened one corner: senders that previously attempted a doomed send to an empty configured chat id now skip it (reachable only in misconfigured setups).
+- Visual-audit variants re-rendered and inspected after the image-generator changes.
+- 273 tests, 0 failures.
+
 ## [Beta 3 Update 25] - 2026-08-07
 
 Bug-fix batch from the full-codebase review (all 89 main files read end to end, findings reported first, fixes applied only after approval). Headline: every outbound HTTP call in the app could hang forever on a silently dropped connection - for the polling thread that meant a permanently deaf bot whose status heartbeat kept reporting "online".

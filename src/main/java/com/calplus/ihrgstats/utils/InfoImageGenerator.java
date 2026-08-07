@@ -4,11 +4,8 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -128,10 +125,6 @@ public class InfoImageGenerator {
         public boolean highlightOpponent; // True if opponent/right side should be highlighted green
         public Integer hallOutcome;     // Outcome value for images (1=win, 0=draw, -1=loss, null=unknown)
         public Integer oppOutcome;      // Outcome value for images (opponent's outcome)
-        
-        // Legacy fields for backward compatibility
-        public String result;           // Deprecated: use hallEmoji instead
-        public int _deprecatedOppElo;   // Deprecated: use opponentElo string instead
     }
     
     /**
@@ -592,14 +585,14 @@ public class InfoImageGenerator {
 
             // Hall name (right-justified before score column)
             if (hallNameSpace > 20) {
-                String displayName = shortenNameWithInitials(entry.playerHall, hallNameSpace, fm);
+                String displayName = ImageRenderSupport.shortenNameWithInitials(entry.playerHall, hallNameSpace, fm);
                 int nameWidth = fm.stringWidth(displayName);
                 g2d.drawString(displayName, scoreLeftEdge - 8 - nameWidth, textY);
             }
 
             // Opponent name (left-justified after score column)
             if (oppNameSpace > 20) {
-                String displayName = shortenNameWithInitials(entry.opponentHall, oppNameSpace, fm);
+                String displayName = ImageRenderSupport.shortenNameWithInitials(entry.opponentHall, oppNameSpace, fm);
                 g2d.drawString(displayName, scoreRightEdge + 8, textY);
             }
         } else {
@@ -647,14 +640,14 @@ public class InfoImageGenerator {
 
             // Draw player name (right-justified before score column)
             if (playerNameSpace > 20) {
-                String displayName = shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
+                String displayName = ImageRenderSupport.shortenNameWithInitials(entry.playerName, playerNameSpace, fm);
                 int nameWidth = fm.stringWidth(displayName);
                 g2d.drawString(displayName, scoreLeftEdge - 20 - nameWidth, textY);
             }
 
             // Draw opponent name (left-justified after score column)
             if (oppNameSpace > 20) {
-                String displayName = shortenNameWithInitials(entry.opponentName, oppNameSpace, fm);
+                String displayName = ImageRenderSupport.shortenNameWithInitials(entry.opponentName, oppNameSpace, fm);
                 g2d.drawString(displayName, scoreRightEdge + 20, textY);
             }
         }
@@ -662,103 +655,9 @@ public class InfoImageGenerator {
         return y + ROW_HEIGHT;
     }
     
-    /**
-     * Fraction of the truly available pixel width actually targeted when
-     * shortening/truncating a name - stops comfortably under the hard limit
-     * rather than at the exact last pixel, so font-metric rounding/hinting
-     * differences between environments can't tip a "just barely fits" name
-     * into overlapping the next element (A36).
-     */
-    private static final double NAME_WIDTH_SAFETY_MARGIN = 0.9;
+    // Name shortening/truncation lives in ImageRenderSupport - previously a
+    // byte-identical twin of ComparisonImageGenerator's copy.
 
-    /**
-     * Shortens a name by converting words to initials until it fits within
-     * availableWidth (measured in real pixels via fm, with a safety margin -
-     * see NAME_WIDTH_SAFETY_MARGIN), falling back to hard pixel-based
-     * truncation with an ellipsis if even every word reduced to an initial
-     * still doesn't fit.
-     * Always shortens the longest word first.
-     * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
-     */
-    static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
-        int targetWidth = (int) (availableWidth * NAME_WIDTH_SAFETY_MARGIN);
-
-        if (fm.stringWidth(name) <= targetWidth) {
-            return name;
-        }
-
-        // Split name into words
-        String[] words = name.split("\\s+");
-        if (words.length == 1) {
-            return truncateToPixelWidth(name, targetWidth, fm);
-        }
-
-        // Track which words are already initials
-        boolean[] isInitial = new boolean[words.length];
-
-        while (true) {
-            // Build current name
-            StringBuilder current = new StringBuilder();
-            for (int i = 0; i < words.length; i++) {
-                if (i > 0) current.append(" ");
-                current.append(words[i]);
-            }
-
-            String currentName = current.toString();
-
-            if (fm.stringWidth(currentName) <= targetWidth) {
-                return currentName;
-            }
-
-            // Find longest non-initial word to shorten
-            int longestIndex = -1;
-            int longestLength = 0;
-            for (int i = 0; i < words.length; i++) {
-                if (!isInitial[i] && words[i].length() > longestLength) {
-                    longestLength = words[i].length();
-                    longestIndex = i;
-                }
-            }
-
-            if (longestIndex == -1) {
-                // All words are already initials and it still doesn't fit -
-                // fall back to hard pixel truncation rather than overflowing.
-                return truncateToPixelWidth(currentName, targetWidth, fm);
-            }
-
-            // Shorten the longest word to initial
-            words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
-            isInitial[longestIndex] = true;
-        }
-    }
-
-    /**
-     * Truncates text to the longest prefix (plus an ellipsis) whose real
-     * rendered width fits within targetWidth, binary-searching on actual
-     * pixel width rather than assuming a fixed character count. Returns an
-     * empty string in the (very cramped) case where even the ellipsis alone
-     * doesn't fit - drawing nothing is safer than drawing something that
-     * still overflows.
-     */
-    static String truncateToPixelWidth(String text, int targetWidth, FontMetrics fm) {
-        String ellipsis = "...";
-        int ellipsisWidth = fm.stringWidth(ellipsis);
-        if (ellipsisWidth > targetWidth) {
-            return "";
-        }
-
-        int lo = 0, hi = text.length();
-        while (lo < hi) {
-            int mid = (lo + hi + 1) / 2;
-            if (fm.stringWidth(text.substring(0, mid)) + ellipsisWidth <= targetWidth) {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
-        }
-        return text.substring(0, lo) + ellipsis;
-    }
-    
     /**
      * Calculates maximum width needed for all sections
      */
@@ -792,9 +691,9 @@ public class InfoImageGenerator {
                     int emojiWidth = fm.stringWidth(entry.hallEmoji != null ? entry.hallEmoji : "✅") + 6;
                     int hallWidth = fm.stringWidth(entry.playerHall != null ? entry.playerHall : "H1") + 6;
                     int eloWidth = fm.stringWidth(entry.playerElo != null ? entry.playerElo : "1500") + 20;
-                    int nameWidth = fm.stringWidth(entry.playerName != null ? shortenNameWithInitials(entry.playerName, nameSizingEstimateWidth, fm) : "") + 20;
+                    int nameWidth = fm.stringWidth(entry.playerName != null ? ImageRenderSupport.shortenNameWithInitials(entry.playerName, nameSizingEstimateWidth, fm) : "") + 20;
                     int scoreWidth = fm.stringWidth(entry.score != null ? entry.score : "1-0") + 40;
-                    int oppNameWidth = fm.stringWidth(entry.opponentName != null ? shortenNameWithInitials(entry.opponentName, nameSizingEstimateWidth, fm) : "") + 20;
+                    int oppNameWidth = fm.stringWidth(entry.opponentName != null ? ImageRenderSupport.shortenNameWithInitials(entry.opponentName, nameSizingEstimateWidth, fm) : "") + 20;
                     int oppEloWidth = fm.stringWidth(entry.opponentElo != null ? entry.opponentElo : "1500") + 6;
                     int oppHallWidth = fm.stringWidth(entry.opponentHall != null ? String.format("%3s", entry.opponentHall) : "H1") + 6;
                     int oppEmojiWidth = fm.stringWidth(entry.oppEmoji != null ? entry.oppEmoji : "❌");
@@ -818,7 +717,8 @@ public class InfoImageGenerator {
         Graphics2D tempG2d = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
         tempG2d.setFont(HEADER_FONT);
         FontMetrics headerFm = tempG2d.getFontMetrics();
-        
+        tempG2d.dispose(); // FontMetrics stays valid after dispose
+
         for (Section section : sections) {
             // Header height
             height += headerFm.getHeight() + 10;

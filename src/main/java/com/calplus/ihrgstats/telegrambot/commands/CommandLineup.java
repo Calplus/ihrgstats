@@ -154,7 +154,7 @@ public class CommandLineup {
         sb.append("🎯 <b>Lineup vs ").append(TelegramHtml.escape(opponentHall.hallName)).append("</b>\n\n");
         sb.append("Predictor: <b>").append(result.predictorFamily).append("</b>");
         if (result.rosterPruned) {
-            sb.append(" | Roster pruned to top ").append(result.ourNominal5.size() >= 5 ? 12 : result.ourNominal5.size())
+            sb.append(" | Roster pruned to top ").append(LineupOptimizer.PRUNE_TARGET)
               .append(" by rating (").append(result.candidatesConsidered).append(" lineups considered)");
         } else {
             sb.append(" | ").append(result.candidatesConsidered).append(" lineups considered");

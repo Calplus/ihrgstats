@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.telegrambot.commands;
 
 import com.calplus.ihrgstats.databasemanager.*;
+import com.calplus.ihrgstats.telegrambot.utils.HallStatsBuilder;
 import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -222,14 +223,14 @@ public class CommandCompareHallsTest {
 
     // --- A33: win-probability tie-handling and denominator ---
 
-    private static CommandCompareHalls.PlayerData playerWithElo(int elo) {
-        CommandCompareHalls.PlayerData p = new CommandCompareHalls.PlayerData();
+    private static HallStatsBuilder.PlayerData playerWithElo(int elo) {
+        HallStatsBuilder.PlayerData p = new HallStatsBuilder.PlayerData();
         p.elo = elo;
         return p;
     }
 
-    private static CommandCompareHalls.HallData hallOf(int... elos) {
-        CommandCompareHalls.HallData h = new CommandCompareHalls.HallData();
+    private static HallStatsBuilder.HallData hallOf(int... elos) {
+        HallStatsBuilder.HallData h = new HallStatsBuilder.HallData();
         for (int elo : elos) {
             h.players.add(playerWithElo(elo));
         }
@@ -245,8 +246,8 @@ public class CommandCompareHallsTest {
         // win threshold by team2.size()=3 instead of the 1 board actually
         // compared, requiring an unreachable >1.5 wins from a single board.
         CommandCompareHalls compareHalls = new CommandCompareHalls();
-        CommandCompareHalls.HallData hall1 = hallOf(1000);
-        CommandCompareHalls.HallData hall2 = hallOf(900, 900, 900);
+        HallStatsBuilder.HallData hall1 = hallOf(1000);
+        HallStatsBuilder.HallData hall2 = hallOf(900, 900, 900);
 
         double winProbability = compareHalls.calculateWinningProbability(hall1, hall2);
 
@@ -265,8 +266,8 @@ public class CommandCompareHallsTest {
         // The old code gave a tied board ZERO credit, so neither permutation
         // ever cleared the win threshold, undercounting hall 1 as a flat 0%.
         CommandCompareHalls compareHalls = new CommandCompareHalls();
-        CommandCompareHalls.HallData hall1 = hallOf(1000, 900);
-        CommandCompareHalls.HallData hall2 = hallOf(1000, 800);
+        HallStatsBuilder.HallData hall1 = hallOf(1000, 900);
+        HallStatsBuilder.HallData hall2 = hallOf(1000, 800);
 
         double winProbability = compareHalls.calculateWinningProbability(hall1, hall2);
 
@@ -281,11 +282,11 @@ public class CommandCompareHallsTest {
         // Hall 1 stopped at round 3; hall 2 played on to round 5. The label
         // must reflect round 5 - the true latest round overall - not just
         // whichever hall happened to be passed as the first argument.
-        CommandCompareHalls.HallData hall1 = hallOf(1000);
+        HallStatsBuilder.HallData hall1 = hallOf(1000);
         hall1.lastRoundOrder = 3;
         hall1.lastRoundLabel = "Round 3";
 
-        CommandCompareHalls.HallData hall2 = hallOf(1000);
+        HallStatsBuilder.HallData hall2 = hallOf(1000);
         hall2.lastRoundOrder = 5;
         hall2.lastRoundLabel = "Round 5";
 
@@ -305,8 +306,8 @@ public class CommandCompareHallsTest {
         // tie scenario, because it silently folded every drawn permutation
         // into hall2's side instead of computing hall2's chance on its own.
         CommandCompareHalls compareHalls = new CommandCompareHalls();
-        CommandCompareHalls.HallData hall1 = hallOf(1000, 1000);
-        CommandCompareHalls.HallData hall2 = hallOf(1000, 1000);
+        HallStatsBuilder.HallData hall1 = hallOf(1000, 1000);
+        HallStatsBuilder.HallData hall2 = hallOf(1000, 1000);
 
         double hall1WinProbability = compareHalls.calculateWinningProbability(hall1, hall2);
         double hall2WinProbability = compareHalls.calculateWinningProbability(hall2, hall1);
@@ -318,11 +319,11 @@ public class CommandCompareHallsTest {
 
     @Test
     void latestRoundLabel_fallsBackToTheOtherHall_whenOneHasNoData() {
-        CommandCompareHalls.HallData hallWithData = hallOf(1000);
+        HallStatsBuilder.HallData hallWithData = hallOf(1000);
         hallWithData.lastRoundOrder = 4;
         hallWithData.lastRoundLabel = "Round 4";
 
-        CommandCompareHalls.HallData hallWithoutData = hallOf(); // no rounds played - lastRoundOrder stays null
+        HallStatsBuilder.HallData hallWithoutData = hallOf(); // no rounds played - lastRoundOrder stays null
 
         assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithData, hallWithoutData));
         assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithoutData, hallWithData));

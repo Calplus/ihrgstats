@@ -1,6 +1,7 @@
 package com.calplus.ihrgstats.utils;
 
 import java.awt.AlphaComposite;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
@@ -20,6 +21,101 @@ public final class ImageRenderSupport {
     public static String sanitizeName(String name) {
         if (name == null || name.isEmpty()) return "";
         return name.replaceAll("[^a-zA-Z0-9_-]", "_").replaceAll("_{2,}", "_").trim();
+    }
+
+    /**
+     * Names get a small safety margin under their nominal column width so a
+     * string measuring exactly at the boundary can't visually bleed into
+     * overlapping the next element (A36).
+     */
+    private static final double NAME_WIDTH_SAFETY_MARGIN = 0.9;
+
+    /**
+     * Shortens a name by converting words to initials until it fits within
+     * availableWidth (measured in real pixels via fm, with a safety margin -
+     * see NAME_WIDTH_SAFETY_MARGIN), falling back to hard pixel-based
+     * truncation with an ellipsis if even every word reduced to an initial
+     * still doesn't fit.
+     * Always shortens the longest word first.
+     * Example: "Thisisa Verylongfake Name" -> "Thisisa V. Name" -> "T. V. Name"
+     */
+    public static String shortenNameWithInitials(String name, int availableWidth, FontMetrics fm) {
+        int targetWidth = (int) (availableWidth * NAME_WIDTH_SAFETY_MARGIN);
+
+        if (fm.stringWidth(name) <= targetWidth) {
+            return name;
+        }
+
+        // Split name into words
+        String[] words = name.split("\\s+");
+        if (words.length == 1) {
+            return truncateToPixelWidth(name, targetWidth, fm);
+        }
+
+        // Track which words are already initials
+        boolean[] isInitial = new boolean[words.length];
+
+        while (true) {
+            // Build current name
+            StringBuilder current = new StringBuilder();
+            for (int i = 0; i < words.length; i++) {
+                if (i > 0) current.append(" ");
+                current.append(words[i]);
+            }
+
+            String currentName = current.toString();
+
+            if (fm.stringWidth(currentName) <= targetWidth) {
+                return currentName;
+            }
+
+            // Find longest non-initial word to shorten
+            int longestIndex = -1;
+            int longestLength = 0;
+            for (int i = 0; i < words.length; i++) {
+                if (!isInitial[i] && words[i].length() > longestLength) {
+                    longestLength = words[i].length();
+                    longestIndex = i;
+                }
+            }
+
+            if (longestIndex == -1) {
+                // All words are already initials and it still doesn't fit -
+                // fall back to hard pixel truncation rather than overflowing.
+                return truncateToPixelWidth(currentName, targetWidth, fm);
+            }
+
+            // Shorten the longest word to initial
+            words[longestIndex] = words[longestIndex].substring(0, 1) + ".";
+            isInitial[longestIndex] = true;
+        }
+    }
+
+    /**
+     * Truncates text to the longest prefix (plus an ellipsis) whose real
+     * rendered width fits within targetWidth, binary-searching on actual
+     * pixel width rather than assuming a fixed character count. Returns an
+     * empty string in the (very cramped) case where even the ellipsis alone
+     * doesn't fit - drawing nothing is safer than drawing something that
+     * still overflows.
+     */
+    public static String truncateToPixelWidth(String text, int targetWidth, FontMetrics fm) {
+        String ellipsis = "...";
+        int ellipsisWidth = fm.stringWidth(ellipsis);
+        if (ellipsisWidth > targetWidth) {
+            return "";
+        }
+
+        int lo = 0, hi = text.length();
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (fm.stringWidth(text.substring(0, mid)) + ellipsisWidth <= targetWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return text.substring(0, lo) + ellipsis;
     }
 
     /**
