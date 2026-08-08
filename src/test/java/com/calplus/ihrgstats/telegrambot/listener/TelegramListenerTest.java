@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.listener;
 
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,5 +87,43 @@ public class TelegramListenerTest {
     void parseCappedlistFilename_unrelatedFilename_doesNotMatch() {
         TelegramListener.ParsedCappedlistFilename parsed = TelegramListener.parseCappedlistFilename("2024_round_1.csv");
         assertFalse(parsed.matched);
+    }
+
+    /**
+     * Regression: half the send paths used to put message_thread_id into the
+     * payload as a STRING; Telegram's API expects a number there. The shared
+     * target applier must emit it as a JSON number.
+     */
+    @Test
+    void applySendTarget_sendsThreadIdAsANumber_notAString() {
+        JsonObject payload = new JsonObject();
+        TelegramListener.applySendTarget(payload, new String[]{"12345", "678"});
+
+        assertEquals("12345", payload.get("chat_id").getAsString());
+        assertTrue(payload.get("message_thread_id").getAsJsonPrimitive().isNumber(),
+                "message_thread_id must be a JSON number, not the old string form");
+        assertEquals(678, payload.get("message_thread_id").getAsInt());
+    }
+
+    @Test
+    void applySendTarget_omitsThreadId_whenEmptyOrNotNumeric() {
+        JsonObject noThread = new JsonObject();
+        TelegramListener.applySendTarget(noThread, new String[]{"12345", ""});
+        assertFalse(noThread.has("message_thread_id"), "an empty thread id must be omitted entirely");
+
+        JsonObject badThread = new JsonObject();
+        TelegramListener.applySendTarget(badThread, new String[]{"12345", "not-a-number"});
+        assertFalse(badThread.has("message_thread_id"), "a malformed thread id must be omitted, not sent as a string");
+    }
+
+    /**
+     * Regression: wrong-channel error text used to interpolate an EMPTY
+     * thread id as "Thread ID  (...)" with a blank in the middle.
+     */
+    @Test
+    void describeThread_fallsBackToAGenericLabel_whenThreadIdUnconfigured() {
+        assertEquals("Thread ID 42 (file upload channel)", TelegramListener.describeThread("42", "file upload channel"));
+        assertEquals("the configured file upload channel", TelegramListener.describeThread("", "file upload channel"));
+        assertEquals("the configured commands channel", TelegramListener.describeThread(null, "commands channel"));
     }
 }

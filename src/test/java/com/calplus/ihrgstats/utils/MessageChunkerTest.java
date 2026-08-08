@@ -99,6 +99,28 @@ public class MessageChunkerTest {
         }
     }
 
+    /**
+     * Gap found by a mutation check: every other fixture's RAW length
+     * already exceeds the limit, so none of them exercised the top-level
+     * early return - the one place a raw-length check could hide.
+     * Conversion only grows text inside fences (escaping) and around bold
+     * pairs, so the probe is a fenced block of ampersands: raw ~3010 fits
+     * the limit, converted ("&amp;" x 3000 inside &lt;pre&gt;) is ~15000.
+     */
+    @Test
+    void rawLengthFitsButConvertedExceeds_isStillSplit_notReturnedAsOneDoomedChunk() {
+        String message = "```\n" + "&".repeat(3000) + "\n```"; // raw 3010 <= limit; converted ~15000 > limit
+
+        List<String> chunks = MessageChunker.splitForTelegram(message);
+
+        assertTrue(chunks.size() > 1,
+                "raw length fits but converted length exceeds the limit - one unsplit chunk would 400 at send time");
+        for (String chunk : chunks) {
+            assertFalse(chunk.isEmpty());
+            assertTrue(TelegramHtml.prepareForSending(chunk).length() <= MessageChunker.TELEGRAM_MESSAGE_LIMIT);
+        }
+    }
+
     // --- Follow-up fixes found by finder-agent verification ---
 
     @Test

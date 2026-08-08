@@ -2,6 +2,33 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 27] - 2026-08-08
+
+Test-hardening and visual-audit close-out of the full-codebase review. Every test class was read end to end for authenticity (tautologies, circular oracles, no-exception-only tests, over-mocking, swallowed assertions - none found anywhere), the suite was stress-tested with deliberate bugs, and the rendered output of every image command was re-audited on a denser variant matrix.
+
+### Added
+
+- **28 new tests (273 → 301)** closing every practically-testable gap the audit surfaced:
+  - Regression tests for the review's bug-fix batch: the 3-character containment rule (a 2-char name no longer dialogs every containing debut, a 3-char one still does), the fuzzy returning-player hall-mismatch dialog (both keep-old-hall and use-new-hall resolutions), the one-capped-row-per-appearance claim, negative-score rejection in both validation branches, `formatHallName(null)`, the win-probability strongest-boards ordering (a capped-first team order can no longer field the wrong board), the identity-keyed All-Years seating collector (a renamed player is one row under the latest name; two same-named people stay two rows), `/predict`'s no-current-year refusal, deterministic name order on exact rating ties, renamed-round labels in text headers, `message_thread_id` emitted as a JSON number (with empty/malformed omitted), wrong-channel wording fallback, the HTTP client factory actually applying its connect timeout (and the long-poll timeout exceeding the 30s hold), schema creation failing fast (provoked against a real readonly database file), and `/admins` reporting "already an admin" with the table unchanged.
+  - Direct `/recalculate` tests: the empty-database path, exact reported counts cross-checked against the stored rows, and honest skip notes for the ML steps alongside a successful recalculation.
+  - Direct DAO tests for the bulk latest-row-per-player queries behind the ranking rewrite: last-write-wins per player, the inclusive round boundary, and year/rating-type isolation (for both current ratings and snapshots).
+  - `/help` Back-button tests (Back returns the main menu; the submenu carries the routed callback) and a message-chunker test for the one window nothing exercised: a message whose raw length fits the limit but whose converted length exceeds it.
+- **Deliberate-bug (mutation) verification of the suite**: 8 deliberate bugs introduced one at a time - rating-update sign flip, idle-round RD reset, ingestion outcome-comparison flip, identity-containment threshold, bulk-query boundary, walkover boards leaking into ML extraction, a dropped export row, and the chunker's length gate measuring raw text. 7 were caught immediately by existing tests (the dropped export row by the corpus export round-trip, off by exactly one row). The chunker gate survived the entire suite - that genuine gap became the new chunker test above, which now catches it. The tree was verified byte-identical after every check.
+- **Visual audit on a denser matrix**: 33 variants (every image command; thin single-outlier variants merged into denser ones, each image's full outlier inventory written to the coverage map), including **5 All-Years views audited for the first time**. Every image inspected: **no rendering defects**. The All-Years hall comparison now shows a year-long renamed player as ONE seating row under the most recent name with every year column filled - the intended rendering of the identity-keyed fix, previously two disjoint rows.
+
+### Fixed
+
+- `/help` typos: "Can bee same hall" → "Can be same hall"; "avereage" → "average" (twice).
+
+### Changed
+
+- Version and `/about` date bumped. Two private helpers (the listener's send-target/thread-description helpers and the hall comparison's All-Years row collector) widened to package-private so they can be unit-tested directly - no behavior change.
+
+### Notes
+
+- Recorded observation, deliberately unchanged pending a decision: All-Years rankings show each player's last-played round label without a year qualifier ("R10" could be any season's round 10).
+- 301 tests, 0 failures.
+
 ## [Beta 3 Update 26] - 2026-08-07
 
 Performance + deduplication batch from the full-codebase review. Strictly behavior-preserving: the corpus exact-value battery and the full suite pass unchanged (273/0), and the perf harness was re-run against the recorded pre-review baseline.

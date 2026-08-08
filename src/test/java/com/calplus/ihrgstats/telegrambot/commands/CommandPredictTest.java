@@ -160,6 +160,26 @@ public class CommandPredictTest {
         assertTrue(response.message.contains("Session expired"));
     }
 
+    /**
+     * Regression: with no current year set, generatePrediction used to fall
+     * back to "year 0" and dress up a meaningless empty-features board as a
+     * real prediction. It must refuse like /lineup does.
+     */
+    @Test
+    void prediction_refusesWhenNoCurrentYearIsSet_insteadOfPredictingAgainstYearZero() {
+        CommandPredict predict = new CommandPredict();
+        predict.handleCommand(ADMIN_ID);
+        predict.handleFirstHallSelection(ADMIN_ID, hallAId);
+        predict.handleFirstPlayerSelection(ADMIN_ID, "AA-01");
+        predict.handleSecondHallSelection(ADMIN_ID, hallBId);
+
+        System.clearProperty("SETTINGS_CURRENTYEAR"); // year vanishes mid-wizard (tearDown restores it)
+        CommandResponse response = predict.handleSecondPlayerSelection(ADMIN_ID, "BB-01");
+
+        assertTrue(response.message.contains("No current year set"),
+                "the final step must refuse without a current year, not fabricate a year-0 prediction: " + response.message);
+    }
+
     /** With enough uploaded history to cross the walk-forward burn-in floor, the model section must actually appear. */
     @Test
     void prediction_showsModelSideBySideWithBaseline_onceAModelHasBeenTrained() throws Exception {

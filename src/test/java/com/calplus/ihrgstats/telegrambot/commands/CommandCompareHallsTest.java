@@ -328,4 +328,73 @@ public class CommandCompareHallsTest {
         assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithData, hallWithoutData));
         assertEquals("Round 4", CommandCompareHalls.latestRoundLabelAcrossBothHalls(hallWithoutData, hallWithData));
     }
+
+    private static HallStatsBuilder.PlayerData cappedPlayerWithElo(int elo) {
+        HallStatsBuilder.PlayerData p = playerWithElo(elo);
+        p.capped = true;
+        return p;
+    }
+
+    /**
+     * Regression: the capped filter's >2-capped branch returns its team
+     * capped-first, and with unequal roster sizes only the FIRST
+     * comparedBoards entries play - so the single compared board used to
+     * field the best CAPPED player (1150) instead of the roster's true best
+     * board (1200 uncapped), losing to an 1180 opponent for a flat 0%. Both
+     * selected teams must be compared strongest-first.
+     */
+    @Test
+    void winProbability_comparesTheStrongestSelectedBoards_notTheCappedFirstOrder() {
+        CommandCompareHalls compareHalls = new CommandCompareHalls();
+
+        // Roster supplied elo-desc, as HallStatsBuilder always does. Three
+        // capped players inside the top 5 trigger the capped-filter branch;
+        // a 6th player makes the selection actually run.
+        HallStatsBuilder.HallData hall1 = new HallStatsBuilder.HallData();
+        hall1.players.add(playerWithElo(1200));       // uncapped - the true best board
+        hall1.players.add(cappedPlayerWithElo(1150));
+        hall1.players.add(cappedPlayerWithElo(1100));
+        hall1.players.add(cappedPlayerWithElo(1050));
+        hall1.players.add(playerWithElo(1000));
+        hall1.players.add(playerWithElo(950));
+
+        HallStatsBuilder.HallData hall2 = hallOf(1180);
+
+        assertEquals(100.0, compareHalls.calculateWinningProbability(hall1, hall2), 0.001,
+                "with one compared board, the roster's strongest legal player (1200) must play it and beat 1180 - "
+                        + "the capped-first order would field 1150 and lose");
+    }
+
+    /**
+     * Regression: the All-Years seating grid used to key rows by display
+     * name, so a player renamed across years split into two rows with
+     * disjoint year columns (and two different players sharing a name would
+     * merge). The id-keyed collector must yield ONE entry per player
+     * identity, labeled with the most recent name - and keep two distinct
+     * same-named players apart.
+     */
+    @Test
+    void allYearsSeatingIds_mergeARenamedPlayerIntoOneRow_underTheLastKnownName() {
+        CommandCompareHalls.YearSummary y2025 = new CommandCompareHalls.YearSummary();
+        y2025.year = 2025;
+        y2025.playerNameById.put("P-RENAMED", "Marta Kova");
+        y2025.playerNameById.put("P-STABLE", "Opp Fixture");
+
+        CommandCompareHalls.YearSummary y2026 = new CommandCompareHalls.YearSummary();
+        y2026.year = 2026;
+        y2026.playerNameById.put("P-RENAMED", "Marta Kove"); // same identity, new name
+        y2026.playerNameById.put("P-OTHER", "Marta Kova");   // a DIFFERENT person now using the old name
+
+        java.util.Map<String, String> lastKnownName = new java.util.HashMap<>();
+        java.util.List<String> ids = CommandCompareHalls.collectAllPlayerIdsByRecency(
+                java.util.List.of(y2025, y2026), lastKnownName);
+
+        assertEquals(1, ids.stream().filter(id -> id.equals("P-RENAMED")).count(),
+                "a renamed player is ONE identity and must yield exactly one seating row");
+        assertEquals("Marta Kove", lastKnownName.get("P-RENAMED"),
+                "the merged row must be labeled with the most recent name");
+        assertTrue(ids.contains("P-OTHER"),
+                "a distinct same-named person must keep their own row - name-keying would have merged them");
+        assertEquals(3, ids.size(), "exactly one row per player identity: " + ids);
+    }
 }

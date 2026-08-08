@@ -134,6 +134,24 @@ public class RoundCsvProcessorTest {
         assertTrue(ex.getMessage().contains("finite"));
     }
 
+    // --- Negative scores: real board scores are non-negative; "-5" used to be
+    // silently ingested and decide outcomes by comparison. Both validation
+    // branches (standard row, timeout winner-score) must reject them.
+
+    @Test
+    void standardRow_negativeScore_isRejected(@TempDir Path tempDir) {
+        Path csv = writeCsv(tempDir, "Player1,1,-5,Player2,2,50\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("negative"), ex.getMessage());
+    }
+
+    @Test
+    void timeoutRow_negativeWinnerScore_isRejected(@TempDir Path tempDir) {
+        Path csv = writeCsv(tempDir, "Player1,1,TIMEOUT,Player2,2,-3\n");
+        Exception ex = assertThrows(Exception.class, () -> new RoundCsvProcessor().parseAndValidateCSV(csv.toString()));
+        assertTrue(ex.getMessage().contains("negative"), ex.getMessage());
+    }
+
     private static Path writeCsv(Path tempDir, String dataRow) {
         try {
             Path csv = tempDir.resolve("round.csv");

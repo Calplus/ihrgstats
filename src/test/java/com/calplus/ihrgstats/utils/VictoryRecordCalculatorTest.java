@@ -83,4 +83,10 @@ public class VictoryRecordCalculatorTest {
         assertEquals("WALKOVER", VictoryRecordCalculator.formatHallName("WALKOVER"));
         assertEquals("WALKOVER", VictoryRecordCalculator.formatHallName("walkover"));
     }
+
+    /** Regression: formatHallName(null) used to NPE on the equalsIgnoreCase probe; it must degrade to "?". */
+    @Test
+    void formatHallName_null_rendersPlaceholderInsteadOfThrowing() {
+        assertEquals("?", VictoryRecordCalculator.formatHallName(null));
+    }
 }

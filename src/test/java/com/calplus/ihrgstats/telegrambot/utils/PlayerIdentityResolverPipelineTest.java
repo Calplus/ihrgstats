@@ -250,4 +250,162 @@ public class PlayerIdentityResolverPipelineTest {
         assertTrue(processor.processRound(csv.toString(), 2026, 1, NOW),
                 "Two different players each facing their own WALKOVER in the same round must not be flagged as duplicates");
     }
+
+    // --- Containment minimum length: a <3-char name must no longer partial-match
+    // every future debut containing its letters, while a 3-char name still must ---
+
+    @Test
+    void containment_underThreeChars_firesNoDialog_forADebutContainingTheShortName(@TempDir Path csvDir) throws Exception {
+        // Regression: a 2-letter registered name ("Ng") used to trigger the
+        // same-person dialog for every future debut containing those letters
+        // ("Nightingale ..."), permanently adding dialog noise to ingestion.
+        Path round1 = writeRoundCsv(csvDir, "r1.csv", "Ng,1,10,Opponent Quill,2,5\n");
+        RoundCsvProcessor processor1 = new RoundCsvProcessor();
+        processor1.setMultiChoiceCallback((message, options) -> fail("no dialog expected in round 1: " + message));
+        assertTrue(processor1.processRound(round1.toString(), 2026, 1, NOW), "Round 1 should process");
+
+        Path round2 = writeRoundCsv(csvDir, "r2.csv", "Nightingale Florence,1,8,Opponent Quill,2,2\n");
+        RoundCsvProcessor processor2 = new RoundCsvProcessor();
+        processor2.setMultiChoiceCallback((message, options) ->
+                fail("the 2-char containment must NOT fire a dialog for the containing debut: " + message));
+        assertTrue(processor2.processRound(round2.toString(), 2026, 2, NOW), "Round 2 should process without any dialog");
+
+        assertNotEquals(resolvePlayerId("Ng"), resolvePlayerId("Nightingale Florence"),
+                "the debut must have been created as its own player, not merged");
+    }
+
+    @Test
+    void containment_atThreeChars_stillFiresTheDialog(@TempDir Path csvDir) throws Exception {
+        Path round1 = writeRoundCsv(csvDir, "r1.csv", "Fis,1,10,Opponent Quill,2,5\n");
+        RoundCsvProcessor processor1 = new RoundCsvProcessor();
+        processor1.setMultiChoiceCallback((message, options) -> 0);
+        assertTrue(processor1.processRound(round1.toString(), 2026, 1, NOW), "Round 1 should process");
+
+        List<String> dialogs = new java.util.ArrayList<>();
+        Path round2 = writeRoundCsv(csvDir, "r2.csv", "Fisher Jones,1,8,Opponent Quill,2,2\n");
+        RoundCsvProcessor processor2 = new RoundCsvProcessor();
+        processor2.setMultiChoiceCallback((message, options) -> {
+            dialogs.add(message);
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].startsWith("Treat as different people")) {
+                    return i;
+                }
+            }
+            return 0;
+        });
+        assertTrue(processor2.processRound(round2.toString(), 2026, 2, NOW), "Round 2 should process");
+
+        assertTrue(dialogs.stream().anyMatch(m -> m.contains("may match existing player 'Fis'")),
+                "a 3-char containment must still fire the same-person dialog, got: " + dialogs);
+        assertNotEquals(resolvePlayerId("Fis"), resolvePlayerId("Fisher Jones"),
+                "answering 'different people' must keep the two players distinct");
+    }
+
+    // --- Fuzzy-confirmed returning players get the SAME prior-year hall-mismatch
+    // dialog the exact-name path offers (both resolutions) ---
+
+    @Test
+    void fuzzyReturningPlayerWithPriorYearHallChange_getsHallDialog_keepOldHall(@TempDir Path csvDir) throws Exception {
+        // 2025: "Rosalind Beck" plays in hall 1.
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "Rosalind Beck,1,10,Opp Alpha,2,5\n");
+        RoundCsvProcessor processor2025 = new RoundCsvProcessor();
+        processor2025.setMultiChoiceCallback((message, options) -> 0);
+        assertTrue(processor2025.processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        // 2026: the typo'd returning player appears under a DIFFERENT hall.
+        // Before the fix, answering "same person" silently adopted hall 3
+        // with no dialog - while the identical situation via an exact name
+        // match prompted "Keep old hall / Use new hall".
+        List<String> dialogs = new java.util.ArrayList<>();
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "Rosalind Bck,3,7,Opp Alpha,2,3\n");
+        RoundCsvProcessor processor2026 = new RoundCsvProcessor();
+        processor2026.setMultiChoiceCallback((message, options) -> {
+            dialogs.add(message);
+            if (message.contains("Hall Mismatch Resolution")) {
+                return 0; // keep old hall
+            }
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].startsWith("Treat as same person")) {
+                    return i;
+                }
+            }
+            return 0;
+        });
+        assertTrue(processor2026.processRound(r2026.toString(), 2026, 1, NOW), "2026 round should process");
+
+        assertTrue(dialogs.stream().anyMatch(m -> m.contains("may match existing player 'Rosalind Beck'")),
+                "the fuzzy same-person dialog must fire first: " + dialogs);
+        assertTrue(dialogs.stream().anyMatch(m -> m.contains("Hall Mismatch Resolution")),
+                "the prior-year hall-mismatch dialog must ALSO fire for the fuzzy-confirmed returning player: " + dialogs);
+
+        assertEquals(resolvePlayerId("Rosalind Beck"), resolvePlayerId("Rosalind Bck"),
+                "the typo must resolve to the returning player");
+        assertEquals(new A3_Halls().getHallByName("1").id,
+                new B6_PlayerYearStatus().getStatus(resolvePlayerId("Rosalind Beck"), 2026).hallId,
+                "answering 'keep old hall' must register the 2026 season under hall 1, not the CSV row's hall 3");
+    }
+
+    @Test
+    void fuzzyReturningPlayerWithPriorYearHallChange_getsHallDialog_useNewHall(@TempDir Path csvDir) throws Exception {
+        Path r2025 = writeRoundCsv(csvDir, "r2025.csv", "Percival Wren,1,10,Opp Alpha,2,5\n");
+        RoundCsvProcessor processor2025 = new RoundCsvProcessor();
+        processor2025.setMultiChoiceCallback((message, options) -> 0);
+        assertTrue(processor2025.processRound(r2025.toString(), 2025, 1, NOW), "2025 round should process");
+
+        List<String> dialogs = new java.util.ArrayList<>();
+        Path r2026 = writeRoundCsv(csvDir, "r2026.csv", "Percival Wrem,3,7,Opp Alpha,2,3\n");
+        RoundCsvProcessor processor2026 = new RoundCsvProcessor();
+        processor2026.setMultiChoiceCallback((message, options) -> {
+            dialogs.add(message);
+            if (message.contains("Hall Mismatch Resolution")) {
+                return 1; // use new hall, same player who changed halls
+            }
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].startsWith("Treat as same person")) {
+                    return i;
+                }
+            }
+            return 0;
+        });
+        assertTrue(processor2026.processRound(r2026.toString(), 2026, 1, NOW), "2026 round should process");
+
+        assertTrue(dialogs.stream().anyMatch(m -> m.contains("Hall Mismatch Resolution")),
+                "the prior-year hall-mismatch dialog must fire: " + dialogs);
+        assertEquals(resolvePlayerId("Percival Wren"), resolvePlayerId("Percival Wrem"),
+                "the typo must resolve to the returning player");
+        assertEquals(new A3_Halls().getHallByName("3").id,
+                new B6_PlayerYearStatus().getStatus(resolvePlayerId("Percival Wren"), 2026).hallId,
+                "answering 'use new hall' must register the 2026 season under the CSV row's hall 3");
+    }
+
+    // --- First appearance claims exactly ONE unmapped same-name capped row ---
+
+    @Test
+    void firstAppearance_claimsExactlyOneUnmappedSameNameCappedRow(@TempDir Path csvDir) throws Exception {
+        // Regression: a year's capped list can legitimately carry two rows of
+        // the same name (two distinct same-named people). The first player to
+        // appear used to claim EVERY unmapped same-name row, so the second
+        // person could never be flagged capped.
+        Path cappedCsv = csvDir.resolve("cappedlist.csv");
+        Files.writeString(cappedCsv, "name,hall\nSame Name,4\nSame Name,5\n");
+        assertTrue(new CappedListProcessor().processCappedList(cappedCsv.toString(), 2026, NOW),
+                "the capped list with a duplicated name must process");
+
+        Path round1 = writeRoundCsv(csvDir, "r1.csv", "Same Name,4,10,Other Person,2,5\n");
+        RoundCsvProcessor processor = new RoundCsvProcessor();
+        processor.setMultiChoiceCallback((message, options) -> 0);
+        assertTrue(processor.processRound(round1.toString(), 2026, 1, NOW), "Round 1 should process");
+
+        String playerId = resolvePlayerId("Same Name");
+        assertTrue(new B6_PlayerYearStatus().getStatus(playerId, 2026).capped,
+                "the appearing player must be flagged capped");
+
+        List<B7_CappedImports.ImportRow> rows = new B7_CappedImports().findByYearAndName(2026, "Same Name");
+        assertEquals(2, rows.size(), "both staging rows must still exist");
+        long mappedCount = rows.stream().filter(r -> r.mapped).count();
+        assertEquals(1, mappedCount,
+                "exactly ONE of the two same-name rows may be claimed - the other must stay claimable by a second same-named person");
+        assertEquals(playerId, rows.stream().filter(r -> r.mapped).findFirst().orElseThrow().playerId,
+                "the claimed row must belong to the player who appeared");
+    }
 }

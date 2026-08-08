@@ -129,4 +129,24 @@ public class F16_AdminsTest {
         F16_Admins admins = new F16_Admins();
         assertFalse(admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, "anyone"));
     }
+
+    /**
+     * Regression: addAdmin is insert-if-absent and now reports whether a row
+     * was actually inserted - /admins' "already an admin" reply depends on
+     * the false return, so a silent true-on-duplicate would bring back the
+     * old false "✅ Added" message.
+     */
+    @Test
+    void addAdmin_returnsTrueOnInsert_falseOnDuplicate() throws Exception {
+        F16_Admins admins = new F16_Admins();
+
+        assertTrue(admins.addAdmin(F16_Admins.PLATFORM_TELEGRAM, "888888", "First add", NOW),
+                "first add must report an actual insert");
+        assertFalse(admins.addAdmin(F16_Admins.PLATFORM_TELEGRAM, "888888", "Second add", NOW),
+                "adding the same platform+id again must report no-op, not a fresh insert");
+        assertEquals(1, admins.countAdmins(), "the duplicate add must not have created a second row");
+
+        assertTrue(admins.addAdmin(F16_Admins.PLATFORM_DISCORD, "888888", "Other platform", NOW),
+                "the same id on a DIFFERENT platform is a distinct admin and must insert");
+    }
 }

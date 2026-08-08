@@ -102,8 +102,9 @@ public class TelegramListener {
      * generic label when the thread ID is not configured, instead of
      * rendering "Thread ID  (...)" with a blank in the middle (reachable in
      * half-configured setups where only one of the two thread IDs is set).
+     * Package-private (not private) so this can be unit-tested directly.
      */
-    private static String describeThread(String threadId, String channelLabel) {
+    static String describeThread(String threadId, String channelLabel) {
         if (threadId == null || threadId.isEmpty()) {
             return "the configured " + channelLabel;
         }
@@ -2867,8 +2868,9 @@ public class TelegramListener {
     /**
      * Adds chat_id (and message_thread_id when present) to a payload, thread
      * id parsed to int - Telegram's API expects a number there.
+     * Package-private (not private) so this can be unit-tested directly.
      */
-    private static void applySendTarget(JsonObject payload, String[] target) {
+    static void applySendTarget(JsonObject payload, String[] target) {
         payload.addProperty("chat_id", target[0]);
         if (target[1] != null && !target[1].isEmpty()) {
             try {

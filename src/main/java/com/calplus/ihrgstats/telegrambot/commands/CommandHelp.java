@@ -326,7 +326,7 @@ public class CommandHelp {
                 message.append("<b>Steps:</b>\n");
                 message.append("1. Select first player's hall\n");
                 message.append("2. Select first player from that hall\n");
-                message.append("3. Select second player's hall (Can bee same hall as first player)\n");
+                message.append("3. Select second player's hall (Can be same hall as first player)\n");
                 message.append("4. Select second player from that hall (Cannot be same player from hall)\n");
                 message.append("5. Select a round or \"All Rounds\"\n");
                 message.append("6. View split-screen comparison image with both players\n\n");
@@ -415,7 +415,7 @@ public class CommandHelp {
                 message.append("• Shows Hall Rank, Global Rank, trueElo, Capped status and name\n");
                 message.append("<b>3. Seating Arrangement:</b>\n");
                 message.append("• Shows seating arrangement of all players, in order of their average seating arrangement\n");
-                message.append("• Shows avereage seating arrangement, name, and seat per round\n");
+                message.append("• Shows average seating arrangement, name, and seat per round\n");
                 message.append("<b>4. Victory Record:</b>\n");
                 message.append("• Complete match history against other halls\n");
                 message.append("• Shows: Round, Hall Elo, Score, Opponent Hall, Opponent Elo\n");
@@ -447,7 +447,7 @@ public class CommandHelp {
                 message.append("• Shows Hall Rank, Global Rank, trueElo, Capped status and name\n");
                 message.append("<b>3. Seating Arrangement:</b>\n");
                 message.append("• Shows seating arrangement of all players, in order of their average seating arrangement\n");
-                message.append("• Shows avereage seating arrangement, name, and seat per round\n");
+                message.append("• Shows average seating arrangement, name, and seat per round\n");
                 message.append("<b>4. Victory Record:</b>\n");
                 message.append("• Complete match history against other halls\n");
                 message.append("• Shows: Round, Hall Elo, Score, Opponent Hall, Opponent Elo\n");

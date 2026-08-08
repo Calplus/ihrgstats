@@ -116,4 +116,54 @@ public class CommandRankPlayersTest {
         assertTrue(allYears.message.contains("Cornelius"), "All-Years view must include the 2026 player");
         assertTrue(allYears.message.contains("Persimmon"), "All-Years view must ALSO include the 2025-only player");
     }
+
+    /**
+     * Regression: rating sorts had no tiebreak over HashMap-ordered input, so
+     * two EXACTLY equal-rated players could swap display order between
+     * runs/JVMs. Two independent boards with identical scorelines produce two
+     * winners with byte-identical ratings; their order must fall back to the
+     * name tiebreak.
+     */
+    @Test
+    void equalRatedPlayers_areOrderedDeterministicallyByName(@TempDir Path csvDir) throws Exception {
+        // The alphabetically-LATER winner is deliberately listed first in the
+        // CSV, so any insertion-order-shaped iteration would show Zed first.
+        Path r1 = writeRoundCsv(csvDir, "r1.csv",
+                "Zed Womack,1,10,Milo Quist,2,5\n" +
+                "Aaron Vance,3,10,Yara Trent,4,5\n");
+        assertTrue(newProcessor().processRound(r1.toString(), YEAR, 1, NOW), "Round should process");
+
+        CommandRankPlayers rankPlayers = new CommandRankPlayers();
+        rankPlayers.handleCommand(ADMIN_USER_ID);
+        CommandRankPlayers.RankResponse response = rankPlayers.handleRoundSelection(ADMIN_USER_ID, "all");
+
+        int aaron = response.message.indexOf("Aaron Vance");
+        int zed = response.message.indexOf("Zed Womack");
+        assertTrue(aaron >= 0 && zed >= 0, "both equal-rated winners must appear: " + response.message);
+        assertTrue(aaron < zed,
+                "equal ratings must order by name (Aaron before Zed), not map-iteration luck: " + response.message);
+    }
+
+    /**
+     * Regression: the round-scoped TEXT header used to render "Round " + the
+     * raw internal round_order while the image metadata resolved the round's
+     * real label - on an admin-renamed round the two disagreed.
+     */
+    @Test
+    void singleRoundTextHeader_usesTheRoundsRealLabel(@TempDir Path csvDir) throws Exception {
+        Path r1 = writeRoundCsv(csvDir, "r1.csv", "Aurelia Nightshade,1,10,Bartholomew Krieger,2,5\n");
+        assertTrue(newProcessor().processRound(r1.toString(), YEAR, 1, NOW), "Round should process");
+
+        A1_Rounds rounds = new A1_Rounds();
+        rounds.updateRoundMetadata(rounds.getRoundByYearAndOrder(YEAR, 1).id, "Finals", null, NOW);
+
+        CommandRankPlayers rankPlayers = new CommandRankPlayers();
+        rankPlayers.handleCommand(ADMIN_USER_ID);
+        CommandRankPlayers.RankResponse response = rankPlayers.handleRoundSelection(ADMIN_USER_ID, "1");
+
+        assertTrue(response.message.contains("Finals"),
+                "the text header must show the round's real label: " + response.message);
+        assertFalse(response.message.contains("Round 1"),
+                "the raw 'Round ' + round_order form must be gone once the round is renamed: " + response.message);
+    }
 }

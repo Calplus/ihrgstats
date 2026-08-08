@@ -74,4 +74,34 @@ public class CommandAdminsTest {
         assertFalse(admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, "111111"));
         assertTrue(admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, "333333"));
     }
+
+    /**
+     * Regression: adding an already-registered admin used to reply with a
+     * false "✅ Added" even though the insert-if-absent no-opped. It must
+     * report "already an admin" and leave the table unchanged.
+     */
+    @Test
+    void addingAnExistingAdmin_replysAlreadyAnAdmin_notAFalseAdded() throws Exception {
+        F16_Admins admins = new F16_Admins();
+        admins.addAdmin(F16_Admins.PLATFORM_TELEGRAM, "111111", "Acting admin", NOW);
+        admins.addAdmin(F16_Admins.PLATFORM_TELEGRAM, "555555", "Already there", NOW);
+        int before = admins.countAdmins();
+
+        CommandAdmins commandAdmins = new CommandAdmins();
+        commandAdmins.handleAddStart("111111");
+        CommandResponse duplicate = commandAdmins.handleTextInput("111111", "TELEGRAM 555555 Duplicate Label");
+
+        assertNotNull(duplicate, "the acting admin is mid-add-flow, so the text must be consumed by it");
+        assertTrue(duplicate.message.contains("already an admin"),
+                "adding an existing admin must say so: " + duplicate.message);
+        assertFalse(duplicate.message.contains("✅ Added"),
+                "the old false success reply must not appear: " + duplicate.message);
+        assertEquals(before, admins.countAdmins(), "the duplicate add must not change the admin table");
+
+        // A genuinely new admin through the same flow still gets the success reply.
+        commandAdmins.handleAddStart("111111");
+        CommandResponse added = commandAdmins.handleTextInput("111111", "TELEGRAM 777777 Genuinely New");
+        assertTrue(added.message.contains("✅ Added"), added.message);
+        assertTrue(admins.isAdmin(F16_Admins.PLATFORM_TELEGRAM, "777777"));
+    }
 }

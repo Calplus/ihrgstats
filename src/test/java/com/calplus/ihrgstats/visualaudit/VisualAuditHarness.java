@@ -156,61 +156,78 @@ public class VisualAuditHarness {
 
         // --- /rankplayers ---------------------------------------------------
         export("01_rankplayers_allrounds", rankPlayers("all"),
-                "ExpElo '-' placeholder; every name shape incl. 42-char, comma, apostrophe-hyphen, 2-char; capped badges; dormant player last-played");
+                "DENSE: 14 rows crossing the 10-row color-band boundary; every name shape at once (42-char hyphenated,"
+                        + " quoted comma-name, apostrophe-hyphen, single-word hyphenated, 2-char, 3-char); capped badges x2;"
+                        + " dormant player's frozen LR (R4) vs active LRs; ExpElo column all '-' (no champion, single year);"
+                        + " zero-loss records both flavors (all-wins Bartholomew, wins+draw Marcus); icon-less hall code in hall column");
         export("02_rankplayers_round6", rankPlayers(roundOrder(YEAR, 6)),
-                "single-round scope; round with blank-winner TIMEOUT and mid-season debuts");
+                "single-round point-in-time scope; the blank-winner TIMEOUT (0-0) round; BOTH mid-season debuts"
+                        + " (comma-name + near-duplicate Sam Le) first appearing; dormant Kai's frozen LR (the"
+                        + " renamed-round header case is unit-pinned in CommandRankPlayersTest)");
 
         // --- /rankhalls -----------------------------------------------------
-        export("03_rankhalls_allrounds", rankHalls("all"), "all-rounds; icon-less hall in table; home-hall marker");
-        export("04_rankhalls_round6", rankHalls(roundOrder(YEAR, 6)), "single-round scope");
-        export("05_rankhalls_round7", rankHalls(roundOrder(YEAR, 7)), "bye round - one hall absent that round");
+        export("03_rankhalls_allrounds", rankHalls("all"),
+                "DENSE: icon-less hall row ('??' fallback) alongside icon halls; home-hall marker; 4-hall field");
+        export("04_rankhalls_round7", rankHalls(roundOrder(YEAR, 7)),
+                "single-round scope AND the bye round in one image - one hall absent that round entirely");
 
         // --- /infohall ------------------------------------------------------
         export("06_infohall_binjai_allrounds", infoHall(hallBinjaiId, "all"),
-                "hall WITH icon; TIMEOUT loss and walkover in member history");
+                "DENSE: hall WITH icon; roster carries capped+dormant Kai (3-char), apostrophe-hyphen name, and Ravi's"
+                        + " DRAW + TIMEOUT loss + WALKOVER win all in one member history; victory record mixes wins/losses/draw");
         export("07_infohall_mysteryville_allrounds", infoHall(hallMysteryvilleId, "all"),
-                "icon-less hall fallback; capped member; near-duplicate member (Sam Le)");
-        export("08_infohall_hall1_round7", infoHall(hall1Id, roundOrder(YEAR, 7)), "single-round scope; multi-opponent round");
+                "DENSE: icon-less hall fallback; capped member; near-duplicate member (Sam Le); timed-out member (Ah Huat);"
+                        + " single-word hyphenated name (Jean-Luc); bye round gap in the round columns (R7)");
+        export("08_infohall_hall1_round7", infoHall(hall1Id, roundOrder(YEAR, 7)),
+                "single-round scope + multi-opponent round (2 boards vs Binjai + 1 vs Crescent shown against primary opponent)");
 
         // --- /infoplayer ----------------------------------------------------
         export("09_infoplayer_longname", infoPlayer(hallCrescentId, "Zara Zephyrine Quintessa Blackwood-Ashford", "all"),
-                "42-char hyphenated name; full-win-vs-0 board; TIMEOUT win with blank winner score (0-0)");
+                "DENSE: 42-char hyphenated name (initials shortening); 21-0 full-win board; TIMEOUT win with blank winner"
+                        + " score (0-0 rated win); loss rounds; sat-out round gaps");
         export("10_infoplayer_capped_dormant", infoPlayer(hallBinjaiId, "Kai", "all"),
-                "capped badge; 2-char name; dormant since round 4; draw in history");
+                "capped badge context; 3-char name; dormant since R4 (history stops mid-season); draw in final played round");
         export("11_infoplayer_draw_timeout_walkover", infoPlayer(hallBinjaiId, "Ravi Kumar", "all"),
-                "one player with DRAW + TIMEOUT loss + WALKOVER win all in history");
+                "DRAW + TIMEOUT loss + WALKOVER win all in ONE history; walkover opponent renders as WALKOVER/unknown hall");
 
         // --- /comparehalls --------------------------------------------------
         export("12_comparehalls_1v_crescent_allrounds", compareHalls(hall1Id, hallCrescentId, "all"),
-                "both icons; victory icons row");
-        export("13_comparehalls_1v_crescent_round6", compareHalls(hall1Id, hallCrescentId, roundOrder(YEAR, 6)),
-                "round-scoped comparison");
-        export("14_comparehalls_1v_mysteryville_allrounds", compareHalls(hall1Id, hallMysteryvilleId, "all"),
-                "icon-less side fallback");
+                "DENSE: both icons; mirror-consistency anchor vs 06/07 victory records; INDEPENDENTLY computed"
+                        + " win-probability pair (the tie-permutation non-sum case has no reachable render here and is"
+                        + " pinned by CommandCompareHallsTest); seating grid with sit-out '-' gaps and comma-name row");
+        export("13_comparehalls_1v_mysteryville_round6", compareHalls(hall1Id, hallMysteryvilleId, roundOrder(YEAR, 6)),
+                "round-scoped comparison AND icon-less side fallback in one image");
 
         // --- /compareplayers ------------------------------------------------
         export("15_compareplayers_bartholomew_v_kai_allrounds",
                 comparePlayers(hall1Id, "Bartholomew Alexander Krieger", hallBinjaiId, "Kai", "all"),
-                "long vs 3-char name; capped vs uncapped; dormant side");
+                "DENSE: long vs 3-char name; capped vs uncapped; dormant side's frozen history vs full-season side;"
+                        + " undefeated record vs mixed record");
         export("16_compareplayers_bartholomew_v_kai_round4",
                 comparePlayers(hall1Id, "Bartholomew Alexander Krieger", hallBinjaiId, "Kai", roundOrder(YEAR, 4)),
-                "round-scoped; the draw round");
+                "round-scoped + the draw round (Kai's draw vs Marcus visible in scope)");
         export("17_compareplayers_zara_v_ng_allrounds",
                 comparePlayers(hallCrescentId, "Zara Zephyrine Quintessa Blackwood-Ashford", hallCrescentId, "Ng", "all"),
-                "extreme name-length asymmetry (42 chars vs 2)");
+                "extreme name-length asymmetry (42 chars vs 2); same-hall comparison; Ng's new R9 draw in history");
 
         // --- /infomatch -----------------------------------------------------
-        export("18_infomatch_round4_draw", infoMatch(YEAR + "_4"), "draw icons");
-        export("19_infomatch_round5_walkover", infoMatch(YEAR + "_5"), "stated-hall individual walkover");
-        export("20_infomatch_round6_timeout", infoMatch(YEAR + "_6"), "TIMEOUT with blank winner score (0-0 rated win); comma-name debut");
+        export("18_infomatch_round4_draw", infoMatch(YEAR + "_4"), "draw icons; cumulative scores with a drawn board");
+        export("19_infomatch_round5_walkover", infoMatch(YEAR + "_5"),
+                "stated-hall individual walkover: the matchup row renders the sentinel side as WALKOVER (established"
+                        + " b3u24 behavior); the stated forfeiting hall is attributed in the hall-level records (see 06)");
+        export("20_infomatch_round6_timeout", infoMatch(YEAR + "_6"),
+                "TIMEOUT with blank winner score (0-0 rated win); comma-name debut board; near-duplicate debut board");
         export("21_infomatch_round9_walkover_name1", infoMatch(YEAR + "_9"),
-                "WALKOVER-as-name1 with blank hall - unknown-hall fallback rendering");
+                "DENSE: WALKOVER-as-name1 with blank hall (unknown-hall '??' fallback) AND a 9-9 draw AND the"
+                        + " 2-char-vs-near-duplicate pairing, all in one round view");
 
         // --- /infomatchhall -------------------------------------------------
-        export("22_infomatchhall_hall1_round7", infoMatchHall(hall1Id, YEAR + "_7"), "multi-opponent round");
+        export("22_infomatchhall_hall1_round7", infoMatchHall(hall1Id, YEAR + "_7"),
+                "multi-opponent round: primary-opponent score + per-board detail incl. the minority opponent");
         export("23_infomatchhall_mysteryville_round7", infoMatchHall(hallMysteryvilleId, YEAR + "_7"),
-                "the hall WITH the bye that round");
-        export("24_infomatchhall_binjai_round6", infoMatchHall(hallBinjaiId, YEAR + "_6"), "normal round with a TIMEOUT board");
+                "the hall WITH the bye that round - text-only response by design (documented, no image)");
+        export("24_infomatchhall_binjai_round6", infoMatchHall(hallBinjaiId, YEAR + "_6"),
+                "TIMEOUT board inside a normal round; 0-0 rated win attribution");
 
         writeCoverage("coverage_synthetic.txt");
         System.out.println("=== VISUAL AUDIT (synthetic) exports written to " + exportsDir + " ===");
@@ -295,18 +312,40 @@ public class VisualAuditHarness {
         int hall3Id = halls.getHallByName("3").id;
         int hall4Id = halls.getHallByName("4").id;
         int hallBId = halls.getHallByName("HallB").id;
+        int hallAId = halls.getHallByName("HallA").id;
 
         export("25_corpus_rankplayers_allrounds", rankPlayers("all"),
-                "ExpElo column POPULATED (trained champion); 11-hall field; capped badges");
-        export("26_corpus_rankhalls_allrounds", rankHalls("all"), "ExpElo-era hall ranking, 11 halls");
+                "DENSE: ExpElo column POPULATED (trained champion) - the synthetic 01 shows the '-' form; 11-hall field;"
+                        + " capped badges; long table many band boundaries; final-season (2004) scope");
+        export("26_corpus_rankhalls_allrounds", rankHalls("all"), "ExpElo-era hall ranking, 11 halls, mixed icons");
         export("27_corpus_infoplayer_bubblegum", infoPlayer(hall2Id, "Princess Bubblegum", "all"),
-                "capped 3 straight years; multi-year history; ExpElo populated");
+                "capped multiple straight years; multi-year veteran; ExpElo populated");
         export("28_corpus_infoplayer_hermione", infoPlayer(hall4Id, "Hermione Granger", "all"),
                 "year-long misspelling merged into one identity; sweepout boards in history");
         export("29_corpus_comparehalls_3_v_hallB", compareHalls(hall3Id, hallBId, "all"),
-                "strongest vs weakest hall across 4 seasons");
+                "strongest vs weakest hall across 4 seasons; fictional-hall (HallB) side");
         export("30_corpus_infomatch_2004r8", infoMatch("2004_8"),
                 "corpus TIMEOUT round; quoted comma-name player on the timed-out side");
+
+        // --- All-Years family (first rendered in this audit; the b3u24 matrix
+        // predated it as an audited surface, and the b3u25 C-4 fix changed
+        // the /comparehalls seating grid's keying) -------------------------
+        export("31_corpus_rankplayers_allyears", rankPlayers("allyears"),
+                "ALL-YEARS ranking: players whose only activity is a PAST year appear alongside 2004 actives;"
+                        + " ExpElo populated; cross-year LR labels");
+        export("32_corpus_infoplayer_allyears_hopper", infoPlayer(hallAId, "Jim Hopper", "allyears"),
+                "ALL-YEARS player summary: HALL MOVER (hall 5 -> 5 -> HallA -> HallA) one row per year;"
+                        + " per-year W/L + final elo/rank");
+        export("33_corpus_infohall_allyears_hall2", infoHall(hall2Id, "allyears"),
+                "ALL-YEARS hall summary: one row per season, rank/elo deltas year over year");
+        export("34_corpus_comparehalls_allyears_4_v_2", compareHalls(hall4Id, hall2Id, "allyears"),
+                "DENSE + INTENDED NEW RENDERING (b3u25 C-4): the year-long renamed player (Hermione's 2004 variant"
+                        + " spelling) appears as ONE seating row under the LAST-KNOWN name with all year columns filled -"
+                        + " b3u24 rendered two disjoint rows; per-year season records both sides; win probability from the"
+                        + " most recent year's rosters");
+        export("35_corpus_compareplayers_allyears_bubblegum_v_hermione",
+                comparePlayers(hall2Id, "Princess Bubblegum", hall4Id, "Hermione Granger", "allyears"),
+                "ALL-YEARS player comparison: multi-year on both sides; a renamed identity on one side; ExpElo era");
 
         writeCoverage("coverage_corpus.txt");
         System.out.println("=== VISUAL AUDIT (corpus) exports written to " + exportsDir + " ===");
@@ -498,7 +537,10 @@ public class VisualAuditHarness {
                 sb.append(row("Anne-Marie O'Brien-Smith", "Binjai", "10", "Fatimah Zahra", "Crescent", "7"));
                 // WALKOVER as name1 with a BLANK hall - the unknown-hall fallback path.
                 sb.append(row("WALKOVER", "", "", "Ravi Kumar", "Binjai", ""));
-                // Ng/Zara/Nightingale (Crescent) sit out this round.
+                // Density: the same round view also carries a DRAW between the
+                // 2-char name and the near-duplicate debutant.
+                sb.append(row("Ng", "Crescent", "9", "Sam Le", "Mysteryville", "9"));
+                // Zara/Nightingale (Crescent) sit out this round.
                 break;
             case 10:
                 sb.append(row("Bartholomew Alexander Krieger", "1", "10", "Zara Zephyrine Quintessa Blackwood-Ashford", "Crescent", "9"));

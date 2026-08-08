@@ -198,8 +198,8 @@ public class CommandCompareHalls {
         return new CompareResponse(textOutput, imagePath, null);
     }
 
-    /** One year's collapsed summary row, for the "All Years" view. */
-    private static class YearSummary {
+    /** One year's collapsed summary row, for the "All Years" view. Package-private (not private) so this can be unit-tested directly. */
+    static class YearSummary {
         int year;
         Double finalHallElo;
         Integer finalHallRank;
@@ -413,8 +413,9 @@ public class CommandCompareHalls {
      * id (fully deterministic). Fills {@code lastKnownNameOut} with each
      * id's most recent display name - summaries are ascending by year, so
      * the last write wins.
+     * Package-private (not private) so this can be unit-tested directly.
      */
-    private static List<String> collectAllPlayerIdsByRecency(List<YearSummary> yearSummaries, Map<String, String> lastKnownNameOut) {
+    static List<String> collectAllPlayerIdsByRecency(List<YearSummary> yearSummaries, Map<String, String> lastKnownNameOut) {
         Map<String, Integer> mostRecentYearByPlayer = new LinkedHashMap<>();
         for (YearSummary s : yearSummaries) {
             for (Map.Entry<String, String> e : s.playerNameById.entrySet()) {
