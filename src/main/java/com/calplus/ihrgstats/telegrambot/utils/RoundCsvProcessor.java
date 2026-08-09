@@ -466,8 +466,17 @@ public class RoundCsvProcessor {
             // hindsight-informed one. Best-effort: no champion yet (a fresh
             // or too-thin database) or any ML error must never fail the
             // upload, matching the recalc's isolation below.
+            //
+            // The extraction here is ALSO the one the retraining step reuses:
+            // it reads only match data (rounds/matches/participants/types,
+            // never the rating rows the recalc below rewrites) and is
+            // deterministic, so one sweep serves the whole ML tail of the
+            // upload - previously logging and training each ran their own
+            // identical whole-history extraction.
+            List<FeatureExtractor.RawBoard> extractedBoards = null;
             try {
-                logPredictionsForRound(round.id, nowTimestamp);
+                extractedBoards = new FeatureExtractor().extractAll();
+                logPredictionsForRound(round.id, extractedBoards, nowTimestamp);
             } catch (Exception e) {
                 notify("🟠", "Round data was saved, but AI prediction logging failed: " + e.getMessage());
             }
@@ -493,7 +502,11 @@ public class RoundCsvProcessor {
             // into its own logged prediction. Never fails the upload.
             ModelTrainer.TrainOutcome outcome = null;
             try {
-                outcome = new ModelTrainer().retrainAndSelect(nowTimestamp);
+                // Reuses the prediction-logging extraction above; falls back
+                // to a fresh sweep only if that extraction itself failed.
+                outcome = extractedBoards != null
+                        ? new ModelTrainer().retrainAndSelect(extractedBoards, nowTimestamp)
+                        : new ModelTrainer().retrainAndSelect(nowTimestamp);
                 if (outcome.trained) {
                     notify("🟢", "AI model retraining complete: " + outcome.note);
                 }
@@ -556,7 +569,7 @@ public class RoundCsvProcessor {
      * (not an error) when no champion has ever been trained yet - normal
      * for a fresh or too-thin database, see {@link ModelTrainer#MIN_BOARDS_TO_TRAIN}.
      */
-    private void logPredictionsForRound(int roundId, String nowTimestamp) throws SQLException {
+    private void logPredictionsForRound(int roundId, List<FeatureExtractor.RawBoard> extractedBoards, String nowTimestamp) throws SQLException {
         PredictionService predictionService = new PredictionService();
         MatchupPredictor champion = predictionService.loadChampion();
         if (champion == null) {
@@ -564,7 +577,7 @@ public class RoundCsvProcessor {
         }
         String modelVersion = predictionService.championVersion();
         E14_AiPredictions predictions = new E14_AiPredictions();
-        for (FeatureExtractor.RawBoard rb : new FeatureExtractor().extractAll()) {
+        for (FeatureExtractor.RawBoard rb : extractedBoards) {
             if (rb.roundId != roundId) {
                 continue;
             }

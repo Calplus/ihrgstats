@@ -118,25 +118,7 @@ public class CommandRankHalls {
         String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
         String table = formatHallsTable(hallRankings, homeHall);
 
-        // Round-scoped header shows the round's real label (same resolution
-        // the image metadata uses) - the raw selection value is a
-        // round_order number, and the two can disagree on custom labels.
-        String roundDisplay;
-        if (allYears) {
-            roundDisplay = "All Years";
-        } else if (selectedRound.equalsIgnoreCase("all")) {
-            roundDisplay = "All Rounds";
-        } else {
-            roundDisplay = "Round " + selectedRound;
-            try {
-                A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
-                if (round != null && round.roundLabel != null && !round.roundLabel.isEmpty()) {
-                    roundDisplay = round.roundLabel;
-                }
-            } catch (SQLException | NumberFormatException e) {
-                // Keep the raw fallback - the header is not worth failing the command over.
-            }
-        }
+        String roundDisplay = MatchScoreUtils.roundDisplayLabel(allYears, selectedRound, year, rounds);
         String yearDisplay = allYears ? "" : (", " + year);
         String message = "🏆 **Hall Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
                 "Halls ranked by average TrueElo of top 5 players\n\n" + table;

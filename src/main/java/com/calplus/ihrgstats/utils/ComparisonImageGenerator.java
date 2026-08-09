@@ -484,11 +484,8 @@ public class ComparisonImageGenerator {
     private static void drawSide(Graphics2D g2d, ComparisonData data, int x, int y, 
                                 int width, boolean isLeft) {
         int currentY = y;
-        
+
         // Draw sections
-        g2d.setFont(TABLE_FONT);
-        FontMetrics fm = g2d.getFontMetrics();
-        
         for (Section section : data.sections) {
             // Draw section title (centered)
             g2d.setFont(HEADER_FONT);
@@ -500,7 +497,7 @@ public class ComparisonImageGenerator {
             
             // Draw section content
             g2d.setFont(TABLE_FONT);
-            fm = g2d.getFontMetrics();
+            FontMetrics fm = g2d.getFontMetrics();
             
             // Check if this is a structured victory record section
             if (section.hallVictoryEntries != null) {

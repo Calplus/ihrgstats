@@ -18,7 +18,6 @@ public class InfoImageGenerator {
     private static final int LARGE_ICON_SIZE = 192;
     private static final int PADDING = 20;
     private static final int SECTION_SPACING = 30;
-    private static final int HEADER_TO_TABLE_SPACING = 50;
     
     // Background color - light yellow
     private static final Color BACKGROUND = new Color(255, 255, 224);
@@ -263,30 +262,7 @@ public class InfoImageGenerator {
         
         // For hall/player images: draw metadata info before subtitle and icon
         if (hallIdentifier != null) {
-            // Draw generated date
-            g2d.setFont(METADATA_FONT);
-            g2d.setColor(Color.BLACK);
-            FontMetrics metaFm = g2d.getFontMetrics();
-            String dateText = "Generated: " + metadata.generatedDate;
-            int dateWidth = metaFm.stringWidth(dateText);
-            g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
-            yOffset += metaFm.getHeight() + 5;
-            
-            // Draw description if available
-            if (metadata.description != null && !metadata.description.isEmpty()) {
-                String descText = metadata.description;
-                int descWidth = metaFm.stringWidth(descText);
-                g2d.drawString(descText, (imageWidth - descWidth) / 2, yOffset + metaFm.getAscent() + 5);
-                yOffset += metaFm.getHeight() + 5;
-            }
-            
-            // Draw last round if available
-            if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
-                String roundText = "Last Round: " + metadata.lastRound;
-                int roundWidth = metaFm.stringWidth(roundText);
-                g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
-                yOffset += metaFm.getHeight() + 10;
-            }
+            yOffset = drawMetadataLines(g2d, metadata, imageWidth, yOffset);
         }
         
         // Draw hall icon (if available)
@@ -322,29 +298,7 @@ public class InfoImageGenerator {
             }
         } else {
             // For match info: draw metadata after subtitle
-            g2d.setFont(METADATA_FONT);
-            g2d.setColor(Color.BLACK);
-            FontMetrics metaFm = g2d.getFontMetrics();
-            String dateText = "Generated: " + metadata.generatedDate;
-            int dateWidth = metaFm.stringWidth(dateText);
-            g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
-            yOffset += metaFm.getHeight() + 5;
-            
-            // Draw description if available
-            if (metadata.description != null && !metadata.description.isEmpty()) {
-                String descText = metadata.description;
-                int descWidth = metaFm.stringWidth(descText);
-                g2d.drawString(descText, (imageWidth - descWidth) / 2, yOffset + metaFm.getAscent() + 5);
-                yOffset += metaFm.getHeight() + 5;
-            }
-            
-            // Draw last round if available
-            if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
-                String roundText = "Last Round: " + metadata.lastRound;
-                int roundWidth = metaFm.stringWidth(roundText);
-                g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
-                yOffset += metaFm.getHeight() + 10;
-            }
+            yOffset = drawMetadataLines(g2d, metadata, imageWidth, yOffset);
         }
 
         // Draw subtitle (hall/player name)
@@ -354,8 +308,37 @@ public class InfoImageGenerator {
             FontMetrics subtitleFm = g2d.getFontMetrics();
             int subtitleWidth = subtitleFm.stringWidth(metadata.subtitle);
             g2d.drawString(metadata.subtitle, (imageWidth - subtitleWidth) / 2, yOffset + subtitleFm.getAscent() + 10);
-            yOffset += subtitleFm.getHeight() + 10;
         }
+    }
+
+    /**
+     * Draws the centered "Generated / description / Last Round" metadata
+     * lines and returns the advanced y offset - previously duplicated
+     * verbatim in both header layouts (with-icon and match-info).
+     */
+    private static int drawMetadataLines(Graphics2D g2d, ImageMetadata metadata, int imageWidth, int yOffset) {
+        g2d.setFont(METADATA_FONT);
+        g2d.setColor(Color.BLACK);
+        FontMetrics metaFm = g2d.getFontMetrics();
+        String dateText = "Generated: " + metadata.generatedDate;
+        int dateWidth = metaFm.stringWidth(dateText);
+        g2d.drawString(dateText, (imageWidth - dateWidth) / 2, yOffset + metaFm.getAscent() + 10);
+        yOffset += metaFm.getHeight() + 5;
+
+        if (metadata.description != null && !metadata.description.isEmpty()) {
+            String descText = metadata.description;
+            int descWidth = metaFm.stringWidth(descText);
+            g2d.drawString(descText, (imageWidth - descWidth) / 2, yOffset + metaFm.getAscent() + 5);
+            yOffset += metaFm.getHeight() + 5;
+        }
+
+        if (metadata.lastRound != null && !metadata.lastRound.isEmpty()) {
+            String roundText = "Last Round: " + metadata.lastRound;
+            int roundWidth = metaFm.stringWidth(roundText);
+            g2d.drawString(roundText, (imageWidth - roundWidth) / 2, yOffset + metaFm.getAscent() + 5);
+            yOffset += metaFm.getHeight() + 10;
+        }
+        return yOffset;
     }
     
     /**

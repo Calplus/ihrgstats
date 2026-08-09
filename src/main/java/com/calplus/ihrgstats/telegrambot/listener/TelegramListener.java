@@ -43,7 +43,6 @@ public class TelegramListener {
     private String publicChatId;
     private String publicChatIdFileupload;
     private String devChatId;  // The dev chat ID for status messages
-    private String devChatIdLog;  // The dev chat ID for log messages
     private String publicChatIdStatus;
     private String publicChatIdCommands;
 
@@ -199,7 +198,6 @@ public class TelegramListener {
             this.publicChatId = PropertyResolver.getProperty("telegram.publicChatId", "");
             this.publicChatIdFileupload = PropertyResolver.getProperty("telegram.publicChatId.fileupload", "");
             this.devChatId = PropertyResolver.getProperty("telegram.devChatId", "");  // Load dev chat ID
-            this.devChatIdLog = PropertyResolver.getProperty("telegram.devChatId.log", "");  // Load dev chat log ID
             this.publicChatIdStatus = PropertyResolver.getProperty("telegram.devChatId.status", "");
             this.publicChatIdCommands = PropertyResolver.getProperty("telegram.publicChatId.commands", "");
 
@@ -241,8 +239,8 @@ public class TelegramListener {
                 || Boolean.parseBoolean(PropertyResolver.getProperty("settings.allowAllChannelsProcessing", "false"));
     }
 
-    /**
-     * Helper methods for intelligent chat/thread routing
+    /*
+     * Helper methods for intelligent chat/thread routing.
      * These methods determine the correct chat ID and thread ID to use based on:
      * 1. Whether sub-channel values exist (prefer sub-channel over main channel)
      * 2. Whether main channel is configured (fallback to main if sub-channel empty)
@@ -1106,9 +1104,6 @@ public class TelegramListener {
     }
 
     /**
-     * Handles file upload
-     */
-    /**
      * Runs entirely on a background thread (like /recalculate's recalcThread)
      * so the polling thread stays free to receive the "yes"/"no" confirmation
      * reply for non-admin uploads. requestUserConfirmationViaChat blocks for
@@ -1285,7 +1280,7 @@ public class TelegramListener {
             String errorMsg = "Failed to download file from Telegram";
             logHelper.logError(errorMsg);
             // Send error to chat where file was uploaded
-            sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+            sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             return;
         }
         
@@ -1313,7 +1308,7 @@ public class TelegramListener {
                 if (year == null) {
                     String errorMsg = "Cannot process cappedlist.csv: no current year set. An admin must set settings.currentYear first.";
                     logHelper.logError(errorMsg);
-                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                    sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
 
@@ -1323,7 +1318,7 @@ public class TelegramListener {
 
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
-                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
+                    sendMessageToChat(responseChatId, msg, responseThreadId);
                 });
 
                 boolean success = processor.processCappedList(downloadedFile.toString(), year, nowTimestamp());
@@ -1332,7 +1327,7 @@ public class TelegramListener {
                     String errorMsg = "Failed to process cappedlist.csv";
                     logHelper.logError(errorMsg);
                     // Send error to chat where file was uploaded
-                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                    sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
 
             } else if (parsedRound.matched) {
@@ -1345,7 +1340,7 @@ public class TelegramListener {
                         "Either upload as {year}_round_%d.csv, or have an admin set settings.currentYear first.",
                         fileName, parsed.roundOrder);
                     logHelper.logError(errorMsg);
-                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                    sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                     return;
                 }
 
@@ -1386,7 +1381,7 @@ public class TelegramListener {
 
                 // Set up callback to send success message to upload chat
                 processor.setUploadChatCallback((msg) -> {
-                    sendMessageToChatWithThread(responseChatId, msg, responseThreadId);
+                    sendMessageToChat(responseChatId, msg, responseThreadId);
                 });
 
                 boolean success = processor.processRound(downloadedFile.toString(), year, parsed.roundOrder, nowTimestamp());
@@ -1395,14 +1390,14 @@ public class TelegramListener {
                     String errorMsg = String.format("Failed to process round_%d.csv for %d", parsed.roundOrder, year);
                     logHelper.logError(errorMsg);
                     // Send error to chat where file was uploaded
-                    sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                    sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
                 }
 
             } else {
                 String errorMsg = String.format("Unknown file type: %s. Accepted files: cappedlist.csv, {year}_cappedlist.csv, {year}_round_[n].csv, round_[n].csv", fileName);
                 logHelper.logError(errorMsg);
                 // Send error to chat where file was uploaded
-                sendMessageToChatWithThread(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
+                sendMessageToChat(responseChatId, formatStatusMessage("🔴", "ERROR", errorMsg), responseThreadId);
             }
             
         } finally {
@@ -1610,10 +1605,6 @@ public class TelegramListener {
         recalcThread.start();
     }
 
-    /**
-     * Sends a message to the commands channel
-     * Intelligently routes based on allowAllChannelsProcessing and subchannel configuration
-     */
     /**
      * POSTs a sendMessage payload to Telegram. On a non-200 response, logs
      * the failure via discordLog/telegramLog (not just System.err, which is
@@ -1833,10 +1824,6 @@ public class TelegramListener {
     }
 
     /**
-     * Sends a message with inline keyboard buttons to the upload chat
-     * Intelligently routes based on allowAllChannelsProcessing and original message
-     */
-    /**
      * Sends a message with inline keyboard buttons, tagged with the
      * dialog's nonce (see MultiChoiceConfirmationRequest.nonce) so a stale
      * button from an earlier resolved dialog can never be mistaken for the
@@ -1895,13 +1882,6 @@ public class TelegramListener {
         }
     }
     
-    /**
-     * Sends a message to the upload chat/thread
-     * Intelligently routes to subchannel if exists, otherwise main channel
-     */
-    /**
-     * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
-     */
     /**
      * Sends a message to the upload chat or original channel (if allowAllChannelsProcessing is enabled)
      * Intelligently routes based on allowAllChannelsProcessing and original message
@@ -2006,50 +1986,6 @@ public class TelegramListener {
     }
 
     /**
-     * Sends a message to a specific chat with thread
-     */
-    private void sendMessageToChatWithThread(String chatId, String message, String threadId) {
-        try {
-            if (chatId == null || chatId.isEmpty()) {
-                System.err.println("Cannot send message: chatId is empty or null");
-                return;
-            }
-            message = com.calplus.ihrgstats.utils.TelegramHtml.prepareForSending(message);
-
-            JsonObject payload = new JsonObject();
-            payload.addProperty("chat_id", chatId);
-            payload.addProperty("text", message);
-
-            // Add parse_mode for HTML if message contains HTML tags
-            if (message.contains("<b>") || message.contains("<i>") || message.contains("<code>") || message.contains("<pre>")) {
-                payload.addProperty("parse_mode", "HTML");
-            }
-            // No parse_mode is set otherwise - after TelegramHtml.prepareForSending
-            // (called at the top of every send method), any remaining "**"/"```"/"__"
-            // is never legitimate markdown intent, only accidental content residue
-            // (a stray unpaired sequence, or literal characters in a name/label).
-            // Sending as plain text is always safe; the fragile legacy "Markdown"
-            // parse mode used to be selected here on that same residue and could
-            // fail outright on a single unpaired "*"/"_" (A11).
-
-            // Add thread ID if specified
-            if (threadId != null && !threadId.isEmpty()) {
-                try {
-                    payload.addProperty("message_thread_id", Integer.parseInt(threadId));
-                } catch (NumberFormatException e) {
-                    // Ignore if not a valid number
-                }
-            }
-
-            sendMessagePayloadWithFallback(payload, "message to chat with thread");
-        } catch (Exception e) {
-            String errorMsg = "Error sending message: " + e.getMessage();
-            System.err.println(errorMsg);
-            logHelper.logError(errorMsg);
-        }
-    }
-
-    /**
      * Handles /settings command
      */
     private void handleSettingsCommand(JsonObject message) {
@@ -2133,13 +2069,7 @@ public class TelegramListener {
         });
     }
 
-    /**
-     * Handles compare halls callback queries. The button-removal prefix stays
-     * synchronous (quick, single API call); the actual generation - the
-     * heaviest code path here - runs on a background thread, matching the
-     * export_db_* callback precedent, so it doesn't stall the polling thread.
-     */
-    /** Command-specific routing for one callback click; may throw - the scaffold logs failures. */
+    /** Command-specific routing for one callback click; may throw - the scaffold logs and reports failures. */
     private interface CallbackRouting {
         void route(JsonObject message) throws Exception;
     }

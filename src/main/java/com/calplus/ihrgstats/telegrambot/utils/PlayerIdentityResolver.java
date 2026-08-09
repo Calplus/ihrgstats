@@ -3,7 +3,6 @@ package com.calplus.ihrgstats.telegrambot.utils;
 import com.calplus.ihrgstats.databasemanager.*;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**

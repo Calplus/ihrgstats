@@ -2,6 +2,36 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 29] - 2026-08-09
+
+Performance + deduplication batch from the second full-codebase review round. Strictly behavior-preserving: the corpus exact-value battery and the full suite pass unchanged (301/0), the perf harness was re-run with a same-session control build, and every rendered image family was re-inspected after the image-generator changes (no defects).
+
+### Changed
+
+- **Each upload now runs the whole-history ML feature extraction ONCE instead of two to three times**: prediction logging, retraining and distillation share a single extraction pass (the extraction reads only match data and is deterministic, so the shared list is identical to a fresh one; a failed extraction still falls back to a fresh sweep in the trainer). Measured same-session: a 12-round ingest dropped ~8%.
+- **/infomatch ported onto the bulk-loading path** it never received - the last report command still doing per-row queries: the hall top-5 average now uses the one bulk point-in-time query (was 2 queries per active player), and both matchup reconstruction and cumulative scores resolve each board's opponent from an in-memory match grouping (was 1 query per participant per round - about 100+ queries on a late-round view).
+- **Case-insensitive player-name lookups are now indexed**: added an expression index on `LOWER(name)` - the existing plain name index cannot serve the `WHERE LOWER(name) = LOWER(?)` shape the resolvers actually run, so every candidate lookup was a full scan (EXPLAIN-verified before and after). Schema creation runs on every startup with IF NOT EXISTS, so existing databases pick the index up automatically.
+- **Hall report rendering deduplicated**: the four hall detail blocks (Hall Elo, Player Stats, Seating, Victory Record) that /infohall and /comparehalls each carried as byte-identical ~76-line private copies now live once in the shared hall stats builder.
+- **Player report rendering deduplicated**: the per-round and All-Years text blocks plus the image table/seating line-builders that /infoplayer and /compareplayers each carried as output-identical copies now live once in the shared player stats builder (~200 lines of parallel copies deleted). The two image victory-entry loops stay separate deliberately - the text and image variants display walkover opponents differently, and the two image generators build different entry types.
+- **Image generators**: the byte-identical "Generated / description / Last Round" header block that existed twice inside the info-image generator collapsed onto one helper; two dead stores flagged by static analysis removed (a leftover trailing offset advance and an unobserved pre-loop font/metrics setup); an unused spacing constant deleted.
+- **GBM training frame deduplicated**: plain and antisymmetric boosting shared two parallel ~50-line copies of the same loop (gradient/hessian refresh, tree growth, early stopping, best-iteration truncation) differing only in base score and validation-loss computation - now one frame with those two as explicit parameters. Arithmetic order unchanged, so trained models are byte-identical (corpus-verified).
+- **Smaller**: the round-label resolution for report headers (byte-identical 16-line block in both rank commands) moved to the shared score utils; one of /infomatch's two score formatting tails now delegates to the shared formatter (provably identical output); a redundant listener send method deleted with its callers pointed at the canonical equivalent (identical delivery; failure logging now also reaches the Discord log); the unused dev-chat-log config field, nine stale duplicated javadoc blocks, and an unused import removed.
+
+### Performance (same-session control: the b3u28 build re-benchmarked in a throwaway worktree alongside this batch, two runs each, medians)
+
+- ingest 12 rounds (incl. per-round recalc + ML): **13781 ms → 12724 ms (-7.7%)**
+- /rankplayers all-rounds view: **141 ms → 126 ms (-10.6%)**
+- /infohall all-rounds view: **554 ms → 514 ms (-7.2%)**
+- recalculateAll / retrain cycle: unchanged (±1%, untouched paths)
+- Absolute numbers are not comparable to the previous batch's records: this session measures ~1.5× slower on identical code (the control run proves it), which is why the control build exists. /infomatch has no harness probe; its improvement is structural, like /comparehalls in the earlier perf batch.
+
+### Notes
+
+- Deliberately NOT deduplicated after review (documented in the review record): the comparison generator's two victory-entry renderers (identical geometry preamble, deliberately different bodies), the listener's per-sender console-label variations, the log classes' dev-CLI main methods, the rank/wizard command scaffolds (same shape, command-specific strings throughout).
+- Recorded observation for a future decision: /infomatchhall formats a mixed score pair per-side ("3-2.5") while every other view formats both-or-neither ("3.0-2.5") - left as-is because this batch changes no output.
+- Visual audit re-rendered and inspected across every image family after the generator changes: no defects.
+- 301 tests, 0 failures.
+
 ## [Beta 3 Update 28] - 2026-08-09
 
 Bug-fix batch from the second full-codebase review round. Eight small, targeted fixes; the round's detection sweep otherwise gave the codebase a clean bill (zero regressions from the previous round's changes, rating math re-verified line by line against the source paper, every degenerate input handled gracefully, every hot query confirmed optimally indexed).

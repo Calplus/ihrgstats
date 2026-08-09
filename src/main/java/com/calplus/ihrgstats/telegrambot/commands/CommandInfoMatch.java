@@ -147,9 +147,7 @@ public class CommandInfoMatch {
                 displayScore2 = MatchScoreUtils.computeWalkoverDefaultScore(hall2Score);
                 displayScore1 = 0.0;
             }
-            return (displayScore1 == Math.floor(displayScore1) && displayScore2 == Math.floor(displayScore2))
-                    ? String.format("%.0f-%.0f", displayScore1, displayScore2)
-                    : String.format("%.1f-%.1f", displayScore1, displayScore2);
+            return VictoryRecordCalculator.formatScorePair(displayScore1, displayScore2);
         }
     }
 
@@ -197,9 +195,13 @@ public class CommandInfoMatch {
     /** Average TrueElo of each hall's top 5 players, for one specific round. */
     private Map<Integer, Double> computeTop5AvgByHallForRound(int year, int roundId, int trueEloTypeId) throws SQLException {
         List<B6_PlayerYearStatus.Status> allStatuses = playerYearStatus.getActiveStatusesForYear(year);
+        // One bulk point-in-time map for the round instead of two queries per
+        // active player (the same swap every other report body received).
+        Map<String, D11_PlayerRatings.Rating> ratingsByPlayer =
+                rankingQueryHelper.getPointInTimeRatingsForRound(roundId, trueEloTypeId);
         Map<Integer, List<Double>> elosByHall = new HashMap<>();
         for (B6_PlayerYearStatus.Status status : allStatuses) {
-            D11_PlayerRatings.Rating rating = rankingQueryHelper.getPointInTimeRating(status.playerId, roundId, trueEloTypeId);
+            D11_PlayerRatings.Rating rating = ratingsByPlayer.get(status.playerId);
             if (rating == null) continue;
             elosByHall.computeIfAbsent(status.hallId, k -> new ArrayList<>()).add(rating.ratingValue);
         }
@@ -224,12 +226,17 @@ public class CommandInfoMatch {
     private List<MatchupData> fetchMatchupsForRound(int roundId, Map<Integer, Double> hallEloForRound) throws SQLException {
         List<C9_MatchParticipants.Participant> allParticipants = participants.getParticipantsForRound(roundId);
 
+        // Every participant of the round is already in memory - resolve each
+        // board's opponent from a matchId grouping instead of one query per
+        // participant (the byMatch pattern the other report bodies use).
+        Map<Integer, List<C9_MatchParticipants.Participant>> byMatch = groupByMatch(allParticipants);
+
         Map<Integer, Map<Integer, Double>> hallVsHallPoints = new HashMap<>();
         Map<Integer, Double> hallVsWalkoverPoints = new HashMap<>();
 
         for (C9_MatchParticipants.Participant p : allParticipants) {
             if (p.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) continue;
-            C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(p.matchId, p.playerId);
+            C9_MatchParticipants.Participant opp = opponentOf(byMatch, p);
             if (opp == null) continue;
 
             double points = p.outcome; // schema stores outcome as 1.0/0.5/0.0 already
@@ -298,6 +305,7 @@ public class CommandInfoMatch {
 
         for (A1_Rounds.Round round : roundsUpToSelected) {
             List<C9_MatchParticipants.Participant> allParticipants = participants.getParticipantsForRound(round.id);
+            Map<Integer, List<C9_MatchParticipants.Participant>> byMatch = groupByMatch(allParticipants);
 
             Map<Integer, Map<Integer, Double>> roundHallVsHallPoints = new HashMap<>();
             Map<Integer, Integer> walkoverCountPerHall = new HashMap<>();
@@ -305,7 +313,7 @@ public class CommandInfoMatch {
 
             for (C9_MatchParticipants.Participant p : allParticipants) {
                 if (p.playerId.equals(B4_Players.WALKOVER_PLAYER_ID)) continue;
-                C9_MatchParticipants.Participant opp = participants.getOpponentParticipant(p.matchId, p.playerId);
+                C9_MatchParticipants.Participant opp = opponentOf(byMatch, p);
                 if (opp == null) continue;
 
                 double points = p.outcome;
@@ -369,6 +377,25 @@ public class CommandInfoMatch {
         for (int i = 0; i < scoreList.size(); i++) scoreList.get(i).rank = i + 1;
 
         return scoreList;
+    }
+
+    private static Map<Integer, List<C9_MatchParticipants.Participant>> groupByMatch(List<C9_MatchParticipants.Participant> allParticipants) {
+        Map<Integer, List<C9_MatchParticipants.Participant>> byMatch = new HashMap<>();
+        for (C9_MatchParticipants.Participant p : allParticipants) {
+            byMatch.computeIfAbsent(p.matchId, k -> new ArrayList<>()).add(p);
+        }
+        return byMatch;
+    }
+
+    /** The other side of this participant's board, from the in-memory grouping - replaces a per-participant opponent query. */
+    private static C9_MatchParticipants.Participant opponentOf(Map<Integer, List<C9_MatchParticipants.Participant>> byMatch,
+                                                               C9_MatchParticipants.Participant p) {
+        for (C9_MatchParticipants.Participant other : byMatch.getOrDefault(p.matchId, Collections.emptyList())) {
+            if (!other.playerId.equals(p.playerId)) {
+                return other;
+            }
+        }
+        return null;
     }
 
     private String generateTextOutput(List<MatchupData> matchups, List<HallScoreData> scores, A1_Rounds.Round round) {

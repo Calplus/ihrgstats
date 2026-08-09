@@ -79,7 +79,17 @@ public class ModelTrainer {
      * normal outcome, reported in the returned note.
      */
     public TrainOutcome retrainAndSelect(String nowTimestamp) throws SQLException {
-        List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
+        return retrainAndSelect(new FeatureExtractor().extractAll(), nowTimestamp);
+    }
+
+    /**
+     * Same cycle over a pre-extracted board list - the upload pipeline
+     * extracts once and shares it across prediction logging, training and
+     * distillation (extraction is deterministic and reads only match data,
+     * so a list extracted moments earlier is identical to a fresh one).
+     * Same two-arg shape as {@code ExpEloDistiller.distillAndWrite}.
+     */
+    public TrainOutcome retrainAndSelect(List<FeatureExtractor.RawBoard> all, String nowTimestamp) throws SQLException {
         if (all.size() < MIN_BOARDS_TO_TRAIN) {
             return new TrainOutcome(false, null, null, 0,
                     String.format(Locale.ROOT, "Only %d rated boards (< %d) - training skipped.",

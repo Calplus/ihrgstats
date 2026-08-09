@@ -115,25 +115,7 @@ public class CommandRankPlayers {
         String homeHall = PropertyResolver.getProperty("settings.homeHall", "");
         String table = formatPlayersTable(players, homeHall);
 
-        // Round-scoped header shows the round's real label (same resolution
-        // the image metadata uses) - the raw selection value is a
-        // round_order number, and the two can disagree on custom labels.
-        String roundDisplay;
-        if (allYears) {
-            roundDisplay = "All Years";
-        } else if (selectedRound.equalsIgnoreCase("all")) {
-            roundDisplay = "All Rounds";
-        } else {
-            roundDisplay = "Round " + selectedRound;
-            try {
-                A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
-                if (round != null && round.roundLabel != null && !round.roundLabel.isEmpty()) {
-                    roundDisplay = round.roundLabel;
-                }
-            } catch (SQLException | NumberFormatException e) {
-                // Keep the raw fallback - the header is not worth failing the command over.
-            }
-        }
+        String roundDisplay = MatchScoreUtils.roundDisplayLabel(allYears, selectedRound, year, rounds);
         String yearDisplay = allYears ? "" : (", " + year);
         String message = "🏆 **Player Rankings** (" + roundDisplay + yearDisplay + ")\n\n" +
                 "Players ranked by TrueElo rating - ExpElo (the AI model's distilled rating) shown alongside where a champion has been trained\n\n" + table;
@@ -267,19 +249,6 @@ public class CommandRankPlayers {
         return players;
     }
 
-    /**
-     * The label of the most recent round (from roundsDescending, already
-     * newest-first) this player actually PLAYED - has a match_participants
-     * row for - rather than merely the round their latest rating row
-     * belongs to. A rating row is written for every round a player's hall
-     * played even when the player personally sat out that round (a real
-     * Glicko-2 RD-growth requirement, not evidence of having played), so
-     * using it directly as "last round" mislabelled a carried-forward,
-     * non-playing player as having played their hall's most recent round -
-     * contradicting the /help text's own "last round the player actually
-     * competed" description of this column. Returns null if the player
-     * never played any round within roundsDescending.
-     */
     /**
      * Every player's last-actually-played round label - the most recent
      * round with a match_participants row for them, NOT merely the round

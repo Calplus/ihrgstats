@@ -346,6 +346,12 @@ public class DatabaseSchema {
         createIndex(conn, "idx_match_participants_player_outcome", "match_participants", "player_id, outcome");
         createIndex(conn, "idx_match_participants_hall_id", "match_participants", "hall_id");
         createIndex(conn, "idx_player_names_name", "player_names", "name");
+        // Expression index matching the case-insensitive lookup the name
+        // resolvers actually run (WHERE LOWER(name) = LOWER(?)) - the plain
+        // name index above cannot serve that shape, so candidate lookups
+        // were full scans. IF NOT EXISTS + schema-ensure-on-startup applies
+        // this to existing databases automatically.
+        createIndex(conn, "idx_player_names_name_lower", "player_names", "LOWER(name)");
         createIndex(conn, "idx_player_year_status_year", "player_year_status", "year");
         createIndex(conn, "idx_player_year_status_hall_id", "player_year_status", "hall_id");
         createIndex(conn, "idx_player_year_status_compound", "player_year_status", "year, hall_id");

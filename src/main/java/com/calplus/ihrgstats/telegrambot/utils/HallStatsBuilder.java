@@ -77,6 +77,94 @@ public class HallStatsBuilder {
     }
 
     /**
+     * Appends the four hall detail blocks (Hall Elo, Player Stats, Seating
+     * Arrangements, Victory Record) exactly as both /infohall and
+     * /comparehalls render them - previously two byte-identical ~76-line
+     * private copies maintained in parallel. Ends at the Victory Record's
+     * closing fence with no trailing newline; callers add their own
+     * headers and trailing spacing.
+     */
+    public static void appendHallDetailBlocks(StringBuilder sb, HallData hall, List<A1_Rounds.Round> roundsToInclude) {
+        sb.append("**🏛️ Hall Elo:**\n```\n");
+        sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", "Rnd", "Rank", "ΔRank", "Elo", "ΔElo"));
+        sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", "----", "------", "----------", "--------", "----------"));
+
+        Double prevElo = null;
+        Integer prevRank = null;
+        for (A1_Rounds.Round round : roundsToInclude) {
+            Double elo = hall.hallEloByRound.get(round.roundOrder);
+            Integer rank = hall.hallRankByRound.get(round.roundOrder);
+            if (elo == null || rank == null) {
+                sb.append(String.format("%-4s %-6s %-10s %-8s %-10s\n", round.roundLabel, "-", "-", "-", "-"));
+                continue;
+            }
+            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
+            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaDoubleString(elo - prevElo);
+            sb.append(String.format("%-4s %-6d %-10s %-8s %-10s\n", round.roundLabel, rank, deltaRank, String.format("%.1f", elo), deltaElo));
+            prevElo = elo;
+            prevRank = rank;
+        }
+        sb.append("```\n\n");
+
+        sb.append("**📋 Player Stats:**\n```\n");
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "HallRank", "GlobRank", "ELO", "Capped", "Name"));
+        sb.append(String.format("%-8s %-8s %-6s %-7s %-20s\n", "--------", "--------", "------", "-------", "--------------------"));
+        for (PlayerData p : hall.players) {
+            String name = p.name.length() > 20 ? p.name.substring(0, 17) + "..." : p.name;
+            sb.append(String.format("%-8d %-8d %-6d %-7s %-20s\n", p.hallRank, p.globalRank, p.elo, p.capped ? "Yes" : "No", name));
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🪑 Seating Arrangements:**\n```\n");
+        List<PlayerData> sortedBySeat = new ArrayList<>(hall.players);
+        sortedBySeat.sort((a, b) -> Double.compare(a.avgSeat, b.avgSeat));
+
+        StringBuilder header = new StringBuilder(String.format("%-4s %-15s: ", "Avg", "Name"));
+        for (A1_Rounds.Round round : roundsToInclude) header.append(String.format("%-3s|", round.roundLabel));
+        sb.append(header).append("\n");
+
+        for (PlayerData p : sortedBySeat) {
+            String name = p.name.length() > 15 ? p.name.substring(0, 12) + "..." : p.name;
+            String avgStr = p.avgSeat < 999 ? String.format("%.1f", p.avgSeat) : "-";
+            StringBuilder line = new StringBuilder(String.format("%-4s %-15s: ", avgStr, name));
+            for (A1_Rounds.Round round : roundsToInclude) {
+                Integer seat = p.seatByRound.get(round.roundOrder);
+                line.append(String.format("%-3s|", seat != null ? seat.toString() : "-"));
+            }
+            sb.append(line).append("\n");
+        }
+        sb.append("```\n\n");
+
+        sb.append("**🏆 Victory Record:**\n```\n");
+        for (A1_Rounds.Round round : roundsToInclude) {
+            HallVictoryRecord record = hall.victoryRecords.get(round.roundOrder);
+            if (record == null) {
+                sb.append(String.format("%-3s -NA-\n", round.roundLabel));
+                continue;
+            }
+
+            Double hallElo = hall.hallEloByRound.get(round.roundOrder);
+            String hallEloStr = hallElo != null ? String.format("%.1f", hallElo) : "?";
+            String oppEloStr = record.oppHallElo != null ? String.format("%.1f", record.oppHallElo) : "?";
+
+            String hallEmoji = VictoryRecordCalculator.getOutcomeEmoji(record.outcome);
+            int oppOutcome = record.outcome == 0 ? 0 : -record.outcome;
+            String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
+
+            String formattedHall = VictoryRecordCalculator.formatHallName(hall.hallName);
+            String formattedOppHall = "WALKOVER".equalsIgnoreCase(record.oppHallName) ? "WALKOVER" : VictoryRecordCalculator.formatHallName(record.oppHallName);
+            if ("WALKOVER".equalsIgnoreCase(record.oppHallName)) oppEloStr = "-";
+
+            String score = VictoryRecordCalculator.formatScorePair(record.hallScore, record.oppScore);
+
+            String line = String.format("%-3s %s %-4s %-15s %s %-15s %-4s %s",
+                    round.roundLabel, hallEmoji, hallEloStr, formattedHall, score, formattedOppHall, oppEloStr, oppEmoji);
+            sb.append(line).append("\n");
+        }
+        sb.append("```");
+    }
+
+    /**
      * The per-round context every hall build reads from, bulk-loaded ONCE
      * per round - previously the point-in-time rating, the full rank map,
      * the player's participant row, the opponent row and the opponent's

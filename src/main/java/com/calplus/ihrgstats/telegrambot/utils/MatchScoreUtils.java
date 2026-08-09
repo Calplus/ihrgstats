@@ -49,4 +49,32 @@ public final class MatchScoreUtils {
         A1_Rounds.Round latest = rounds.getRoundByYearAndOrder(year, latestOrder);
         return latest != null ? latest.roundLabel : null;
     }
+
+    /**
+     * Display label for a round-scoped report header: "All Years"/"All
+     * Rounds" for the aggregate selections, otherwise the round's REAL
+     * stored label when it has one - the raw selection value is a
+     * round_order number, and the two can disagree on custom labels -
+     * falling back to "Round {n}". Never throws: the header is not worth
+     * failing a command over. Previously a byte-identical block in each
+     * rank command.
+     */
+    public static String roundDisplayLabel(boolean allYears, String selectedRound, Integer year, A1_Rounds rounds) {
+        if (allYears) {
+            return "All Years";
+        }
+        if (selectedRound.equalsIgnoreCase("all")) {
+            return "All Rounds";
+        }
+        String roundDisplay = "Round " + selectedRound;
+        try {
+            A1_Rounds.Round round = rounds.getRoundByYearAndOrder(year, Integer.parseInt(selectedRound));
+            if (round != null && round.roundLabel != null && !round.roundLabel.isEmpty()) {
+                roundDisplay = round.roundLabel;
+            }
+        } catch (SQLException | NumberFormatException e) {
+            // Keep the raw fallback.
+        }
+        return roundDisplay;
+    }
 }

@@ -222,9 +222,39 @@ public class GbmModel implements MatchupPredictor {
         return out;
     }
 
+    /**
+     * Per-iteration validation loss for the shared boosting frame. Sees the
+     * ensemble grown so far plus the tree just added, so a stateful
+     * implementation can advance an incremental prediction with just the
+     * newest tree while a stateless one may re-predict through the whole
+     * ensemble.
+     */
+    private interface ValidationLoss {
+        double lossAfter(List<GbmTree.Node> trees, GbmTree.Node newestTree);
+    }
+
     /** Standard second-order logistic boosting with a constant base score and validation-based early stopping. */
     private static List<GbmTree.Node> boost(double[][] fitX, double[] fitY, double baseScore,
                                             double[][] valX, double[] valY, Params p) {
+        double[] valPred = new double[valX.length];
+        java.util.Arrays.fill(valPred, baseScore);
+        return boostFrame(fitX, fitY, baseScore, valX.length, (trees, newestTree) -> {
+            for (int i = 0; i < valX.length; i++) {
+                valPred[i] += p.learningRate * GbmTree.predict(newestTree, valX[i]);
+            }
+            return logLoss(valPred, valY);
+        }, p);
+    }
+
+    /**
+     * The boosting frame both variants share (grad/hess refresh, tree
+     * growth, fit-prediction advance, early stopping, best-iteration
+     * truncation) - previously two parallel ~50-line copies whose only
+     * real differences were the base score and how the validation loss is
+     * computed each iteration.
+     */
+    private static List<GbmTree.Node> boostFrame(double[][] fitX, double[] fitY, double baseScore,
+                                                 int valCount, ValidationLoss validation, Params p) {
         int n = fitX.length;
         if (n == 0) {
             return List.of();
@@ -235,14 +265,12 @@ public class GbmModel implements MatchupPredictor {
         }
         double[] fitPred = new double[n];
         java.util.Arrays.fill(fitPred, baseScore);
-        double[] valPred = new double[valX.length];
-        java.util.Arrays.fill(valPred, baseScore);
 
         List<GbmTree.Node> trees = new ArrayList<>();
         int bestIteration = 0;
-        double bestValLoss = valX.length > 0 ? Double.POSITIVE_INFINITY : Double.NaN;
+        double bestValLoss = valCount > 0 ? Double.POSITIVE_INFINITY : Double.NaN;
         int sinceImprovement = 0;
-        int cap = valX.length > 0 ? MAX_TREES : FALLBACK_TREE_COUNT;
+        int cap = valCount > 0 ? MAX_TREES : FALLBACK_TREE_COUNT;
 
         for (int t = 0; t < cap; t++) {
             double[] grad = new double[n];
@@ -257,13 +285,10 @@ public class GbmModel implements MatchupPredictor {
             for (int i = 0; i < n; i++) {
                 fitPred[i] += p.learningRate * GbmTree.predict(tree, fitX[i]);
             }
-            if (valX.length == 0) {
+            if (valCount == 0) {
                 continue;
             }
-            for (int i = 0; i < valX.length; i++) {
-                valPred[i] += p.learningRate * GbmTree.predict(tree, valX[i]);
-            }
-            double valLoss = logLoss(valPred, valY);
+            double valLoss = validation.lossAfter(trees, tree);
             if (valLoss < bestValLoss - 1e-6) {
                 bestValLoss = valLoss;
                 bestIteration = trees.size();
@@ -275,7 +300,7 @@ public class GbmModel implements MatchupPredictor {
                 }
             }
         }
-        return valX.length > 0 ? new ArrayList<>(trees.subList(0, Math.max(1, bestIteration))) : trees;
+        return valCount > 0 ? new ArrayList<>(trees.subList(0, Math.max(1, bestIteration))) : trees;
     }
 
     /**
@@ -286,38 +311,7 @@ public class GbmModel implements MatchupPredictor {
      */
     private static List<GbmTree.Node> boostAntisymmetric(double[][] fitX, double[] fitY,
                                                           double[][] valX, double[] valY, Params p) {
-        int n = fitX.length;
-        if (n == 0) {
-            return List.of();
-        }
-        List<Integer> allIdx = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            allIdx.add(i);
-        }
-        double[] fitPred = new double[n];
-
-        List<GbmTree.Node> trees = new ArrayList<>();
-        int bestIteration = 0;
-        double bestValLoss = valX.length > 0 ? Double.POSITIVE_INFINITY : Double.NaN;
-        int sinceImprovement = 0;
-        int cap = valX.length > 0 ? MAX_TREES : FALLBACK_TREE_COUNT;
-
-        for (int t = 0; t < cap; t++) {
-            double[] grad = new double[n];
-            double[] hess = new double[n];
-            for (int i = 0; i < n; i++) {
-                double pi = sigmoid(fitPred[i]);
-                grad[i] = pi - fitY[i];
-                hess[i] = Math.max(pi * (1 - pi), 1e-6);
-            }
-            GbmTree.Node tree = GbmTree.buildTree(allIdx, fitX, grad, hess, p.maxDepth, p.lambda, MIN_CHILD_WEIGHT, MIN_GAIN);
-            trees.add(tree);
-            for (int i = 0; i < n; i++) {
-                fitPred[i] += p.learningRate * GbmTree.predict(tree, fitX[i]);
-            }
-            if (valX.length == 0) {
-                continue;
-            }
+        return boostFrame(fitX, fitY, 0.0, valX.length, (trees, newestTree) -> {
             double valLoss = 0.0;
             for (int i = 0; i < valX.length; i++) {
                 double raw = ensemblePredict(trees, p.learningRate, valX[i]);
@@ -326,19 +320,8 @@ public class GbmModel implements MatchupPredictor {
                 double pi = sigmoid(logit);
                 valLoss += -Math.log(Math.max(valY[i] > 0.5 ? pi : 1 - pi, 1e-12));
             }
-            valLoss /= valX.length;
-            if (valLoss < bestValLoss - 1e-6) {
-                bestValLoss = valLoss;
-                bestIteration = trees.size();
-                sinceImprovement = 0;
-            } else {
-                sinceImprovement++;
-                if (sinceImprovement >= PATIENCE) {
-                    break;
-                }
-            }
-        }
-        return valX.length > 0 ? new ArrayList<>(trees.subList(0, Math.max(1, bestIteration))) : trees;
+            return valLoss / valX.length;
+        }, p);
     }
 
     private static double ensemblePredict(List<GbmTree.Node> trees, double learningRate, double[] x) {

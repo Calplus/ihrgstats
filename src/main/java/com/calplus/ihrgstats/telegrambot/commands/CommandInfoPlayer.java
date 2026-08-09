@@ -226,37 +226,8 @@ public class CommandInfoPlayer {
         StringBuilder sb = new StringBuilder();
         sb.append("**👤 Player Information (All Years)**\n\n");
         sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(playerName), VictoryRecordCalculator.formatHallName(hallName)));
-
-        sb.append("**📊 Stats Per Year:**\n```\n");
-        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
-        sb.append(String.format("%-6s %-6s %-10s %-6s %-10s\n", "------", "------", "----------", "------", "----------"));
-        Integer prevRank = null;
-        Integer prevElo = null;
-        for (YearSummary s : yearSummaries) {
-            if (s.finalRank == null || s.finalElo == null) continue;
-            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalRank);
-            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(s.finalElo - prevElo);
-            sb.append(String.format("%-6d %-6d %-10s %-6d %-10s\n", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
-            prevRank = s.finalRank;
-            prevElo = s.finalElo;
-        }
-        sb.append("```\n\n");
-
-        sb.append("**🪑 Avg Seat by Year:**\n```\n");
-        StringBuilder yearsLine = new StringBuilder("Year:");
-        StringBuilder seatsLine = new StringBuilder("Seat:");
-        for (YearSummary s : yearSummaries) {
-            yearsLine.append(String.format(" %-6d|", s.year));
-            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
-        }
-        sb.append(yearsLine).append("\n").append(seatsLine).append("\n```\n\n");
-
-        sb.append("**🏆 Season Record (wins-losses per year):**\n```\n");
-        for (YearSummary s : yearSummaries) {
-            sb.append(String.format("%-6d %s\n", s.year, VictoryRecordCalculator.formatScorePair(s.wins, s.losses)));
-        }
-        sb.append("```\n");
-
+        PlayerStatsBuilder.appendYearSummaryBlocks(sb, yearSummaries);
+        sb.append("\n");
         return sb.toString();
     }
 
@@ -271,32 +242,20 @@ public class CommandInfoPlayer {
 
         InfoImageGenerator.Section statsSection = new InfoImageGenerator.Section("Stats Per Year");
         statsSection.addMonospacedRow(String.format("%-6s %-6s %-10s %-6s %-10s", "Year", "Rank", "ΔRank", "ELO", "ΔELO"));
-        Integer prevRank = null;
-        Integer prevElo = null;
-        for (YearSummary s : yearSummaries) {
-            if (s.finalRank == null || s.finalElo == null) continue;
-            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - s.finalRank);
-            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(s.finalElo - prevElo);
-            statsSection.addMonospacedRow(String.format("%-6d %-6d %-10s %-6d %-10s", s.year, s.finalRank, deltaRank, s.finalElo, deltaElo));
-            prevRank = s.finalRank;
-            prevElo = s.finalElo;
+        for (String line : PlayerStatsBuilder.statsPerYearLines(yearSummaries)) {
+            statsSection.addMonospacedRow(line);
         }
         sections.add(statsSection);
 
         InfoImageGenerator.Section seatSection = new InfoImageGenerator.Section("Avg Seat by Year");
-        StringBuilder yearsLine = new StringBuilder("Year:");
-        StringBuilder seatsLine = new StringBuilder("Seat:");
-        for (YearSummary s : yearSummaries) {
-            yearsLine.append(String.format(" %-6d|", s.year));
-            seatsLine.append(String.format(" %-6s|", s.avgSeat < 999 ? String.format("%.1f", s.avgSeat) : "-"));
+        for (String line : PlayerStatsBuilder.avgSeatByYearLines(yearSummaries)) {
+            seatSection.addMonospacedRow(line);
         }
-        seatSection.addMonospacedRow(yearsLine.toString());
-        seatSection.addMonospacedRow(seatsLine.toString());
         sections.add(seatSection);
 
         InfoImageGenerator.Section seasonSection = new InfoImageGenerator.Section("Season Record");
-        for (YearSummary s : yearSummaries) {
-            seasonSection.addMonospacedRow(String.format("%-6d %s", s.year, VictoryRecordCalculator.formatScorePair(s.wins, s.losses)));
+        for (String line : PlayerStatsBuilder.seasonRecordLines(yearSummaries)) {
+            seasonSection.addMonospacedRow(line);
         }
         sections.add(seasonSection);
 
@@ -307,83 +266,8 @@ public class CommandInfoPlayer {
         StringBuilder sb = new StringBuilder();
         sb.append("**👤 Player Information**\n\n");
         sb.append(String.format("**%s** (%s)\n\n", TelegramHtml.escape(player.name), VictoryRecordCalculator.formatHallName(player.hall)));
-
-        sb.append("**📊 Stats Per Round:**\n```\n");
-        sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
-        sb.append(String.format("%-4s %-6s %-10s %-6s %-10s\n", "----", "------", "----------", "------", "----------"));
-
-        Integer prevRank = null;
-        Integer prevElo = null;
-        for (int order : roundOrders) {
-            Integer rank = player.rankByRound.get(order);
-            Integer elo = player.eloByRound.get(order);
-            if (rank == null || elo == null) continue;
-
-            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(elo - prevElo);
-
-            sb.append(String.format("%-4s %-6d %-10s %-6d %-10s\n",
-                    player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
-
-            prevRank = rank;
-            prevElo = elo;
-        }
-        sb.append("```\n\n");
-
-        sb.append("**🪑 Seating Arrangement:**\n```\n");
-        StringBuilder roundsLine = new StringBuilder("Rnd: ");
-        StringBuilder seatsLine = new StringBuilder("Seat:");
-        for (int order : roundOrders) {
-            String roundName = player.roundLabelByOrder.get(order);
-            Integer seat = player.seatByRound.get(order);
-            roundsLine.append(String.format("%-4s", roundName)).append("|");
-            seatsLine.append(String.format(" %-3s", seat != null ? String.valueOf(seat) : "-")).append("|");
-        }
-        sb.append(roundsLine).append("\n").append(seatsLine).append("\n```\n\n");
-
-        sb.append("**🏆 Victory Record:**\n```\n");
-        for (int order : roundOrders) {
-            String roundName = player.roundLabelByOrder.get(order);
-            Integer outcome = player.outcomeByRound.get(order);
-            if (outcome == null) {
-                if (player.eloByRound.containsKey(order)) {
-                    sb.append(String.format("%-3s  -NA-\n", roundName));
-                }
-                continue;
-            }
-
-            String oppName = player.oppNameByRound.get(order);
-            String oppHall = player.oppHallByRound.get(order);
-            Integer playerElo = player.eloByRound.get(order);
-            Integer oppElo = player.oppEloByRound.get(order);
-            String playerEloStr = playerElo != null ? String.valueOf(playerElo) : "?";
-            String oppEloStr = oppElo != null ? String.valueOf(oppElo) : "?";
-
-            String emoji = VictoryRecordCalculator.getOutcomeEmoji(outcome);
-            Integer oppOutcome = outcome == 0 ? 0 : -outcome;
-            String oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(oppOutcome);
-
-            String playerHallFormatted = TableFormatter.shortenHallName(player.hall);
-            String oppHallFormatted;
-            if ("WALKOVER".equalsIgnoreCase(oppName)) {
-                oppHallFormatted = "";
-                oppEloStr = "-";
-                oppEmoji = VictoryRecordCalculator.getOutcomeEmoji(-1);
-            } else if (oppHall != null) {
-                oppHallFormatted = TableFormatter.shortenHallName(oppHall);
-            } else {
-                oppHallFormatted = "??";
-            }
-
-            String score = VictoryRecordCalculator.formatScorePair(player.scoreByRound.get(order), player.oppScoreByRound.get(order), Boolean.TRUE.equals(player.selfTimeoutByRound.get(order)), Boolean.TRUE.equals(player.oppTimeoutByRound.get(order)));
-
-            String line = String.format("%-3s %s %-2s %-4s %-16s %s %-16s %-4s %-2s %s",
-                    roundName, emoji, playerHallFormatted, playerEloStr, player.name, score,
-                    oppName != null ? oppName : "?", oppEloStr, oppHallFormatted, oppEmoji);
-            sb.append(line).append("\n");
-        }
-        sb.append("```\n");
-
+        PlayerStatsBuilder.appendPlayerDetailBlocks(sb, player, roundOrders);
+        sb.append("\n");
         return sb.toString();
     }
 
@@ -399,32 +283,15 @@ public class CommandInfoPlayer {
         List<InfoImageGenerator.Section> sections = new ArrayList<>();
 
         InfoImageGenerator.Section statsSection = new InfoImageGenerator.Section("Stats Per Round");
-        statsSection.addMonospacedRow(String.format("%-4s %-6s %-10s %-6s %-10s", "Rnd", "Rank", "ΔRank", "ELO", "ΔELO"));
-        Integer prevRank = null;
-        Integer prevElo = null;
-        for (int order : roundOrders) {
-            Integer rank = player.rankByRound.get(order);
-            Integer elo = player.eloByRound.get(order);
-            if (rank == null || elo == null) continue;
-            String deltaRank = prevRank == null ? "-" : VictoryRecordCalculator.deltaString(prevRank - rank);
-            String deltaElo = prevElo == null ? "-" : VictoryRecordCalculator.deltaString(elo - prevElo);
-            statsSection.addMonospacedRow(String.format("%-4s %-6d %-10s %-6d %-10s",
-                    player.roundLabelByOrder.get(order), rank, deltaRank, elo, deltaElo));
-            prevRank = rank;
-            prevElo = elo;
+        for (String line : PlayerStatsBuilder.statsPerRoundLines(player, roundOrders)) {
+            statsSection.addMonospacedRow(line);
         }
         sections.add(statsSection);
 
         InfoImageGenerator.Section seatSection = new InfoImageGenerator.Section("Seating");
-        StringBuilder seatHeader = new StringBuilder("Rnd: ");
-        StringBuilder seatData = new StringBuilder("Seat:");
-        for (int order : roundOrders) {
-            seatHeader.append(String.format("%-3s|", player.roundLabelByOrder.get(order)));
-            Integer seat = player.seatByRound.get(order);
-            seatData.append(String.format("%-3s|", seat != null ? seat : "-"));
+        for (String line : PlayerStatsBuilder.seatingLines(player, roundOrders)) {
+            seatSection.addMonospacedRow(line);
         }
-        seatSection.addMonospacedRow(seatHeader.toString());
-        seatSection.addMonospacedRow(seatData.toString());
         sections.add(seatSection);
 
         InfoImageGenerator.Section victorySection = new InfoImageGenerator.Section("Victory Record");
