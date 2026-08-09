@@ -63,24 +63,47 @@ public class PredictionService {
     }
 
     /**
+     * Snapshot of the extraction's end state: every player's
+     * most-recently-played Side plus the context a hypothetical "played
+     * right now" board would carry (the last real round's year, and its
+     * roundOrder + 1) - all from ONE extraction pass, so roster-wide
+     * consumers never re-extract just for the round context.
+     */
+    public static class LatestState {
+        /** Most-recently-played Side per player_id; a player who has never played has no entry - use {@link #latestSideOrDefault}. */
+        public final Map<String, FeatureExtractor.Side> sides;
+        /** Year of the most recent rated round, or the caller's fallback year when there is no history at all. */
+        public final int year;
+        /** Round order a hypothetical next board would be played at: last real roundOrder + 1, or 1 with no history. */
+        public final int nextRoundOrder;
+
+        LatestState(Map<String, FeatureExtractor.Side> sides, int year, int nextRoundOrder) {
+            this.sides = sides;
+            this.year = year;
+            this.nextRoundOrder = nextRoundOrder;
+        }
+    }
+
+    /**
      * Every player's most-recently-played Side snapshot, keyed by player_id
      * - one extraction pass shared across a whole roster (the lineup
      * optimizer and opponent model both need this for many players at
      * once). "Most recent" means the state ENTERING that player's last
      * rated round - up to one round short of perfectly live, since it
      * doesn't yet include their own most recent result, but the closest
-     * available without a dedicated live-state sweep. A player who has
-     * never played simply has no entry - callers fall back to
-     * {@link #defaultSide}.
+     * available without a dedicated live-state sweep.
      */
-    public Map<String, FeatureExtractor.Side> latestSides() throws SQLException {
+    public LatestState latestState(int fallbackYear) throws SQLException {
+        List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
         Map<String, FeatureExtractor.Side> latest = new HashMap<>();
         Map<String, Integer> latestSeq = new HashMap<>();
-        for (FeatureExtractor.RawBoard rb : new FeatureExtractor().extractAll()) {
+        for (FeatureExtractor.RawBoard rb : all) {
             considerLatest(latest, latestSeq, rb.a, rb.roundSeq);
             considerLatest(latest, latestSeq, rb.b, rb.roundSeq);
         }
-        return latest;
+        int nextRoundOrder = all.isEmpty() ? 1 : all.get(all.size() - 1).roundOrder + 1;
+        int year = all.isEmpty() ? fallbackYear : all.get(all.size() - 1).year;
+        return new LatestState(latest, year, nextRoundOrder);
     }
 
     private static void considerLatest(Map<String, FeatureExtractor.Side> latest, Map<String, Integer> latestSeq,
@@ -92,7 +115,7 @@ public class PredictionService {
         }
     }
 
-    /** {@code latestSides()}, falling back to a neutral debutant Side for any playerId with no history. */
+    /** {@code latestState().sides}, falling back to a neutral debutant Side for any playerId with no history. */
     public FeatureExtractor.Side latestSideOrDefault(Map<String, FeatureExtractor.Side> latestSides, String playerId) {
         FeatureExtractor.Side side = latestSides.get(playerId);
         return side != null ? side : defaultSide(playerId);
@@ -110,18 +133,10 @@ public class PredictionService {
     public FeatureExtractor.RawBoard buildHypotheticalBoard(String playerAId, String playerBId, int fallbackYear) throws SQLException {
         // One extraction serves both the per-player latest sides and the
         // next-round context (this method previously ran extractAll twice).
-        List<FeatureExtractor.RawBoard> all = new FeatureExtractor().extractAll();
-        Map<String, FeatureExtractor.Side> latest = new HashMap<>();
-        Map<String, Integer> latestSeq = new HashMap<>();
-        for (FeatureExtractor.RawBoard rb : all) {
-            considerLatest(latest, latestSeq, rb.a, rb.roundSeq);
-            considerLatest(latest, latestSeq, rb.b, rb.roundSeq);
-        }
-        FeatureExtractor.Side sideA = latestSideOrDefault(latest, playerAId);
-        FeatureExtractor.Side sideB = latestSideOrDefault(latest, playerBId);
-        int roundOrder = all.isEmpty() ? 1 : all.get(all.size() - 1).roundOrder + 1;
-        int year = all.isEmpty() ? fallbackYear : all.get(all.size() - 1).year;
-        return new FeatureExtractor.RawBoard(-1, Integer.MAX_VALUE, -1, year, roundOrder, sideA, sideB, 0.0, false, false, 0.0);
+        LatestState state = latestState(fallbackYear);
+        FeatureExtractor.Side sideA = latestSideOrDefault(state.sides, playerAId);
+        FeatureExtractor.Side sideB = latestSideOrDefault(state.sides, playerBId);
+        return new FeatureExtractor.RawBoard(-1, Integer.MAX_VALUE, -1, state.year, state.nextRoundOrder, sideA, sideB, 0.0, false, false, 0.0);
     }
 
     /** Fits a fresh Glicko baseline (draw rate) from the full stored history - the free "side by side" comparator. */

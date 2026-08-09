@@ -271,7 +271,9 @@ public class PlayerIdentityResolver {
         // match, and within the same match strength, prefer whichever
         // candidate was more RECENTLY active - a typo for a recently-active
         // player is a far more likely real-world scenario than confusion
-        // with a long-dormant record.
+        // with a long-dormant record. Exact strength+recency ties break by
+        // name (A-Z), then playerId, so the offered candidate never depends
+        // on the scan order.
         B5_PlayerNames.NameRecord bestCandidate = null;
         boolean bestIsPartial = false;
 
@@ -286,7 +288,9 @@ public class PlayerIdentityResolver {
             }
             if (bestCandidate == null
                     || (partial && !bestIsPartial)
-                    || (partial == bestIsPartial && candidate.lastSeenYear > bestCandidate.lastSeenYear)) {
+                    || (partial == bestIsPartial && candidate.lastSeenYear > bestCandidate.lastSeenYear)
+                    || (partial == bestIsPartial && candidate.lastSeenYear == bestCandidate.lastSeenYear
+                            && tieBreaksBefore(candidate, bestCandidate))) {
                 bestCandidate = candidate;
                 bestIsPartial = partial;
             }
@@ -321,6 +325,19 @@ public class PlayerIdentityResolver {
             result.cancelled = true;
         }
         return result;
+    }
+
+    /**
+     * Deterministic final tie-break for two fuzzy candidates of equal match
+     * strength and recency: name A-Z, then playerId (unique, so the order
+     * is total even for two distinct players sharing one exact name).
+     */
+    private static boolean tieBreaksBefore(B5_PlayerNames.NameRecord a, B5_PlayerNames.NameRecord b) {
+        int byName = a.name.compareToIgnoreCase(b.name);
+        if (byName != 0) {
+            return byName < 0;
+        }
+        return a.playerId.compareTo(b.playerId) < 0;
     }
 
     /** Ported from legacy: checks for substring/partial name overlap (e.g. "John Smith" vs "John"). */

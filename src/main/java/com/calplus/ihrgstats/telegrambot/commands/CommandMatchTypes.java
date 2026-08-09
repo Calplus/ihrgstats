@@ -268,7 +268,12 @@ public class CommandMatchTypes {
                 } catch (NumberFormatException e) {
                     return new CommandResponse("❌ Invalid input: Max score must be a valid positive number. Please try again.", (java.nio.file.Path) null, null);
                 }
-                if (maxScore <= 0) {
+                // isFinite: Double.parseDouble accepts "NaN"/"Infinity"/"1e999",
+                // none of which are caught by the <= 0 range check, and a
+                // non-finite max score would flow into walkover default scores
+                // unvalidated (CSV rows have their own finite-score checks;
+                // this wizard is the only other way a score bound enters).
+                if (!Double.isFinite(maxScore) || maxScore <= 0) {
                     return new CommandResponse("❌ Invalid input: Max score must be a positive number. Please try again.", (java.nio.file.Path) null, null);
                 }
                 state.maxScore = maxScore;

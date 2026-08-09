@@ -288,10 +288,7 @@ public class CommandInfoMatchHall {
             boardsByOpp.merge(player.oppHall, 1, Integer::sum);
         }
 
-        String primaryOppHall = boardsByOpp.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(null);
+        String primaryOppHall = VictoryRecordCalculator.primaryOpponent(boardsByOpp, myScoreByOpp);
 
         OpponentTally tally = new OpponentTally();
         if (primaryOppHall != null) {

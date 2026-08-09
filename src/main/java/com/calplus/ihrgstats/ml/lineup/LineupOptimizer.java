@@ -124,7 +124,8 @@ public class LineupOptimizer {
                     + " players, have " + opponentProfile.expectedRoster.size() + ")");
         }
 
-        Map<String, FeatureExtractor.Side> latestSides = predictionService.latestSides();
+        PredictionService.LatestState latestState = predictionService.latestState(fallbackYear);
+        Map<String, FeatureExtractor.Side> latestSides = latestState.sides;
 
         boolean pruned = false;
         List<String> pool = ourAvailableRoster;
@@ -139,7 +140,8 @@ public class LineupOptimizer {
 
         // Precompute the full (ourPlayer x theirPlayer x seat) probability tensor once.
         List<String> theirRoster = opponentProfile.expectedRoster;
-        Map<String, Map<String, PairingProbs[]>> tensor = buildTensor(pool, theirRoster, latestSides, predictor, baseline, fallbackYear);
+        Map<String, Map<String, PairingProbs[]>> tensor = buildTensor(pool, theirRoster, latestSides, predictor, baseline,
+                latestState.year, latestState.nextRoundOrder);
 
         // Exact enumeration: every 5-subset of pool, every seat ordering of that subset.
         LineupCandidate bestResponse = null;
@@ -197,7 +199,7 @@ public class LineupOptimizer {
     private Map<String, Map<String, PairingProbs[]>> buildTensor(List<String> ourPool, List<String> theirRoster,
                                                                   Map<String, FeatureExtractor.Side> latestSides,
                                                                   MatchupPredictor predictor, GlickoBaseline baseline,
-                                                                  int fallbackYear) {
+                                                                  int year, int nextRoundOrder) {
         Map<String, Map<String, PairingProbs[]>> tensor = new HashMap<>();
         for (String ourPlayer : ourPool) {
             Map<String, PairingProbs[]> row = new HashMap<>();
@@ -208,8 +210,13 @@ public class LineupOptimizer {
                 for (int seat = 1; seat <= LINEUP_SIZE; seat++) {
                     FeatureExtractor.Side ourSeated = FeatureExtractor.withSeat(ourBase, seat);
                     FeatureExtractor.Side theirSeated = FeatureExtractor.withSeat(theirBase, seat);
+                    // Every hypothetical board carries the SAME next-round
+                    // order (matching buildHypotheticalBoard's convention) -
+                    // the seat must only enter via the seated Sides, never
+                    // the round-number slot, or draw-stage features would
+                    // vary spuriously by seat across one tie.
                     FeatureExtractor.RawBoard board = new FeatureExtractor.RawBoard(-1, Integer.MAX_VALUE, -1,
-                            fallbackYear, seat, ourSeated, theirSeated, 0.0, false, false, 0.0);
+                            year, nextRoundOrder, ourSeated, theirSeated, 0.0, false, false, 0.0);
                     bySeat[seat - 1] = new PairingProbs(predictor.predict(board), baseline.predict(board));
                 }
                 row.put(theirPlayer, bySeat);

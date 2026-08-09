@@ -320,12 +320,7 @@ public class HallStatsBuilder {
                 boardsByOpp.merge(oppHallName, 1, Integer::sum);
             }
 
-            // Primary opponent = whichever hall we faced on the most boards
-            // this round (the normal case is exactly one opponent hall).
-            String primaryOppHall = boardsByOpp.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse(null);
+            String primaryOppHall = VictoryRecordCalculator.primaryOpponent(boardsByOpp, myScoreByOpp);
             if (primaryOppHall == null && anyWalkover) {
                 primaryOppHall = "WALKOVER";
             }

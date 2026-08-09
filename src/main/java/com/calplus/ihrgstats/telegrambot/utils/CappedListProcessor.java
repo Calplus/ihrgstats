@@ -11,7 +11,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Processes {year}_cappedlist.csv uploads - replaces the legacy
@@ -80,6 +82,14 @@ public class CappedListProcessor {
             playerYearStatus.clearCappedForYear(year, nowTimestamp);
 
             int mappedCount = 0;
+            // Each list row is a distinct person, so a player matched to an
+            // earlier row is not eligible for later rows - otherwise, when the
+            // list names two different people with the same name and only one
+            // is active yet, the fallback below would map BOTH rows to that one
+            // player and the second person could never be flagged capped when
+            // they debut. The unclaimed row stays unmapped for the resolver to
+            // claim later (same one-claim rule it applies on round uploads).
+            Set<String> claimedPlayerIds = new HashSet<>();
             for (CappedEntry entry : entries) {
                 int importId = cappedImports.insertImportRow(year, entry.name, entry.prevHall, nowTimestamp);
 
@@ -89,6 +99,7 @@ public class CappedListProcessor {
                 String matchedPlayerId = null;
                 B6_PlayerYearStatus.Status matchedStatus = null;
                 for (B5_PlayerNames.NameRecord candidate : candidates) {
+                    if (claimedPlayerIds.contains(candidate.playerId)) continue;
                     B6_PlayerYearStatus.Status status = playerYearStatus.getStatus(candidate.playerId, year);
                     if (status == null) continue;
                     // When two distinct players share this exact name (a real
@@ -111,6 +122,7 @@ public class CappedListProcessor {
                 if (matchedStatus != null) {
                     playerYearStatus.setCapped(matchedPlayerId, year, true, nowTimestamp);
                     cappedImports.markMapped(importId, matchedPlayerId, nowTimestamp);
+                    claimedPlayerIds.add(matchedPlayerId);
                     mappedCount++;
                 }
             }

@@ -2,6 +2,25 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 28] - 2026-08-09
+
+Bug-fix batch from the second full-codebase review round. Eight small, targeted fixes; the round's detection sweep otherwise gave the codebase a clean bill (zero regressions from the previous round's changes, rating math re-verified line by line against the source paper, every degenerate input handled gracefully, every hot query confirmed optimally indexed).
+
+### Fixed
+
+- **Capped-list upload could map two same-named rows to one player**: when the list names two different people with the same name and only one of them is active at upload time, the fallback matcher let that one player claim BOTH rows - the second, distinct person then could never be flagged capped when they debuted (and the "immediately matched" count was inflated). A player now claims at most one row per upload; the unclaimed row stays unmapped for the real person to claim on debut, matching the round-upload resolver's one-claim rule.
+- **Match-type wizard accepted "NaN"/"Infinity" as a max score**: `Double.parseDouble` accepts non-finite spellings (including overflow forms like "1e999"), and the positive-number check does not catch them - a non-finite max score could be stored and later flow into walkover default scores unvalidated, bypassing the CSV pipeline's finite-score checks. Non-finite input is now rejected like any other invalid number.
+- **`/lineup` fed each board's seat number into the round-number model feature**: pairing probabilities were computed as if seat 1 played in "round 1", seat 2 in "round 2", and so on, so draw probabilities could vary spuriously by seat through a feature that should be constant across one tie. All hypothetical boards now carry the same next-round order, matching `/predict`'s builder - sourced from the same single extraction pass that already builds the roster snapshot, so no extra work.
+- **Concurrent uploads could interleave one round's database writes**: nothing serialized ingestion itself, so two simultaneous confirmed uploads ran two full pipelines at once against the same database (both could pass the latest-round check and write into the same round row, with one then failing mid-write after its deletes had already run). Uploads now queue behind an app-level ingestion lock; sequential uploads behave exactly as before, and confirmation dialogs still work while the lock is held.
+- **A crashed button click left the user with silence**: report/wizard callbacks that failed mid-generation logged the error but sent nothing to the chat - the keyboard had already been stripped, so the click just vanished. Callback failures now send the same red error message slash-command failures always did (the synchronous callback branches included).
+- **Tied "primary opponent" pick was arbitrary**: when a hall faced two opponent halls on an exactly-equal number of boards in one round, the displayed one-line record picked its opponent by hash-map iteration order - in both the hall stats builder and the single-round hall view. Ties now break deterministically (more boards, then higher own score, then name A-Z) via one shared helper for both sites.
+- **Tied fuzzy-name candidate was arbitrary**: when two name-mismatch candidates tie on both match strength and most-recent year, the dialog offered whichever the unordered scan happened to meet first. Exact ties now break by name A-Z, then player id.
+- **A hand-edited timezone offset outside ±18 crashed every timestamp**: the `/settings` wizard validates its own input to [-12, +14], but a raw config value outside the legal offset range made every date formatter in the app throw ("NaN" instead silently became UTC). Out-of-range values now fall back to the default timezone, the same convention as unparseable ones.
+
+### Notes
+
+- 301 tests, 0 failures.
+
 ## [Beta 3 Update 27] - 2026-08-08
 
 Test-hardening and visual-audit close-out of the full-codebase review. Every test class was read end to end for authenticity (tautologies, circular oracles, no-exception-only tests, over-mocking, swallowed assertions - none found anywhere), the suite was stress-tested with deliberate bugs, and the rendered output of every image command was re-audited on a denser variant matrix.

@@ -1,5 +1,8 @@
 package com.calplus.ihrgstats.utils;
 
+import java.util.Comparator;
+import java.util.Map;
+
 /**
  * Enhanced utility class for calculating and formatting victory records.
  * Converts database outcome values (1/0/-1) to points (1/0.5/0) and provides formatted strings.
@@ -116,6 +119,24 @@ public class VictoryRecordCalculator {
         } catch (NumberFormatException e) {
             return hallName + " Hall";
         }
+    }
+
+    /**
+     * Primary opponent for a hall's round = whichever opponent hall was
+     * faced on the most boards (the normal case is exactly one opponent
+     * hall). An exactly-equal board split breaks deterministically: higher
+     * own score first, then name ascending - previously the pick fell to
+     * HashMap iteration order, stable across runs but arbitrary (shared by
+     * the hall stats builder and the single-round hall view, which had
+     * drifted-in-place twin copies of the same max()).
+     */
+    public static String primaryOpponent(Map<String, Integer> boardsByOpp, Map<String, Double> myScoreByOpp) {
+        return boardsByOpp.entrySet().stream()
+                .max(Map.Entry.<String, Integer>comparingByValue()
+                        .thenComparing((Map.Entry<String, Integer> e) -> myScoreByOpp.getOrDefault(e.getKey(), 0.0))
+                        .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey)
+                .orElse(null);
     }
 
     /**

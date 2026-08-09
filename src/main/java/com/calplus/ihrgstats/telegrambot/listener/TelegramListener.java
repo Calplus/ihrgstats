@@ -24,6 +24,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -65,6 +66,16 @@ public class TelegramListener {
 
     private ScheduledExecutorService statusHeartbeatExecutor;
     private static final long STATUS_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+    // One upload processed at a time, app-wide: the logical ingestion
+    // sequence (latest-round check -> reprocess deletes -> match and
+    // participant inserts -> rating recalc) is not safe to interleave with
+    // a second upload's, even though busy_timeout serializes the individual
+    // statements - e.g. two concurrent uploads of the same round could both
+    // pass the latest-round check and write into one round row. Static so
+    // the guarantee holds even if two listener instances ever share one
+    // database.
+    private static final ReentrantLock INGESTION_LOCK = new ReentrantLock();
 
     // Matches "cappedlist.csv" or "{year}_cappedlist.csv" - group(1) is the
     // year digits, or null when the prefix is absent.
@@ -1278,6 +1289,13 @@ public class TelegramListener {
             return;
         }
         
+        // Uploads queue behind each other here (see INGESTION_LOCK). The
+        // lock is held across this upload's own confirmation dialogs -
+        // safe, because every upload runs on its own daemon thread and the
+        // polling thread stays free to deliver the answers those dialogs
+        // wait on; a queued second upload simply starts after the first
+        // fully finishes.
+        INGESTION_LOCK.lock();
         try {
             // Accepts the plain literal or a {year}_-prefixed variant (e.g.
             // "2025_cappedlist.csv") - the year prefix, when present, is
@@ -1388,6 +1406,7 @@ public class TelegramListener {
             }
             
         } finally {
+            INGESTION_LOCK.unlock();
             // Clean up temp file
             TelegramFileDownloader.deleteTempFile(downloadedFile);
         }
@@ -2143,24 +2162,34 @@ public class TelegramListener {
             removeInlineKeyboard(chat.get("id").getAsString(), message.get("message_id").getAsString());
 
             if (!onWorkerThread) {
-                routing.route(message);
+                routeReportingFailure(routing, message, context);
                 return;
             }
-            Thread worker = new Thread(() -> {
-                try {
-                    routing.route(message);
-                } catch (Exception e) {
-                    String errorMsg = "Error processing " + context + ": " + e.getMessage();
-                    logHelper.logError(errorMsg);
-                    e.printStackTrace();
-                }
-            });
+            Thread worker = new Thread(() -> routeReportingFailure(routing, message, context));
             worker.setDaemon(true);
             worker.start();
         } catch (Exception e) {
             String errorMsg = "Error processing " + context + ": " + e.getMessage();
             logHelper.logError(errorMsg);
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Runs one callback routing, reporting any failure to the chat as well
+     * as the logs - the clicked message's keyboard was already stripped by
+     * the scaffold, so without the chat message a crashed callback looks to
+     * the user like the bot silently ate their click (the slash-command
+     * scaffold {@link #runCommandHandler} has always reported this way).
+     */
+    private void routeReportingFailure(CallbackRouting routing, JsonObject message, String context) {
+        try {
+            routing.route(message);
+        } catch (Exception e) {
+            String errorMsg = "Error processing " + context + ": " + e.getMessage();
+            logHelper.logError(errorMsg);
+            e.printStackTrace();
+            sendMessageToCommandsChannel(formatStatusMessage("🔴", "ERROR", errorMsg), message);
         }
     }
 

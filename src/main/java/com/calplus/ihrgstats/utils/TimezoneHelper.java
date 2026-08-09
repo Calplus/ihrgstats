@@ -27,7 +27,18 @@ public class TimezoneHelper {
             if (timezoneProperty == null || timezoneProperty.trim().isEmpty()) {
                 return null;
             }
-            return Double.parseDouble(timezoneProperty.trim());
+            double offset = Double.parseDouble(timezoneProperty.trim());
+            // Defensive range check for a hand-edited config value: the
+            // /settings wizard only ever stores [-12, +14], but a raw value
+            // outside ZoneOffset's legal +/-18 would make getZoneIdFromOffset
+            // throw from every timestamp/filename formatter in the app (and
+            // NaN would silently become UTC via the (int) cast). Same
+            // fall-back-to-default convention as the parse-failure catch.
+            if (!Double.isFinite(offset) || offset < -18.0 || offset > 18.0) {
+                System.err.println("Out-of-range timezone offset in settings.timezone, using default: " + DEFAULT_TIMEZONE);
+                return null;
+            }
+            return offset;
         } catch (NumberFormatException e) {
             System.err.println("Invalid timezone offset in settings.timezone, using default: " + DEFAULT_TIMEZONE);
             return null;
