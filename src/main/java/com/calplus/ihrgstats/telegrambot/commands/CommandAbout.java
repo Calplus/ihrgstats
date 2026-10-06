@@ -29,7 +29,7 @@ public class CommandAbout {
     private final LogHelper logHelper;
     private final String version;
     private final String author = "Calplus";
-    private final String lastUpdated = "9 Aug 2026";
+    private final String lastUpdated = "6 Oct 2026";
     private final String botToken;
     private final HttpClient httpClient;
     private final Gson gson;

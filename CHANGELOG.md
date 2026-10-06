@@ -2,6 +2,29 @@
 
 All notable changes to IHRGStats are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Beta 3 Update 30] - 2026-10-06
+
+Test-tooling batch that opens the third review round, the last before 3.0. Nothing changes for users: the ten touched main classes only gain test seams whose defaults are the old literals. Every defect the round found is pinned by a test that asserts today's behaviour and carries its finding id; the fixes follow in the next updates and flip those tests as they land.
+
+### Added
+
+- **Local fake Telegram Bot API server** with a conversation driver and transcripts, and an end-to-end suite that drives the real listener through it: every command and picker path, dialogs and timeouts, callback edge cases, upload rejections, failure injection (429, 500, connection resets, slow and malformed responses), concurrent commands, polling-failure visibility and oversized pickers. A 2,000-command soak test runs behind `-Dihrgstats.e2e.soak=true`.
+- **Mechanical image checks** from a draw-call record of every rendered image (column alignment, overlaps, canvas bounds, margins, Telegram photo limits), an image tiler with phone-size previews, a lint for text tables, independent answer sheets for the visual audit, and new visual-audit variants (every hall icon, long and single-word names, custom round labels, accented, CJK, Tamil, Arabic and emoji names).
+- **Upload robustness tests**: CSV byte-level variants (BOM, UTF-16, Windows-1252, CR/CRLF, delimiters, quoted cells, number formats), look-alike player names, sync equivalence; a test-side planner for the coming .xlsx upload.
+- **Security tests**: authorisation matrix, path traversal, token leakage, HTML injection.
+- **Probes**: resource lifecycle, locale and charset handling, ML invariants over the sample corpus.
+- **Test hardening**: mutation gap tests, a degenerate-database battery, regression locks for the Update 28 and 29 fixes.
+- **Scalability harness**: synthetic databases at 1x, 2x and 3x of the sample size, per-command limit sweeps, profiling and A/B timing tests, all opt-in (`-Db2.*`; see the class comments under `src/test/java/com/calplus/ihrgstats/perf/`).
+- README: a "Running the Tests" section listing every opt-in flag.
+
+### Changed
+
+- Test seams in the main code, defaults unchanged: the Telegram and Discord API base URLs can be overridden with `-Dihrgstats.telegram.baseUrl` and `-Dihrgstats.discord.baseUrl` (new `utils/ApiEndpoints`, replacing 13 hardcoded URL sites); the four HTTP timeouts with `-Dihrgstats.http.{connect,request,longPoll,fileTransfer}TimeoutMs`; the three image generators expose a draw-call recorder hook.
+
+### Notes
+
+- 491 tests, 0 failures, 0 errors, 16 skipped (the opt-in harnesses). Plain `mvn test` - and therefore `mvn package` - now takes 45-70 minutes; the slow probes move behind an opt-in flag in the next update. `mvn package -DskipTests` builds without them.
+
 ## [Beta 3 Update 29] - 2026-08-09
 
 Performance + deduplication batch from the second full-codebase review round. Strictly behavior-preserving: the corpus exact-value battery and the full suite pass unchanged (301/0), the perf harness was re-run with a same-session control build, and every rendered image family was re-inspected after the image-generator changes (no defects).

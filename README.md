@@ -4,7 +4,7 @@
 
 <img src="Github%20Images/Icon_IHRGStats.png" width="75%" alt="IHRG Stats Icon">
 
-![Version](https://img.shields.io/badge/version-Beta%203%20Update%2029-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Aug%209,%202026-red)
+![Version](https://img.shields.io/badge/version-Beta%203%20Update%2030-blue) &nbsp; ![Last Updated](https://img.shields.io/badge/Last%20Updated-Oct%206,%202026-red)
 
 <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4"> *Developed with love, 4 Hall 4* <img src="src/main/resources/halls/4.png" width="18" height="18" alt="Hall 4">
 </div>
@@ -257,8 +257,25 @@ cd ihrgstats
 ### Step 2: Build the Application (Maven)
 ```bash
 mvn clean compile
-mvn package
+mvn package               # runs the whole test suite first (45-70 minutes since Update 30)
+mvn package -DskipTests   # quick build without the tests
 ```
+
+### Running the Tests
+
+`mvn test` runs the unit tests and the end-to-end suite, which drives the bot through a local fake Telegram server (no bot token, no network). The heavier harnesses are opt-in:
+
+| Flag | What it runs |
+|---|---|
+| `-Dvisual.audit=true` | Renders every image family from synthetic and sample data to `temp/visual-audit/exports/` |
+| `-Dvisual.answers=true` | Independent answer sheets for the rendered images |
+| `-Dvisual.post=true` | Tiles and phone-size previews of the rendered images |
+| `-Dvisual.textlint=true` | Lint of the text tables sent to Telegram |
+| `-Dperf.benchmark=true` | Performance benchmark (ingest, recalculation, retraining, reports) |
+| `-Dihrgstats.e2e.slow=true` | Dialog scenarios that wait for the real timeouts |
+| `-Dihrgstats.e2e.soak=true` | 2,000-command soak against the fake server (heap, threads, shutdown hooks) |
+| `-Db3.detectors=true` | Calibration of the image checks against planted defects |
+| `-Db2.scale=<factor>`, `-Db2.db=<default.db>`, `-Db2.sweep=true`, `-Db2.ab=<candidate>`, `-Db2.jfrDb=<default.db>` | Scalability harness: synthetic databases at 1x/2x/3x, per-command limit sweeps, A/B timings, JFR profiles (see the class comments in `src/test/java/com/calplus/ihrgstats/perf/`) |
 
 ### Step 3: Configure Environment Variables
 
@@ -659,7 +676,7 @@ ihrgstats/
 │   │       ├── application.properties             # Configuration
 │   │       └── halls/                             # Hall icons (PNG files)
 │   └── test/
-│       └── java/com/calplus/ihrgstats/            # Test files
+│       └── java/com/calplus/ihrgstats/            # Unit tests; e2e/ (fake Telegram server + end-to-end suite), upload/, visualaudit/ (image checks), perf/ (benchmark + scale harnesses), lifecycle/, b3/
 ├── database/
 │   └── core/
 │       └── default.db                             # SQLite database (auto-created)
