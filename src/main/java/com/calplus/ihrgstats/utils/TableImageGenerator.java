@@ -312,7 +312,7 @@ public class TableImageGenerator {
         int imageHeight = headerOffset + totalRows * ROW_HEIGHT + PADDING * 2;
 
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = image.createGraphics();
+        Graphics2D g2d = ImageRenderSupport.createGraphics(image, "table");
 
         // Enable anti-aliasing
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -386,7 +386,7 @@ public class TableImageGenerator {
         // dir - nothing was ever cleaning that up, so images accumulated
         // there indefinitely with no inspectable, intentional home).
         Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
-        ImageIO.write(croppedImage, "PNG", tempFile.toFile());
+        ImageRenderSupport.writePng(croppedImage, tempFile);
 
         return tempFile;
     }

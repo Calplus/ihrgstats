@@ -163,7 +163,7 @@ public class InfoImageGenerator {
         
         // Create actual image
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2d = image.createGraphics();
+        Graphics2D g2d = ImageRenderSupport.createGraphics(image, "info");
         
         // Enable antialiasing
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -196,7 +196,7 @@ public class InfoImageGenerator {
         // dir - nothing was ever cleaning that up, so images accumulated
         // there indefinitely with no inspectable, intentional home).
         Path outputPath = OutputPaths.getOutputDirectory().resolve(filename);
-        ImageIO.write(image, "PNG", outputPath.toFile());
+        ImageRenderSupport.writePng(image, outputPath);
         
         return outputPath;
     }

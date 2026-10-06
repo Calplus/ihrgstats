@@ -38,13 +38,59 @@ public final class HttpClientFactory {
      */
     public static final Duration FILE_TRANSFER_TIMEOUT = Duration.ofSeconds(120);
 
+    /*
+     * Test-only overrides, in milliseconds. Production never sets them, so the
+     * accessors below return exactly the constants above. They let a harness
+     * exercise a timeout path against a local fake server in milliseconds
+     * instead of sleeping for the real 10/30/45/120 seconds. Read on every
+     * call, never cached, so they can change between scenarios in one JVM.
+     */
+    public static final String CONNECT_TIMEOUT_PROPERTY = "ihrgstats.http.connectTimeoutMs";
+    public static final String REQUEST_TIMEOUT_PROPERTY = "ihrgstats.http.requestTimeoutMs";
+    public static final String LONG_POLL_TIMEOUT_PROPERTY = "ihrgstats.http.longPollTimeoutMs";
+    public static final String FILE_TRANSFER_TIMEOUT_PROPERTY = "ihrgstats.http.fileTransferTimeoutMs";
+
     private HttpClientFactory() {
     }
 
     /** New client with the standard connect timeout. */
     public static HttpClient newClient() {
         return HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
+                .connectTimeout(connectTimeout())
                 .build();
+    }
+
+    /** {@link #CONNECT_TIMEOUT}, unless overridden by {@link #CONNECT_TIMEOUT_PROPERTY}. */
+    public static Duration connectTimeout() {
+        return override(CONNECT_TIMEOUT_PROPERTY, CONNECT_TIMEOUT);
+    }
+
+    /** {@link #REQUEST_TIMEOUT}, unless overridden by {@link #REQUEST_TIMEOUT_PROPERTY}. */
+    public static Duration requestTimeout() {
+        return override(REQUEST_TIMEOUT_PROPERTY, REQUEST_TIMEOUT);
+    }
+
+    /** {@link #LONG_POLL_TIMEOUT}, unless overridden by {@link #LONG_POLL_TIMEOUT_PROPERTY}. */
+    public static Duration longPollTimeout() {
+        return override(LONG_POLL_TIMEOUT_PROPERTY, LONG_POLL_TIMEOUT);
+    }
+
+    /** {@link #FILE_TRANSFER_TIMEOUT}, unless overridden by {@link #FILE_TRANSFER_TIMEOUT_PROPERTY}. */
+    public static Duration fileTransferTimeout() {
+        return override(FILE_TRANSFER_TIMEOUT_PROPERTY, FILE_TRANSFER_TIMEOUT);
+    }
+
+    /** A positive whole number of milliseconds from the property, else the default. */
+    private static Duration override(String property, Duration defaultValue) {
+        String value = System.getProperty(property);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            long millis = Long.parseLong(value.trim());
+            return millis > 0 ? Duration.ofMillis(millis) : defaultValue;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 }

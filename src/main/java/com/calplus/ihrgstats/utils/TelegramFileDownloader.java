@@ -31,11 +31,11 @@ public class TelegramFileDownloader {
     public boolean downloadFile(String fileId, String destinationPath) {
         try {
             // Step 1: Get file path from Telegram
-            String getFileUrl = "https://api.telegram.org/bot" + botToken + "/getFile?file_id=" + fileId;
-            
+            String getFileUrl = ApiEndpoints.telegramMethodUrl(botToken, "getFile") + "?file_id=" + fileId;
+
             HttpRequest getFileRequest = HttpRequest.newBuilder()
                 .uri(URI.create(getFileUrl))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .GET()
                 .build();
 
@@ -56,11 +56,11 @@ public class TelegramFileDownloader {
             }
 
             // Step 2: Download the file
-            String downloadUrl = "https://api.telegram.org/file/bot" + botToken + "/" + filePath;
-            
+            String downloadUrl = ApiEndpoints.telegramFileUrl(botToken, filePath);
+
             HttpRequest downloadRequest = HttpRequest.newBuilder()
                 .uri(URI.create(downloadUrl))
-                .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
+                .timeout(HttpClientFactory.fileTransferTimeout())
                 .GET()
                 .build();
 

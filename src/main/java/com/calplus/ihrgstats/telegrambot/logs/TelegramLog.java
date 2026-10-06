@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.telegrambot.logs;
 
+import com.calplus.ihrgstats.utils.ApiEndpoints;
 import com.calplus.ihrgstats.utils.ChannelLog;
 import com.calplus.ihrgstats.utils.HttpClientFactory;
 import com.calplus.ihrgstats.utils.TelegramHtml;
@@ -60,7 +61,7 @@ public class TelegramLog extends ChannelLog {
                 System.out.println("INFO: telegram.admin.userId not found in application.properties. Admin mentions disabled.");
             }
 
-            this.telegramApiUrl = "https://api.telegram.org/bot" + this.botToken + "/sendMessage";
+            this.telegramApiUrl = ApiEndpoints.telegramMethodUrl(this.botToken, "sendMessage");
             return true;
 
         } catch (IOException e) {
@@ -122,7 +123,7 @@ public class TelegramLog extends ChannelLog {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(telegramApiUrl))
-                    .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                    .timeout(HttpClientFactory.requestTimeout())
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();

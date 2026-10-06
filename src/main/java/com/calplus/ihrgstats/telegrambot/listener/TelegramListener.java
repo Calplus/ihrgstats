@@ -5,6 +5,7 @@ import com.calplus.ihrgstats.telegrambot.logs.TelegramLog;
 import com.calplus.ihrgstats.telegrambot.commands.CommandSettings;
 import com.calplus.ihrgstats.telegrambot.utils.CappedListProcessor;
 import com.calplus.ihrgstats.telegrambot.utils.RoundCsvProcessor;
+import com.calplus.ihrgstats.utils.ApiEndpoints;
 import com.calplus.ihrgstats.utils.EnvironmentManager;
 import com.calplus.ihrgstats.utils.HttpClientFactory;
 import com.calplus.ihrgstats.utils.PropertyResolver;
@@ -392,11 +393,11 @@ public class TelegramListener {
      */
     private boolean setTelegramWebhook() {
         try {
-            String setWebhookUrl = "https://api.telegram.org/bot" + botToken + "/setWebhook?url=" + webhookUrl;
+            String setWebhookUrl = ApiEndpoints.telegramMethodUrl(botToken, "setWebhook") + "?url=" + webhookUrl;
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(setWebhookUrl))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -457,11 +458,11 @@ public class TelegramListener {
      */
     private void deleteWebhook() {
         try {
-            String deleteWebhookUrl = "https://api.telegram.org/bot" + botToken + "/deleteWebhook";
+            String deleteWebhookUrl = ApiEndpoints.telegramMethodUrl(botToken, "deleteWebhook");
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(deleteWebhookUrl))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
@@ -476,11 +477,11 @@ public class TelegramListener {
      */
     private void initializeUpdateId() {
         try {
-            String getUpdatesUrl = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=-1&limit=1";
+            String getUpdatesUrl = ApiEndpoints.telegramMethodUrl(botToken, "getUpdates") + "?offset=-1&limit=1";
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(getUpdatesUrl))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .GET()
                 .build();
 
@@ -506,7 +507,7 @@ public class TelegramListener {
      * Polls for new updates from Telegram
      */
     private void pollForUpdates() throws IOException, InterruptedException {
-        String getUpdatesUrl = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=" + (lastUpdateId + 1) + "&timeout=30";
+        String getUpdatesUrl = ApiEndpoints.telegramMethodUrl(botToken, "getUpdates") + "?offset=" + (lastUpdateId + 1) + "&timeout=30";
         
         // Request timeout must exceed the 30s long-poll hold requested in the
         // URL - without it, a silently dropped connection blocks this thread
@@ -514,7 +515,7 @@ public class TelegramListener {
         // on its own executor, keeps reporting it online).
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(getUpdatesUrl))
-            .timeout(HttpClientFactory.LONG_POLL_TIMEOUT)
+            .timeout(HttpClientFactory.longPollTimeout())
             .GET()
             .build();
 
@@ -970,14 +971,14 @@ public class TelegramListener {
      */
     private void answerCallbackQuery(String callbackId) {
         try {
-            String url = String.format("https://api.telegram.org/bot%s/answerCallbackQuery", botToken);
+            String url = ApiEndpoints.telegramMethodUrl(botToken, "answerCallbackQuery");
             
             JsonObject payload = new JsonObject();
             payload.addProperty("callback_query_id", callbackId);
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();
@@ -1616,10 +1617,10 @@ public class TelegramListener {
      */
     private void sendMessagePayloadWithFallback(JsonObject payload, String context) {
         try {
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            String url = ApiEndpoints.telegramMethodUrl(botToken, "sendMessage");
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();
@@ -1660,7 +1661,7 @@ public class TelegramListener {
                     payload.remove("parse_mode");
                     HttpRequest retryRequest = HttpRequest.newBuilder()
                         .uri(URI.create(url))
-                        .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                        .timeout(HttpClientFactory.requestTimeout())
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                         .build();
@@ -2901,7 +2902,7 @@ public class TelegramListener {
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(HttpClientFactory.FILE_TRANSFER_TIMEOUT)
+            .timeout(HttpClientFactory.fileTransferTimeout())
             .header("Content-Type", "multipart/form-data; boundary=" + boundary)
             .POST(HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
             .build();
@@ -2915,7 +2916,7 @@ public class TelegramListener {
     private void sendImageMultipart(String endpoint, String fieldName, String cannotLabel, String kindLabel,
             java.nio.file.Path imagePath, JsonObject originalMessage) {
         try {
-            String url = "https://api.telegram.org/bot" + botToken + "/" + endpoint;
+            String url = ApiEndpoints.telegramMethodUrl(botToken, endpoint);
             byte[] imageBytes = java.nio.file.Files.readAllBytes(imagePath);
 
             String[] target = resolveSendTarget(originalMessage, this::getCommandsChatIdAndThread);
@@ -3192,7 +3193,7 @@ public class TelegramListener {
      */
     private void sendFileToUser(String userId, String filePath) {
         try {
-            String url = "https://api.telegram.org/bot" + botToken + "/sendDocument";
+            String url = ApiEndpoints.telegramMethodUrl(botToken, "sendDocument");
             byte[] fileBytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath));
 
             // chat_id is the user's DM; no thread id in a DM.
@@ -3217,7 +3218,7 @@ public class TelegramListener {
      */
     private void removeInlineKeyboard(String chatId, String messageId) {
         try {
-            String url = "https://api.telegram.org/bot" + botToken + "/editMessageReplyMarkup";
+            String url = ApiEndpoints.telegramMethodUrl(botToken, "editMessageReplyMarkup");
             
             JsonObject payload = new JsonObject();
             payload.addProperty("chat_id", chatId);
@@ -3227,7 +3228,7 @@ public class TelegramListener {
             
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                .timeout(HttpClientFactory.requestTimeout())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
                 .build();

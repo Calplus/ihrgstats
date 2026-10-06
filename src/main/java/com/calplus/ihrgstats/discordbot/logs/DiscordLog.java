@@ -1,5 +1,6 @@
 package com.calplus.ihrgstats.discordbot.logs;
 
+import com.calplus.ihrgstats.utils.ApiEndpoints;
 import com.calplus.ihrgstats.utils.ChannelLog;
 import com.calplus.ihrgstats.utils.HttpClientFactory;
 
@@ -57,7 +58,7 @@ public class DiscordLog extends ChannelLog {
                 System.err.println("INFO: discord.admin.userId not configured. Admin pings will be skipped.");
             }
 
-            this.discordApiUrl = "https://discord.com/api/v10/channels/" + this.channelId + "/messages";
+            this.discordApiUrl = ApiEndpoints.discordChannelMessagesUrl(this.channelId);
             return true;
 
         } catch (IOException e) {
@@ -99,7 +100,7 @@ public class DiscordLog extends ChannelLog {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(this.discordApiUrl))
-                    .timeout(HttpClientFactory.REQUEST_TIMEOUT)
+                    .timeout(HttpClientFactory.requestTimeout())
                     .header("Authorization", "Bot " + this.botToken)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(payload))

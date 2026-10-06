@@ -6,6 +6,9 @@ import java.awt.Graphics2D;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
+import javax.imageio.ImageIO;
 
 /**
  * Rendering primitives shared by the image generators (table, info,
@@ -16,6 +19,46 @@ import java.awt.image.BufferedImage;
 public final class ImageRenderSupport {
 
     private ImageRenderSupport() {}
+
+    /**
+     * Test-only observer of the generators' drawing surfaces (null in
+     * production). When set, every report canvas is drawn through the
+     * Graphics2D the observer returns and every written PNG is reported to
+     * it - the single seam the draw-call recorder hooks into.
+     */
+    public interface DrawSurfaceObserver {
+        /** Returns the Graphics2D the generator draws with (normally a recording wrapper around {@code real}). */
+        Graphics2D wrap(BufferedImage canvas, Graphics2D real, String generator);
+
+        /** Called after {@code written} (the canvas, or a cropped sub-image of it) was saved to {@code file}. */
+        void imageWritten(BufferedImage written, Path file);
+    }
+
+    private static volatile DrawSurfaceObserver drawSurfaceObserver;
+
+    /** Installs (or, with null, removes) the test-only draw-surface observer. */
+    public static void setDrawSurfaceObserver(DrawSurfaceObserver observer) {
+        drawSurfaceObserver = observer;
+    }
+
+    /**
+     * The one place the image generators obtain the Graphics2D for a report
+     * canvas. Without an observer this is exactly {@code canvas.createGraphics()}.
+     */
+    public static Graphics2D createGraphics(BufferedImage canvas, String generator) {
+        Graphics2D g2d = canvas.createGraphics();
+        DrawSurfaceObserver observer = drawSurfaceObserver;
+        return observer == null ? g2d : observer.wrap(canvas, g2d, generator);
+    }
+
+    /** Writes a finished report image as PNG (exactly {@code ImageIO.write}) and notifies the observer, if any. */
+    public static void writePng(BufferedImage image, Path file) throws IOException {
+        ImageIO.write(image, "PNG", file.toFile());
+        DrawSurfaceObserver observer = drawSurfaceObserver;
+        if (observer != null) {
+            observer.imageWritten(image, file);
+        }
+    }
 
     /** Sanitizes a name for use in a filename by removing invalid characters. */
     public static String sanitizeName(String name) {

@@ -243,7 +243,7 @@ public class ComparisonImageGenerator {
         
         // Create image
         BufferedImage image = new BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = image.createGraphics();
+        Graphics2D g2d = ImageRenderSupport.createGraphics(image, "comparison");
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
@@ -301,7 +301,7 @@ public class ComparisonImageGenerator {
         // dir - nothing was ever cleaning that up, so images accumulated
         // there indefinitely with no inspectable, intentional home).
         Path tempFile = OutputPaths.getOutputDirectory().resolve(filename);
-        ImageIO.write(image, "PNG", tempFile.toFile());
+        ImageRenderSupport.writePng(image, tempFile);
 
         return tempFile;
     }
